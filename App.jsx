@@ -9,13 +9,15 @@ import {
   StatusBar,
   Dimensions,
   Animated,
+  Alert,
+  Platform,
 } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { LineChart } from 'react-native-chart-kit';
 import Icon from 'react-native-vector-icons/Feather';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // ============== STORE (Zustand simplificado) ==============
 const mockProducts = [
@@ -61,135 +63,108 @@ const mockProducts = [
 
 // StatCard Component
 const StatCard = ({ icon, value, label, color, onPress }) => {
-  const scaleAnim = new Animated.Value(1);
-
-  const handlePressIn = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 0.95,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const handlePressOut = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 1,
-      friction: 3,
-      useNativeDriver: true,
-    }).start();
-  };
-
   return (
-    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-      <TouchableOpacity
-        onPress={onPress}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-        activeOpacity={0.9}
+    <TouchableOpacity
+      onPress={() => {
+        console.log('StatCard pressed:', label);
+        Alert.alert('Estadística', `${label}: ${value}`);
+      }}
+      activeOpacity={0.7}
+      style={{
+        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
+        padding: 16,
+        width: (SCREEN_WIDTH - 48) / 3,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 3,
+        minHeight: 120,
+      }}
+    >
+      <View
         style={{
-          backgroundColor: '#FFFFFF',
-          borderRadius: 16,
-          padding: 16,
-          width: (SCREEN_WIDTH - 48) / 3,
+          width: 48,
+          height: 48,
+          borderRadius: 24,
+          backgroundColor: `${color}15`,
+          justifyContent: 'center',
           alignItems: 'center',
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 8,
-          elevation: 3,
+          marginBottom: 8,
         }}
       >
-        <View
-          style={{
-            width: 48,
-            height: 48,
-            borderRadius: 24,
-            backgroundColor: `${color}15`,
-            justifyContent: 'center',
-            alignItems: 'center',
-            marginBottom: 8,
-          }}
-        >
-          <Icon name={icon} size={24} color={color} />
-        </View>
-        <Text style={{ fontSize: 24, fontWeight: '700', color: '#1A1A2E', marginBottom: 2 }}>
-          {value}
-        </Text>
-        <Text style={{ fontSize: 11, fontWeight: '500', color: '#666', textAlign: 'center' }}>
-          {label}
-        </Text>
-      </TouchableOpacity>
-    </Animated.View>
+        <Icon name={icon} size={24} color={color} />
+      </View>
+      <Text style={{ fontSize: 24, fontWeight: '700', color: '#1A1A2E', marginBottom: 2 }}>
+        {value}
+      </Text>
+      <Text style={{ fontSize: 11, fontWeight: '500', color: '#666', textAlign: 'center' }}>
+        {label}
+      </Text>
+    </TouchableOpacity>
   );
 };
 
 // AlertBanner Component
 const AlertBanner = ({ count, onPress }) => {
-  const pulseAnim = new Animated.Value(1);
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.02,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-  }, []);
-
   return (
-    <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-      <TouchableOpacity
-        onPress={onPress}
+    <TouchableOpacity
+      onPress={() => {
+        console.log('AlertBanner pressed');
+        Alert.alert(
+          '⚠️ Productos para resubir',
+          `Tienes ${count} productos que llevan más de 60 días sin vender. ¿Quieres revisarlos ahora?`,
+          [
+            { text: 'Más tarde', style: 'cancel' },
+            { text: 'Ver productos', onPress: () => console.log('Ver productos') },
+          ]
+        );
+      }}
+      activeOpacity={0.8}
+      style={{
+        backgroundColor: '#FFF9E6',
+        borderLeftWidth: 4,
+        borderLeftColor: '#FFB800',
+        borderRadius: 12,
+        padding: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        shadowColor: '#FFB800',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+        elevation: 4,
+      }}
+    >
+      <View
         style={{
-          backgroundColor: '#FFF9E6',
-          borderLeftWidth: 4,
-          borderLeftColor: '#FFB800',
-          borderRadius: 12,
-          padding: 16,
-          flexDirection: 'row',
+          width: 40,
+          height: 40,
+          borderRadius: 20,
+          backgroundColor: '#FFB800',
+          justifyContent: 'center',
           alignItems: 'center',
-          shadowColor: '#FFB800',
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.2,
-          shadowRadius: 8,
-          elevation: 4,
         }}
       >
-        <View
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 20,
-            backgroundColor: '#FFB800',
-            justifyContent: 'center',
-            alignItems: 'center',
-          }}
-        >
-          <Icon name="alert-circle" size={24} color="#FFF" />
-        </View>
-        <View style={{ flex: 1, marginLeft: 12 }}>
-          <Text style={{ fontSize: 16, fontWeight: '700', color: '#1A1A2E', marginBottom: 2 }}>
-            ⚠️ Productos para resubir
-          </Text>
-          <Text style={{ fontSize: 13, color: '#666' }}>
-            {count} productos llevan más de 60 días sin vender
-          </Text>
-        </View>
-        <Icon name="chevron-right" size={24} color="#FFB800" />
-      </TouchableOpacity>
-    </Animated.View>
+        <Icon name="alert-circle" size={24} color="#FFF" />
+      </View>
+      <View style={{ flex: 1, marginLeft: 12 }}>
+        <Text style={{ fontSize: 16, fontWeight: '700', color: '#1A1A2E', marginBottom: 2 }}>
+          ⚠️ Productos para resubir
+        </Text>
+        <Text style={{ fontSize: 13, color: '#666' }}>
+          {count} productos llevan más de 60 días sin vender
+        </Text>
+      </View>
+      <Icon name="chevron-right" size={24} color="#FFB800" />
+    </TouchableOpacity>
   );
 };
 
 // ProductCard Component
-const ProductCard = ({ product, onPress, onRepost, onMarkSold }) => {
+const ProductCard = ({ product, onPress }) => {
   const statusConfig = {
     active: { color: '#004E89', label: 'Activo', icon: 'eye' },
     needs_repost: { color: '#FFB800', label: 'Resubir', icon: 'refresh-cw' },
@@ -200,7 +175,17 @@ const ProductCard = ({ product, onPress, onRepost, onMarkSold }) => {
 
   return (
     <TouchableOpacity
-      onPress={onPress}
+      onPress={() => {
+        console.log('ProductCard pressed:', product.title);
+        Alert.alert(
+          product.title,
+          `Marca: ${product.brand}\nPrecio: ${product.price}€\nEstado: ${config.label}\nVistas: ${product.views}\nDías activo: ${product.daysActive}`,
+          [
+            { text: 'Cerrar', style: 'cancel' },
+            { text: 'Editar', onPress: () => console.log('Editar producto') },
+          ]
+        );
+      }}
       activeOpacity={0.7}
       style={{
         backgroundColor: '#FFFFFF',
@@ -299,14 +284,25 @@ const ProductCard = ({ product, onPress, onRepost, onMarkSold }) => {
 
       {/* Action Menu */}
       <TouchableOpacity
+        onPress={() => {
+          Alert.alert(
+            'Opciones',
+            'Selecciona una acción',
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              { text: 'Editar', onPress: () => console.log('Editar') },
+              { text: 'Eliminar', onPress: () => console.log('Eliminar'), style: 'destructive' },
+            ]
+          );
+        }}
         style={{
           position: 'absolute',
           top: 8,
           right: 8,
-          width: 32,
-          height: 32,
-          borderRadius: 16,
-          backgroundColor: 'rgba(255,255,255,0.9)',
+          width: 40,
+          height: 40,
+          borderRadius: 20,
+          backgroundColor: 'rgba(255,255,255,0.95)',
           justifyContent: 'center',
           alignItems: 'center',
         }}
@@ -337,7 +333,7 @@ const ProductCard = ({ product, onPress, onRepost, onMarkSold }) => {
 // ============== SCREENS ==============
 
 // Dashboard Screen
-const DashboardScreen = () => {
+const DashboardScreen = ({ navigation }) => {
   const [products] = useState(mockProducts);
 
   const activeProducts = products.filter(p => p.status === 'active').length;
@@ -362,7 +358,7 @@ const DashboardScreen = () => {
       
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ padding: 16 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
       >
         {/* Header */}
         <View style={{ marginBottom: 24 }}>
@@ -376,6 +372,9 @@ const DashboardScreen = () => {
               </Text>
             </View>
             <TouchableOpacity
+              onPress={() => {
+                Alert.alert('Perfil', 'Funcionalidad de perfil en desarrollo');
+              }}
               style={{
                 width: 48,
                 height: 48,
@@ -400,7 +399,7 @@ const DashboardScreen = () => {
         {/* Alert Banner */}
         {needsRepost > 0 && (
           <View style={{ marginBottom: 20 }}>
-            <AlertBanner count={needsRepost} onPress={() => {}} />
+            <AlertBanner count={needsRepost} onPress={() => navigation.navigate('Products')} />
           </View>
         )}
 
@@ -422,7 +421,10 @@ const DashboardScreen = () => {
             <Text style={{ fontSize: 18, fontWeight: '700', color: '#1A1A2E' }}>
               Ventas Mensuales
             </Text>
-            <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <TouchableOpacity 
+              onPress={() => Alert.alert('Filtro', 'Selecciona el año')}
+              style={{ flexDirection: 'row', alignItems: 'center' }}
+            >
               <Text style={{ fontSize: 13, color: '#666', marginRight: 4 }}>
                 2025
               </Text>
@@ -466,6 +468,39 @@ const DashboardScreen = () => {
             <ProductCard key={product.id} product={product} />
           ))}
         </View>
+
+        {/* Add Product Button */}
+        <TouchableOpacity
+          onPress={() => {
+            Alert.alert(
+              'Añadir Producto',
+              'Selecciona una opción',
+              [
+                { text: 'Cancelar', style: 'cancel' },
+                { text: 'Desde Galería', onPress: () => console.log('Galería') },
+                { text: 'Procesar Carpeta', onPress: () => console.log('Carpeta') },
+              ]
+            );
+          }}
+          style={{
+            backgroundColor: '#FF6B35',
+            borderRadius: 16,
+            padding: 18,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            shadowColor: '#FF6B35',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.3,
+            shadowRadius: 8,
+            elevation: 6,
+          }}
+        >
+          <Icon name="plus-circle" size={24} color="#FFF" style={{ marginRight: 8 }} />
+          <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFF' }}>
+            Añadir Producto
+          </Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -502,7 +537,11 @@ const ProductsScreen = () => {
           ].map(item => (
             <TouchableOpacity
               key={item.key}
-              onPress={() => setFilter(item.key)}
+              onPress={() => {
+                console.log('Filter selected:', item.key);
+                setFilter(item.key);
+              }}
+              activeOpacity={0.7}
               style={{
                 backgroundColor: filter === item.key ? '#FF6B35' : '#FFF',
                 paddingHorizontal: 16,
@@ -511,6 +550,7 @@ const ProductsScreen = () => {
                 marginRight: 8,
                 borderWidth: 1,
                 borderColor: filter === item.key ? '#FF6B35' : '#E8E8E8',
+                minHeight: 40,
               }}
             >
               <Text
@@ -527,7 +567,7 @@ const ProductsScreen = () => {
         </ScrollView>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 0 }}>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 0, paddingBottom: 100 }}>
         {filteredProducts.map(product => (
           <ProductCard key={product.id} product={product} />
         ))}
@@ -540,13 +580,15 @@ const ProductsScreen = () => {
 const StatsScreen = () => {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-      <ScrollView contentContainerStyle={{ padding: 16 }}>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
         <Text style={{ fontSize: 24, fontWeight: '800', color: '#1A1A2E', marginBottom: 16 }}>
           Estadísticas
         </Text>
 
         {/* Overview Cards */}
-        <View
+        <TouchableOpacity
+          onPress={() => Alert.alert('Ingresos Totales', 'Detalles de tus ingresos totales')}
+          activeOpacity={0.8}
           style={{
             backgroundColor: '#004E89',
             borderRadius: 20,
@@ -566,7 +608,7 @@ const StatsScreen = () => {
               +12% vs mes anterior
             </Text>
           </View>
-        </View>
+        </TouchableOpacity>
 
         {/* Category Performance */}
         <View
@@ -591,7 +633,12 @@ const StatsScreen = () => {
             { category: 'Moda', sold: 15, total: 18, color: '#FF6B35' },
             { category: 'Hogar', sold: 4, total: 9, color: '#FFB800' },
           ].map((item, index) => (
-            <View key={index} style={{ marginBottom: 16 }}>
+            <TouchableOpacity
+              key={index}
+              onPress={() => Alert.alert(item.category, `Vendidos: ${item.sold} de ${item.total}`)}
+              activeOpacity={0.7}
+              style={{ marginBottom: 16 }}
+            >
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
                 <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A2E' }}>
                   {item.category}
@@ -609,7 +656,7 @@ const StatsScreen = () => {
                   }}
                 />
               </View>
-            </View>
+            </TouchableOpacity>
           ))}
         </View>
 
@@ -636,8 +683,10 @@ const StatsScreen = () => {
             { range: '30-60 días', count: 5, color: '#FF6B35' },
             { range: '+60 días', count: 2, color: '#E63946' },
           ].map((item, index) => (
-            <View
+            <TouchableOpacity
               key={index}
+              onPress={() => Alert.alert(item.range, `${item.count} productos vendidos en este rango`)}
+              activeOpacity={0.7}
               style={{
                 flexDirection: 'row',
                 justifyContent: 'space-between',
@@ -662,7 +711,7 @@ const StatsScreen = () => {
               <Text style={{ fontSize: 16, fontWeight: '700', color: '#1A1A2E' }}>
                 {item.count}
               </Text>
-            </View>
+            </TouchableOpacity>
           ))}
         </View>
       </ScrollView>
@@ -672,9 +721,15 @@ const StatsScreen = () => {
 
 // Settings Screen
 const SettingsScreen = () => {
+  const [notifications, setNotifications] = useState({
+    repost: true,
+    lowViews: true,
+    weekly: false,
+  });
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-      <ScrollView contentContainerStyle={{ padding: 16 }}>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
         <Text style={{ fontSize: 24, fontWeight: '800', color: '#1A1A2E', marginBottom: 16 }}>
           Configuración
         </Text>
@@ -698,12 +753,20 @@ const SettingsScreen = () => {
           </Text>
 
           {[
-            { label: 'Alertas de resubida (60 días)', enabled: true },
-            { label: 'Productos sin vistas (7 días)', enabled: true },
-            { label: 'Resumen semanal', enabled: false },
+            { key: 'repost', label: 'Alertas de resubida (60 días)' },
+            { key: 'lowViews', label: 'Productos sin vistas (7 días)' },
+            { key: 'weekly', label: 'Resumen semanal' },
           ].map((item, index) => (
-            <View
+            <TouchableOpacity
               key={index}
+              onPress={() => {
+                setNotifications(prev => ({
+                  ...prev,
+                  [item.key]: !prev[item.key]
+                }));
+                console.log('Toggle notification:', item.key);
+              }}
+              activeOpacity={0.7}
               style={{
                 flexDirection: 'row',
                 justifyContent: 'space-between',
@@ -711,15 +774,16 @@ const SettingsScreen = () => {
                 paddingVertical: 12,
                 borderBottomWidth: index < 2 ? 1 : 0,
                 borderBottomColor: '#F0F0F0',
+                minHeight: 50,
               }}
             >
-              <Text style={{ fontSize: 14, color: '#1A1A2E' }}>{item.label}</Text>
+              <Text style={{ fontSize: 14, color: '#1A1A2E', flex: 1 }}>{item.label}</Text>
               <View
                 style={{
                   width: 50,
                   height: 28,
                   borderRadius: 14,
-                  backgroundColor: item.enabled ? '#00D9A3' : '#E8E8E8',
+                  backgroundColor: notifications[item.key] ? '#00D9A3' : '#E8E8E8',
                   justifyContent: 'center',
                   paddingHorizontal: 4,
                 }}
@@ -730,11 +794,11 @@ const SettingsScreen = () => {
                     height: 20,
                     borderRadius: 10,
                     backgroundColor: '#FFF',
-                    alignSelf: item.enabled ? 'flex-end' : 'flex-start',
+                    alignSelf: notifications[item.key] ? 'flex-end' : 'flex-start',
                   }}
                 />
               </View>
-            </View>
+            </TouchableOpacity>
           ))}
         </View>
 
@@ -757,6 +821,8 @@ const SettingsScreen = () => {
           </Text>
 
           <TouchableOpacity
+            onPress={() => Alert.alert('Carpeta de entrada', 'Selecciona la carpeta de entrada')}
+            activeOpacity={0.7}
             style={{
               flexDirection: 'row',
               justifyContent: 'space-between',
@@ -778,12 +844,33 @@ const SettingsScreen = () => {
 
         {/* Actions */}
         <TouchableOpacity
+          onPress={() => {
+            Alert.alert(
+              'Procesar Productos',
+              '¿Quieres escanear la carpeta en busca de nuevos productos?',
+              [
+                { text: 'Cancelar', style: 'cancel' },
+                { 
+                  text: 'Procesar', 
+                  onPress: () => {
+                    Alert.alert('Éxito', 'Se han procesado 3 nuevos productos');
+                  }
+                },
+              ]
+            );
+          }}
+          activeOpacity={0.8}
           style={{
             backgroundColor: '#FF6B35',
             borderRadius: 12,
-            padding: 16,
+            padding: 18,
             alignItems: 'center',
             marginBottom: 12,
+            shadowColor: '#FF6B35',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.3,
+            shadowRadius: 8,
+            elevation: 6,
           }}
         >
           <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFF' }}>
@@ -792,10 +879,14 @@ const SettingsScreen = () => {
         </TouchableOpacity>
 
         <TouchableOpacity
+          onPress={() => {
+            Alert.alert('Exportar', 'Estadísticas exportadas correctamente');
+          }}
+          activeOpacity={0.8}
           style={{
             backgroundColor: '#FFF',
             borderRadius: 12,
-            padding: 16,
+            padding: 18,
             alignItems: 'center',
             borderWidth: 2,
             borderColor: '#E8E8E8',
@@ -838,8 +929,8 @@ export default function App() {
           tabBarActiveTintColor: '#FF6B35',
           tabBarInactiveTintColor: '#999',
           tabBarStyle: {
-            height: 60,
-            paddingBottom: 8,
+            height: 70,
+            paddingBottom: 16,
             paddingTop: 8,
             borderTopWidth: 0,
             elevation: 8,
@@ -847,6 +938,7 @@ export default function App() {
             shadowOffset: { width: 0, height: -2 },
             shadowOpacity: 0.1,
             shadowRadius: 8,
+            backgroundColor: '#FFFFFF',
           },
           tabBarLabelStyle: {
             fontSize: 11,
