@@ -46,8 +46,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "your-project-id"
+        "projectId": "7885857d-7423-415c-8683-cac090ec5f79"
       }
-    }
+    },
+    "owner": "perdigon85"
   }
 }
