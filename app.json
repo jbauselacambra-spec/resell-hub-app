@@ -41,8 +41,16 @@
         {
           "icon": "./assets/notification-icon.png",
           "color": "#FF6B35"
-        }
-      ]
+        }        
+        
+      ],
+      [
+    "expo-image-picker",
+    {
+      "photosPermission": "Permite que ResellHub acceda a tus fotos para subir productos.",
+      "cameraPermission": "Permite que ResellHub use la cámara para fotografiar tus productos."
+    }
+  ]
     ],
     "extra": {
       "eas": {

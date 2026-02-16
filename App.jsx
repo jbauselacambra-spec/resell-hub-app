@@ -1,282 +1,204 @@
 import React, { useState, useEffect } from 'react';
 import {
-  SafeAreaView,
-  ScrollView,
-  View,
-  Text,
-  TouchableOpacity,
-  Image,
-  StatusBar,
-  Dimensions,
-  Alert,
-  ActivityIndicator,
+  View, Text, TouchableOpacity, Image, Dimensions,
+  ActivityIndicator, LogBox, Alert, StyleSheet, Platform, ScrollView
 } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { LineChart } from 'react-native-chart-kit';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 
-// SERVICIOS (Asegúrate de que las rutas sean correctas)
+// SERVICIOS
 import { DatabaseService } from './services/DatabaseService';
 import { ImageProcessingService } from './services/ImageProcessingService';
-import { NotificationService } from './services/NotificationService';
+import LogService from './services/LogService';
 
-import { LogBox } from 'react-native';
-
-// Ignoramos avisos que ensucian la pantalla
 LogBox.ignoreAllLogs();
 
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-// ============== COMPONENTES REUTILIZABLES ==============
-
-const StatCard = ({ icon, value, label, color }) => (
-  <View style={{
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    width: (SCREEN_WIDTH - 48) / 3,
-    alignItems: 'center',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-  }}>
-    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: `${color}15`, justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
-      <Icon name={icon} size={20} color={color} />
-    </View>
-    <Text style={{ fontSize: 20, fontWeight: '700', color: '#1A1A2E' }}>{value}</Text>
-    <Text style={{ fontSize: 10, color: '#666', textAlign: 'center' }}>{label}</Text>
-  </View>
-);
-
-const ProductCard = ({ product, onPress }) => {
-  const statusConfig = {
-    active: { color: '#004E89', label: 'Activo' },
-    needs_repost: { color: '#FFB800', label: 'Resubir' },
-    sold: { color: '#00D9A3', label: 'Vendido' },
-  };
-  const config = statusConfig[product.status] || statusConfig.active;
-
-  return (
-    <TouchableOpacity 
-      onPress={onPress}
-      style={{
-        backgroundColor: '#FFF',
-        borderRadius: 16,
-        padding: 12,
-        flexDirection: 'row',
-        marginBottom: 12,
-        elevation: 2,
-        opacity: product.status === 'sold' ? 0.7 : 1,
-      }}
-    >
-      <Image 
-        source={{ uri: product.images?.[0] || 'https://via.placeholder.com/150' }} 
-        style={{ width: 70, height: 70, borderRadius: 12, backgroundColor: '#EEE' }}
-      />
-      <View style={{ flex: 1, marginLeft: 12, justifyContent: 'center' }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#999' }}>{product.brand?.toUpperCase()}</Text>
-          <Text style={{ fontSize: 10, color: config.color, fontWeight: 'bold' }}>{config.label}</Text>
-        </View>
-        <Text style={{ fontSize: 16, fontWeight: '700', color: '#1A1A2E' }} numberOfLines={1}>{product.title}</Text>
-        <Text style={{ fontSize: 18, fontWeight: '800', color: '#FF6B35', marginTop: 4 }}>{product.price}€</Text>
-      </View>
-    </TouchableOpacity>
-  );
+const COLORS = {
+  primary: '#FF6B35',
+  secondary: '#1A1A2E',
+  background: '#F8F9FA',
+  card: '#FFFFFF',
+  textMuted: '#666',
+  success: '#00D9A3',
+  error: '#FF5252'
 };
 
-// ============== SCREENS ==============
+// ============== PANTALLAS ==============
 
-const DashboardScreen = ({ navigation }) => {
-  const [stats, setStats] = useState({ active: 0, sold: 0, alerts: 0, totalRevenue: 0 });
-  const [loading, setLoading] = useState(true);
+const DashboardView = () => {
+  const insets = useSafeAreaInsets();
+  const [stats, setStats] = useState({ sold: 0, revenue: '0.00' });
 
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', loadData);
-    return unsubscribe;
-  }, [navigation]);
-
-  const loadData = () => {
-    const s = DatabaseService.getStats();
-    const products = DatabaseService.getAllProducts();
-    const alerts = products.filter(p => p.status === 'needs_repost').length;
-    
-    setStats({
-      active: products.filter(p => p.status === 'active').length,
-      sold: s.sold,
-      alerts: alerts,
-      totalRevenue: s.revenue
-    });
-    setLoading(false);
-  };
-
-  if (loading) return <ActivityIndicator style={{flex:1}} color="#FF6B35" />;
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
-        <Text style={{ fontSize: 28, fontWeight: '800', color: '#1A1A2E', marginBottom: 20 }}>ResellHub</Text>
-        
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25 }}>
-          <StatCard icon="package" value={stats.active} label="Activos" color="#004E89" />
-          <StatCard icon="check-circle" value={stats.sold} label="Vendidos" color="#00D9A3" />
-          <StatCard icon="alert-circle" value={stats.alerts} label="Alertas" color="#FFB800" />
-        </View>
-
-        <View style={{ backgroundColor: '#004E89', borderRadius: 20, padding: 20, marginBottom: 25 }}>
-          <Text style={{ color: '#FFF', opacity: 0.8 }}>Ingresos Totales</Text>
-          <Text style={{ fontSize: 32, fontWeight: '800', color: '#FFF' }}>{stats.totalRevenue}€</Text>
-        </View>
-
-        <TouchableOpacity 
-          onPress={() => navigation.navigate('Products')}
-          style={{ backgroundColor: '#FF6B35', borderRadius: 16, padding: 20, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
-        >
-          <Icon name="plus-circle" size={24} color="#FFF" style={{ marginRight: 10 }} />
-          <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 16 }}>Gestionar Inventario</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </SafeAreaView>
-  );
-};
-
-const ProductsScreen = ({ navigation }) => {
-  const [products, setProducts] = useState([]);
-  const [filter, setFilter] = useState('all');
-
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      setProducts(DatabaseService.getAllProducts());
-    });
-    return unsubscribe;
-  }, [navigation]);
-
- const handleAddProduct = async () => {
-  try {
-    // 1. Tomar foto
-    const photo = await ImageProcessingService.takePicture();
-    if (!photo) return;
-
-    setLoading(true); // Podrías añadir un estado de carga
-
-    // 2. Procesar la imagen (Recorte 1px anti-Vinted)
-    // Usamos el método que creamos para procesar una imagen individual
-    const processedUri = await ImageProcessingService.processImage(photo.uri);
-    
-    // 3. Guardar en DB Real (MMKV)
-    const newProd = DatabaseService.saveProduct({
-      title: `Producto ${Date.now().toString().slice(-4)}`,
-      brand: 'Nuevo',
-      price: 0,
-      images: [processedUri], // Guardamos la imagen ya recortada
-      status: 'active'
-    });
-
-    setProducts(DatabaseService.getAllProducts());
-    Alert.alert("¡Éxito!", "Producto guardado con foto optimizada.");
-  } catch (error) {
-    Alert.alert("Error", "Asegúrate de dar permisos de cámara: " + error.message);
-  } finally {
-    setLoading(false);
-  }
-};
-
-  const filtered = products.filter(p => filter === 'all' ? true : p.status === filter);
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-      <View style={{ padding: 16 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-          <Text style={{ fontSize: 24, fontWeight: '800', color: '#1A1A2E' }}>Mis Productos</Text>
-          <TouchableOpacity onPress={handleAddProduct}>
-            <Icon name="plus-square" size={28} color="#FF6B35" />
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 15 }}>
-          {['all', 'active', 'needs_repost', 'sold'].map(f => (
-            <TouchableOpacity 
-              key={f} 
-              onPress={() => setFilter(f)}
-              style={{
-                backgroundColor: filter === f ? '#FF6B35' : '#FFF',
-                paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, marginRight: 8, borderWidth: 1, borderColor: '#EEE'
-              }}
-            >
-              <Text style={{ color: filter === f ? '#FFF' : '#666', fontWeight: '600' }}>
-                {f === 'all' ? 'Todos' : f === 'needs_repost' ? 'Resubir' : f}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-
-      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 0, paddingBottom: 100 }}>
-        {filtered.length === 0 ? (
-          <Text style={{ textAlign: 'center', marginTop: 40, color: '#999' }}>No hay productos en esta categoría</Text>
-        ) : (
-          filtered.map(p => (
-            <ProductCard 
-              key={p.id} 
-              product={p} 
-              onPress={() => Alert.alert(p.title, "¿Marcar como vendido?", [
-                { text: "No" },
-                { text: "Sí, vendido", onPress: () => {
-                  DatabaseService.markProductAsSold(p.id, p.price);
-                  setProducts(DatabaseService.getAllProducts());
-                }}
-              ])} 
-            />
-          ))
-        )}
-      </ScrollView>
-    </SafeAreaView>
-  );
-};
-
-// ============== APP ROOT ==============
-
-const Tab = createBottomTabNavigator();
-
-export default function App() {
-  useEffect(() => {
-    const init = async () => {
-      try {
-        // Inicializar servicios con un pequeño delay para que el motor asiente
-        setTimeout(async () => {
-          await ImageProcessingService.initialize();
-          await NotificationService.initialize();
-          console.log("🚀 Servicios listos");
-        }, 1000);
-      } catch (e) {
-        console.log("Error inicializando servicios:", e);
-      }
-    };
-    init();
+    setStats(DatabaseService.getStats());
   }, []);
 
   return (
-    <NavigationContainer>      
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          headerShown: false,
-          tabBarIcon: ({ color, size }) => {
-            const icons = { Dashboard: 'home', Products: 'package', Stats: 'bar-chart-2', Settings: 'settings' };
-            return <Icon name={icons[route.name]} size={size} color={color} />;
-          },
-          tabBarActiveTintColor: '#FF6B35',
-          tabBarInactiveTintColor: '#999',
-          tabBarStyle: { height: 70, paddingBottom: 15, paddingTop: 10 },
-        })}
-      >
-        <Tab.Screen name="Dashboard" component={DashboardScreen} options={{ tabBarLabel: 'Inicio' }} />
-        <Tab.Screen name="Products" component={ProductsScreen} options={{ tabBarLabel: 'Inventario' }} />
-        <Tab.Screen name="Stats" component={DashboardScreen} options={{ tabBarLabel: 'Stats' }} />
-        <Tab.Screen name="Settings" component={DashboardScreen} options={{ tabBarLabel: 'Ajustes' }} />
-      </Tab.Navigator>
-    </NavigationContainer>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <View style={styles.header}><Text style={styles.headerTitle}>ResellHub <Text style={{color: COLORS.primary}}>v1.0</Text></Text></View>
+      <View style={styles.statsCard}>
+        <Text style={styles.statsLabel}>VENTAS TOTALES</Text>
+        <Text style={styles.statsValue}>{stats.revenue}€</Text>
+        <View style={styles.divider} />
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Icon name="check-circle" size={18} color={COLORS.success} />
+          <Text style={styles.statsSubtext}>Vendidos: <Text style={{ fontWeight: 'bold', color: COLORS.secondary }}>{stats.sold}</Text></Text>
+        </View>
+      </View>
+    </View>
+  );
+};
+
+const StockView = () => {
+  const insets = useSafeAreaInsets();
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = () => setProducts(DatabaseService.getAllProducts());
+  useEffect(() => { load(); }, []);
+
+  const handleAddProduct = async () => {
+    try {
+      // 1. Tomar la foto
+      // Nota: No hace falta LogService.add aquí porque ya lo hace el servicio internamente
+      const result = await ImageProcessingService.takePicture();
+      
+      // Verificamos si el usuario canceló o no hay resultado
+      if (!result) {
+        // El servicio ya registra si fue cancelado o hubo error
+        return;
+      }
+
+      setLoading(true);
+
+      // 2. Procesar la imagen (Anti-Hash)
+      // Usamos result.uri porque el servicio devuelve el objeto del asset capturado
+      const processedUri = await ImageProcessingService.processImage(result.uri);
+      
+      // 3. Guardar en la base de datos
+      const newProduct = {
+        title: `Item #${products.length + 1}`,
+        price: "25.00",
+        images: [processedUri],
+        status: 'active'
+      };
+
+      DatabaseService.saveProduct(newProduct);
+      
+      // 4. Refrescar la lista y avisar
+      load();
+      LogService.add("✅ Producto añadido al inventario");
+      
+    } catch (e) {
+      LogService.add("❌ Error en handleAddProduct: " + e.message);
+      Alert.alert("Error", "No se pudo procesar la imagen: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <View style={styles.headerRow}>
+        <Text style={styles.headerTitle}>Inventario</Text>
+        <TouchableOpacity style={styles.addButton} onPress={handleAddProduct} disabled={loading}>
+          {loading ? <ActivityIndicator color="#FFF" /> : <Icon name="plus" size={24} color="#FFF" />}
+        </TouchableOpacity>
+      </View>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }}>
+        {products.map(p => (
+          <View key={p.id} style={styles.productCard}>
+            <Image source={{ uri: p.images[0] }} style={styles.productImage} />
+            <View style={styles.productInfo}>
+              <Text style={styles.productTitle}>{p.title}</Text>
+              <Text style={styles.productPrice}>{p.price}€</Text>
+            </View>
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+};
+
+const LogsView = () => {
+  const insets = useSafeAreaInsets();
+  const [logs, setLogs] = useState([]);
+  useEffect(() => {
+    setLogs([...LogService.logs]);
+    return LogService.subscribe(setLogs);
+  }, []);
+
+  return (
+    <View style={[styles.container, { backgroundColor: '#121212', paddingTop: insets.top }]}>
+      <View style={styles.headerRow}>
+        <Text style={[styles.headerTitle, { color: '#FFF' }]}>Terminal</Text>
+        <TouchableOpacity onPress={() => LogService.clear()}><Icon name="trash-2" size={20} color={COLORS.error} /></TouchableOpacity>
+      </View>
+      <ScrollView style={{ padding: 15 }}>
+        {logs.map((log, i) => (
+          <Text key={i} style={{ color: log.type === 'error' ? COLORS.error : '#AAA', fontSize: 11, marginBottom: 5 }}>
+            [{log.time}] {log.text}
+          </Text>
+        ))}
+      </ScrollView>
+    </View>
+  );
+};
+
+// ============== NAVEGACIÓN ==============
+
+const Tab = createBottomTabNavigator();
+
+function TabNavigator() {
+  const insets = useSafeAreaInsets();
+  return (
+    <Tab.Navigator 
+      screenOptions={{ 
+        tabBarActiveTintColor: COLORS.primary,
+        headerShown: false,
+        tabBarStyle: { 
+          height: 70 + insets.bottom, // Se ajusta solo según el sistema
+          paddingBottom: insets.bottom + 10,
+          paddingTop: 10,
+          backgroundColor: '#FFF',
+          borderTopWidth: 1,
+          borderTopColor: '#EEE'
+        }
+      }}
+    >
+      <Tab.Screen name="Home" component={DashboardView} options={{ tabBarIcon: ({color}) => <Icon name="grid" size={22} color={color}/> }} />
+      <Tab.Screen name="Stock" component={StockView} options={{ tabBarIcon: ({color}) => <Icon name="list" size={22} color={color}/> }} />
+      <Tab.Screen name="Debug" component={LogsView} options={{ tabBarIcon: ({color}) => <Icon name="terminal" size={22} color={color}/> }} />
+    </Tab.Navigator>
   );
 }
+
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <NavigationContainer>
+        <TabNavigator />
+      </NavigationContainer>
+    </SafeAreaProvider>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: COLORS.background },
+  header: { paddingHorizontal: 25, paddingVertical: 20 },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 25, paddingVertical: 20 },
+  headerTitle: { fontSize: 26, fontWeight: '800', color: COLORS.secondary },
+  statsCard: { marginHorizontal: 25, backgroundColor: COLORS.card, borderRadius: 24, padding: 25, elevation: 8, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10 },
+  statsLabel: { color: COLORS.textMuted, fontSize: 12, fontWeight: 'bold', letterSpacing: 1 },
+  statsValue: { fontSize: 44, fontWeight: '900', color: COLORS.primary, marginVertical: 8 },
+  divider: { height: 1, backgroundColor: '#F0F0F0', marginVertical: 15 },
+  statsSubtext: { marginLeft: 10, fontSize: 14, color: COLORS.textMuted },
+  addButton: { backgroundColor: COLORS.primary, width: 44, height: 44, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  productCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 18, padding: 12, marginBottom: 12, marginHorizontal: 5, elevation: 3 },
+  productImage: { width: 60, height: 60, borderRadius: 12, backgroundColor: '#F0F0F0' },
+  productInfo: { flex: 1, marginLeft: 15 },
+  productTitle: { fontWeight: '700', fontSize: 15, color: COLORS.secondary },
+  productPrice: { color: COLORS.primary, fontWeight: '800', fontSize: 17 }
+});

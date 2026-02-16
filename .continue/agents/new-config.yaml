@@ -1,0 +1,34 @@
+# Configuración de modelos locales con Ollama
+# Para más información: https://docs.continue.dev/reference
+
+name: Modelos Locales Ollama
+version: 1.0.0
+schema: v1
+
+# Define los modelos locales disponibles
+# https://docs.continue.dev/customization/models
+models:
+  - name: Llama 3.2 3B (Principal)
+    provider: ollama
+    model: llama3.2:3b
+    roles:
+      - chat
+      - edit
+      - apply
+  
+  - name: Qwen2.5-Coder 1.5B (Autocompletado)
+    provider: ollama
+    model: qwen2.5-coder:1.5b-base
+    roles:
+      - autocomplete
+  
+  - name: Nomic Embed (Embeddings)
+    provider: ollama
+    model: nomic-embed-text:latest
+    roles:
+      - embed
+
+# MCP Servers que Continue puede acceder (opcional)
+# https://docs.continue.dev/customization/mcp-tools
+# mcpServers:
+#   - uses: anthropic/memory-mcp
