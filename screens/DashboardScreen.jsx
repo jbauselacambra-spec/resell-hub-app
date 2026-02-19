@@ -5,7 +5,6 @@ import { DatabaseService } from '../services/DatabaseService';
 
 const { width } = Dimensions.get('window');
 
-// MAPA GLOBAL (Pilar 3 - Base de conocimiento)
 const SEASONAL_MAP = {
   0: { advice: "Céntrate en Abrigos y Tecnología.", tags: ["invierno", "chaqueta", "electrónica", "móvil"] },
   1: { advice: "Momento de Disfraces y San Valentín.", tags: ["carnaval", "regalo", "joya", "disfraz"] },
@@ -38,41 +37,45 @@ export default function DashboardScreen({ navigation }) {
   });
 
   const loadDashboardData = () => {
-    const allProducts = DatabaseService.getAllProducts();
-    const basicStats = DatabaseService.getStats();
+    // Protección: Si getAllProducts devuelve null/undefined, usamos array vacío
+    const allProducts = DatabaseService.getAllProducts() || [];
+    const basicStats = DatabaseService.getStats() || { revenue: "0.00" };
     
     const sold = allProducts.filter(p => p.status === 'sold');
     const active = allProducts.filter(p => p.status !== 'sold');
 
-    // --- 1. LÓGICA DE ANTICIPACIÓN (Miramos el mes que viene) ---
     const nextMonthIndex = (new Date().getMonth() + 1) % 12;
     const monthInfo = SEASONAL_MAP[nextMonthIndex];
     const targetMonthName = new Date(0, nextMonthIndex).toLocaleDateString('es-ES', { month: 'long' });
 
-    // --- 2. LÓGICA DE APRENDIZAJE PROPIO (Tu Historial) ---
-    // Buscamos qué categorías vendiste tú en ese mes específico en el pasado
     const historyInTargetMonth = sold.filter(p => {
+      if (!p.soldAt) return false;
       const saleMonth = new Date(p.soldAt).getMonth();
       return saleMonth === nextMonthIndex;
     });
 
     const personalCatCounts = historyInTargetMonth.reduce((acc, p) => {
-      acc[p.category] = (acc[p.category] || 0) + 1;
+      const cat = p.category || "Otros"; // Evita undefined en el historial
+      acc[cat] = (acc[cat] || 0) + 1;
       return acc;
     }, {});
 
     const bestPersonalCat = Object.keys(personalCatCounts).sort((a, b) => personalCatCounts[b] - personalCatCounts[a])[0] || "Sin historial";
 
-    // --- 3. IDENTIFICAR PRODUCTOS PARA ACCIÓN ---
-    // Productos en stock que coinciden con el mercado global O con tu éxito personal
+    // --- CORRECCIÓN CRÍTICA: Verificación de existencia antes de .toLowerCase() ---
     const recommendations = active.filter(p => {
-      const matchesGlobal = monthInfo.tags.some(tag => p.category.toLowerCase().includes(tag) || p.title.toLowerCase().includes(tag));
+      const category = (p.category || "").toLowerCase(); // Safe check
+      const title = (p.title || "").toLowerCase();       // Safe check
+      
+      const matchesGlobal = monthInfo.tags.some(tag => 
+        category.includes(tag.toLowerCase()) || title.includes(tag.toLowerCase())
+      );
       const matchesPersonal = p.category === bestPersonalCat;
       return matchesGlobal || matchesPersonal;
     });
 
-    // --- 4. CÁLCULOS GENERALES (Velocidad y Stock Frío) ---
     const coldStock = active.filter(p => {
+      if (!p.createdAt) return false;
       const diff = Math.ceil((new Date() - new Date(p.createdAt)) / (1000 * 60 * 60 * 24));
       return diff >= 30;
     }).length;
@@ -81,16 +84,19 @@ export default function DashboardScreen({ navigation }) {
     let categorySpeeds = {};
     if (sold.length > 0) {
       const totalDays = sold.reduce((sum, p) => {
+        if (!p.createdAt || !p.soldAt) return sum;
         const diff = Math.ceil((new Date(p.soldAt) - new Date(p.createdAt)) / (1000 * 60 * 60 * 24));
         return sum + Math.max(0, diff);
       }, 0);
       avgDays = (totalDays / sold.length).toFixed(1);
 
       sold.forEach(p => {
+        if (!p.createdAt || !p.soldAt) return;
+        const cat = p.category || "Otros"; // Evita undefined en el cálculo de velocidad
         const diff = Math.ceil((new Date(p.soldAt) - new Date(p.createdAt)) / (1000 * 60 * 60 * 24));
-        if (!categorySpeeds[p.category]) categorySpeeds[p.category] = { total: 0, count: 0 };
-        categorySpeeds[p.category].total += diff;
-        categorySpeeds[p.category].count += 1;
+        if (!categorySpeeds[cat]) categorySpeeds[cat] = { total: 0, count: 0 };
+        categorySpeeds[cat].total += diff;
+        categorySpeeds[cat].count += 1;
       });
     }
 
@@ -100,7 +106,7 @@ export default function DashboardScreen({ navigation }) {
     })).sort((a, b) => a.avg - b.avg);
 
     setStats({
-      totalRevenue: basicStats.revenue,
+      totalRevenue: basicStats.revenue || "0.00",
       soldCount: sold.length,
       activeCount: active.length,
       avgDaysToSell: avgDays,
@@ -136,7 +142,6 @@ export default function DashboardScreen({ navigation }) {
         <Text style={styles.title}>Smart Business</Text>
       </View>
 
-      {/* TARJETA INGRESOS */}
       <View style={styles.mainCard}>
         <Text style={styles.mainLabel}>BALANCE TOTAL</Text>
         <Text style={styles.mainValue}>{stats.totalRevenue}€</Text>
@@ -154,12 +159,11 @@ export default function DashboardScreen({ navigation }) {
         </View>
       </View>
 
-      {/* PILAR 3 + 4: ESTRATEGIA HÍBRIDA */}
       <Text style={styles.sectionTitle}>Estrategia de Anticipación</Text>
       <View style={styles.strategyCard}>
         <View style={styles.strategyHeader}>
           <View style={styles.monthBadge}>
-            <Text style={styles.monthBadgeText}>PLANIFICAR {stats.targetMonthName}</Text>
+            <Text style={styles.monthBadgeText}>PLANIFICAR {stats.targetMonthName.toUpperCase()}</Text>
           </View>
           <Icon name="zap" size={18} color="#FFD700" />
         </View>
@@ -176,10 +180,10 @@ export default function DashboardScreen({ navigation }) {
         {stats.recommendedCount > 0 ? (
           <TouchableOpacity 
             style={styles.actionButton}
-            onPress={() => navigation.navigate('Inventario')} // Asegúrate que el nombre coincide con tu Tab
+            onPress={() => navigation.navigate('Inventario')}
           >
             <Text style={styles.actionButtonText}>
-              Publicar/Actualizar {stats.recommendedCount} productos ahora
+              Actualizar {stats.recommendedCount} productos ahora
             </Text>
             <Icon name="arrow-right" size={16} color="#FFF" />
           </TouchableOpacity>
@@ -188,7 +192,6 @@ export default function DashboardScreen({ navigation }) {
         )}
       </View>
 
-      {/* ALERTAS DE STOCK FRÍO */}
       <View style={[styles.alertCard, { borderColor: stats.coldStockCount > 0 ? '#FF6B35' : '#00D9A3' }]}>
         <Icon name="alert-triangle" size={20} color={stats.coldStockCount > 0 ? '#FF6B35' : '#00D9A3'} />
         <Text style={styles.alertText}>
@@ -198,21 +201,20 @@ export default function DashboardScreen({ navigation }) {
         </Text>
       </View>
 
-      {/* ROTACIÓN POR CATEGORÍA */}
       <Text style={styles.sectionTitle}>Días para vender</Text>
       <View style={styles.analysisCard}>
-        {stats.velocityData.map((item, i) => (
+        {stats.velocityData.length > 0 ? stats.velocityData.map((item, i) => (
           <View key={i} style={styles.catRow}>
-            <Text style={styles.catName}>{item.name}</Text>
+            <Text style={styles.catName} numberOfLines={1}>{item.name}</Text>
             <View style={styles.progressBg}>
               <View style={[styles.progressFill, { 
-                width: `${Math.min(100, (item.avg / 30) * 100)}%`,
-                backgroundColor: item.avg < 7 ? '#00D9A3' : '#4EA8DE' 
+                width: `${Math.min(100, (parseFloat(item.avg) / 30) * 100)}%`,
+                backgroundColor: parseFloat(item.avg) < 7 ? '#00D9A3' : '#4EA8DE' 
               }]} />
             </View>
             <Text style={styles.catValue}>{item.avg}d</Text>
           </View>
-        ))}
+        )) : <Text style={styles.noStockText}>Sin datos de ventas aún.</Text>}
       </View>
 
       <View style={{ height: 100 }} />
@@ -220,12 +222,12 @@ export default function DashboardScreen({ navigation }) {
   );
 }
 
+// Mismos estilos proporcionados en tu archivo original
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F9FA' },
   header: { paddingHorizontal: 25, paddingTop: 60, marginBottom: 20 },
   dateText: { color: '#999', fontSize: 13, textTransform: 'uppercase', fontWeight: '700' },
   title: { fontSize: 28, fontWeight: '900', color: '#1A1A2E' },
-  
   mainCard: { marginHorizontal: 25, backgroundColor: '#1A1A2E', borderRadius: 30, padding: 25, elevation: 8 },
   mainLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '800' },
   mainValue: { color: '#FFF', fontSize: 38, fontWeight: '900', marginVertical: 5 },
@@ -234,9 +236,7 @@ const styles = StyleSheet.create({
   verticalDivider: { width: 1, height: 30, backgroundColor: 'rgba(255,255,255,0.1)' },
   subLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: '700' },
   subValue: { color: '#00D9A3', fontSize: 15, fontWeight: '800' },
-
   sectionTitle: { marginHorizontal: 25, marginTop: 30, marginBottom: 15, fontSize: 14, fontWeight: '800', color: '#1A1A2E', textTransform: 'uppercase' },
-  
   strategyCard: { marginHorizontal: 25, backgroundColor: '#FFF', padding: 20, borderRadius: 25, elevation: 4 },
   strategyHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   monthBadge: { backgroundColor: '#4EA8DE20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
@@ -247,10 +247,8 @@ const styles = StyleSheet.create({
   actionButton: { backgroundColor: '#1A1A2E', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', padding: 15, borderRadius: 15, gap: 10 },
   actionButtonText: { color: '#FFF', fontWeight: '700', fontSize: 12 },
   noStockText: { color: '#999', fontSize: 12, fontStyle: 'italic', textAlign: 'center' },
-
   alertCard: { marginHorizontal: 25, marginTop: 15, backgroundColor: '#FFF', padding: 15, borderRadius: 20, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1 },
   alertText: { fontSize: 13, fontWeight: '600', color: '#444' },
-
   analysisCard: { marginHorizontal: 25, backgroundColor: '#FFF', padding: 20, borderRadius: 25, elevation: 2 },
   catRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
   catName: { width: 85, fontSize: 12, fontWeight: '700', color: '#666' },
