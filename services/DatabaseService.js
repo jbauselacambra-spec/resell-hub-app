@@ -6,8 +6,7 @@ try {
   storage = new MMKV();
   LogService.add("✅ MMKV conectado correctamente");
 } catch (e) {
-  LogService.add("⚠️ MMKV falló (Probable Debugger activo). Usando memoria temporal.");
-  // Creamos un almacenamiento temporal en memoria para que la app no de error
+  LogService.add("⚠️ MMKV falló. Usando memoria temporal.");
   const backupStorage = new Map();
   storage = {
     getString: (key) => backupStorage.get(key),
@@ -49,6 +48,57 @@ export class DatabaseService {
     } catch (e) {
       LogService.add("❌ Error guardando: " + e.message);
       return null;
+    }
+  }
+
+  // --- NUEVA FUNCIÓN: ACTUALIZAR ---
+  static updateProduct(updatedProduct) {
+    try {
+      const products = this.getAllProducts();
+      const index = products.findIndex(p => p.id === updatedProduct.id);
+      
+      if (index !== -1) {
+        products[index] = { ...products[index], ...updatedProduct };
+        storage.set(this.KEYS.PRODUCTS, JSON.stringify(products));
+        LogService.add(`✅ Producto actualizado: ${updatedProduct.id}`);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      LogService.add("❌ Error actualizando: " + e.message);
+      return false;
+    }
+  }
+
+static markAsSold(id, soldPrice) {
+  try {
+    const products = this.getAllProducts();
+    const index = products.findIndex(p => p.id === id);
+    if (index !== -1) {
+      products[index] = {
+        ...products[index],
+        status: 'sold', // Cambio de estado fundamental
+        soldPrice: parseFloat(soldPrice) || 0,
+        soldAt: new Date().toISOString()
+      };
+      storage.set(this.KEYS.PRODUCTS, JSON.stringify(products));
+      return true;
+    }
+    return false;
+  } catch (e) { return false; }
+}
+
+  // --- FUNCIÓN CORREGIDA: ELIMINAR ---
+  static deleteProduct(id) {
+    try {
+      const products = this.getAllProducts();
+      const filtered = products.filter(p => p.id !== id);
+      storage.set(this.KEYS.PRODUCTS, JSON.stringify(filtered));
+      LogService.add(`🗑️ Producto eliminado: ${id}`);
+      return true;
+    } catch (e) {
+      LogService.add("❌ Error eliminando: " + e.message);
+      return false;
     }
   }
 

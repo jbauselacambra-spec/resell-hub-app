@@ -19,7 +19,10 @@ export default function ProductsScreen({ navigation }) {
   const loadData = () => {
     try {
       const data = DatabaseService.getAllProducts();
-      setProducts(data);
+      // FILTRO CRUCIAL: Solo mostramos lo que NO esté vendido
+      const onlyActive = data.filter(p => p.status !== 'sold'); 
+      setProducts(onlyActive);
+      
       const tagsMap = data.flatMap(p => p.tags ? p.tags.split(',').map(t => t.trim()) : []);
       setExistingTags([...new Set(tagsMap)].filter(t => t.length > 0));
     } catch (e) {
