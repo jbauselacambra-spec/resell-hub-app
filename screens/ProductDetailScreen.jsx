@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   View, Text, ScrollView, Image, StyleSheet, Dimensions, 
-  TouchableOpacity, Alert, TextInput, Platform 
+  TouchableOpacity, Alert, TextInput, Modal, KeyboardAvoidingView, Platform 
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import Icon from 'react-native-vector-icons/Feather';
@@ -13,44 +13,33 @@ const { width } = Dimensions.get('window');
 export default function ProductDetailScreen({ route, navigation }) {
   const { product: initialProduct } = route.params || {};
   
+  // ESTADOS
   const [product, setProduct] = useState(initialProduct);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({ ...initialProduct });
   const [errors, setErrors] = useState({}); 
-  const [activeIndex, setActiveIndex] = useState(0);
+  
+  // ESTADOS PARA EL NUEVO MODAL DE VENTA
+  const [showSoldModal, setShowSoldModal] = useState(false);
+  const [soldPrice, setSoldPrice] = useState(initialProduct?.price.toString());
 
   if (!product) return null;
 
-  // --- LÓGICA DE FOTOS ---
+  // --- LÓGICA DE FOTOS (RESTRICCIÓN MÍNIMO 3) ---
   const pickImage = async (fromCamera = false) => {
-    try {
-      const permission = fromCamera 
-        ? await ImagePicker.requestCameraPermissionsAsync()
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    const result = fromCamera 
+      ? await ImagePicker.launchCameraAsync({ quality: 0.7 })
+      : await ImagePicker.launchImageLibraryAsync({ allowsMultipleSelection: true, quality: 0.7 });
 
-      if (!permission.granted) return;
-
-      const result = fromCamera 
-        ? await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true })
-        : await ImagePicker.launchImageLibraryAsync({ 
-            allowsMultipleSelection: true, 
-            quality: 0.7 
-          });
-
-      if (!result.canceled) {
-        const uris = result.assets.map(a => a.uri);
-        const newImages = [...editForm.images, ...uris];
-        setEditForm({ ...editForm, images: newImages });
-        // Validación en tiempo real para las fotos
-        if (newImages.length >= 3) setErrors(prev => ({ ...prev, images: false }));
-        LogService.success(`Fotos preparadas: ${newImages.length}`);
-      }
-    } catch (e) {
-      LogService.error("Error al añadir imagen: " + e.message);
+    if (!result.canceled) {
+      const uris = result.assets.map(a => a.uri);
+      const newImages = [...editForm.images, ...uris];
+      setEditForm({ ...editForm, images: newImages });
+      if (newImages.length >= 3) setErrors(prev => ({ ...prev, images: false }));
     }
   };
 
-  // --- VALIDACIÓN Y GUARDADO ---
+  // --- GUARDAR EDICIÓN (VALIDACIÓN VISUAL ROJA) ---
   const handleSaveEdit = () => {
     let currentErrors = {};
     if (!editForm.title.trim()) currentErrors.title = true;
@@ -60,79 +49,42 @@ export default function ProductDetailScreen({ route, navigation }) {
     if (editForm.images.length < 3) currentErrors.images = true;
 
     setErrors(currentErrors);
-
-    // Si hay errores, no sale Alert, solo se marcan los campos en rojo
-    if (Object.keys(currentErrors).length > 0) {
-      LogService.info("Edición bloqueada por validación visual");
-      return;
-    }
+    if (Object.keys(currentErrors).length > 0) return;
 
     if (DatabaseService.updateProduct(editForm)) {
       setProduct(editForm);
       setIsEditing(false);
-      LogService.success("Producto actualizado correctamente");
+      LogService.success("Producto editado con éxito");
     }
   };
 
-// --- LÓGICA DE VENTA INFALIBLE ---
-  const handleMarkAsSold = () => {
-    LogService.info(`Iniciando venta de: ${product.title}`);
-    
-    Alert.prompt(
-      "Confirmar Venta",
-      "Introduce el precio final (se usará el actual por defecto):",
-      [
-        { 
-          text: "Cancelar", 
-          onPress: () => LogService.info("Venta cancelada por usuario"),
-          style: "cancel" 
-        },
-        { 
-          text: "Vendido", 
-          onPress: (price) => {
-            // Si el usuario deja el campo vacío o cancela el input, usamos el precio original
-            const finalPrice = (price && price.trim() !== "") ? price : product.price;
-            
-            LogService.info(`Procesando venta por: ${finalPrice}€`);
-            
-            const success = DatabaseService.markAsSold(product.id, finalPrice);
-            
-            if (success) {
-              LogService.success("¡Base de Datos actualizada!");
-              // Pequeña alerta de éxito antes de cerrar
-              Alert.alert("¡Vendido!", "El producto se ha movido al historial.", [
-                { text: "OK", onPress: () => navigation.goBack() }
-              ]);
-            } else {
-              LogService.error("Error al marcar como vendido en DB");
-              Alert.alert("Error", "No se pudo actualizar el estado del producto.");
-            }
-          } 
-        }
-      ],
-      "plain-text",
-      product.price.toString() // Valor por defecto en el input
-    );
+  // --- MARCAR COMO VENDIDO (AHORA CON MODAL PROPIO) ---
+  const confirmSold = () => {
+    LogService.info(`Procesando venta final por: ${soldPrice}€`);
+    const success = DatabaseService.markAsSold(product.id, soldPrice);
+    if (success) {
+      setShowSoldModal(false);
+      LogService.success("¡Producto Marcado como Vendido!");
+      navigation.goBack(); 
+    } else {
+      LogService.error("Fallo al guardar venta en DB");
+    }
   };
 
   return (
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
         
-        {/* CARRUSEL */}
+        {/* CARRUSEL Y BOTONES SUPERIORES */}
         <View style={styles.carouselWrapper}>
-          <ScrollView horizontal pagingEnabled onScroll={(e) => setActiveIndex(Math.round(e.nativeEvent.contentOffset.x / width))}>
+          <ScrollView horizontal pagingEnabled>
             {(isEditing ? editForm.images : product.images).map((uri, i) => (
               <View key={i} style={{width}}>
                 <Image source={{ uri }} style={styles.mainImage} />
                 {isEditing && (
                    <TouchableOpacity 
                     style={styles.removePhotoBadge} 
-                    onPress={() => {
-                        const filtered = editForm.images.filter((_, idx) => idx !== i);
-                        setEditForm({...editForm, images: filtered});
-                        if (filtered.length < 3) setErrors(prev => ({ ...prev, images: true }));
-                    }}
+                    onPress={() => setEditForm({...editForm, images: editForm.images.filter((_, idx) => idx !== i)})}
                    >
                      <Icon name="x" size={16} color="#FFF" />
                    </TouchableOpacity>
@@ -151,7 +103,10 @@ export default function ProductDetailScreen({ route, navigation }) {
                 <Icon name={isEditing ? "x" : "edit-2"} size={20} color={isEditing ? "#E63946" : "#004E89"} />
               </TouchableOpacity>
               {!isEditing && (
-                <TouchableOpacity style={[styles.circleBtn, {backgroundColor: '#FFF5F5'}]} onPress={() => DatabaseService.deleteProduct(product.id) && navigation.goBack()}>
+                <TouchableOpacity style={[styles.circleBtn, {backgroundColor: '#FFF5F5'}]} onPress={() => {
+                  DatabaseService.deleteProduct(product.id);
+                  navigation.goBack();
+                }}>
                   <Icon name="trash-2" size={20} color="#E63946" />
                 </TouchableOpacity>
               )}
@@ -161,6 +116,7 @@ export default function ProductDetailScreen({ route, navigation }) {
 
         <View style={styles.content}>
           {isEditing ? (
+            /* --- MODO EDICIÓN (ESTILOS ROJOS) --- */
             <View style={styles.form}>
               <Text style={[styles.label, errors.images && {color: '#E63946'}]}>FOTOS (Mínimo 3) *</Text>
               <View style={styles.photoRow}>
@@ -171,11 +127,7 @@ export default function ProductDetailScreen({ route, navigation }) {
                   <Icon name="image" size={18} color="#FF6B35" /><Text style={styles.photoActionText}>Galería</Text>
                 </TouchableOpacity>
               </View>
-
-              {/* MENSAJE DE ERROR ROJO BAJO FOTOS */}
-              {errors.images && (
-                <Text style={styles.errorTextUnder}>Debes tener al menos 3 fotos. Faltan {3 - editForm.images.length}.</Text>
-              )}
+              {errors.images && <Text style={styles.errorTextUnder}>Faltan {3 - editForm.images.length} fotos.</Text>}
 
               <Text style={styles.label}>Título *</Text>
               <TextInput style={[styles.input, errors.title && styles.inputError]} value={editForm.title} onChangeText={t => setEditForm({...editForm, title: t})} />
@@ -194,6 +146,7 @@ export default function ProductDetailScreen({ route, navigation }) {
               </TouchableOpacity>
             </View>
           ) : (
+            /* --- MODO VISTA --- */
             <>
               <View style={styles.headerInfo}>
                 <Text style={styles.categoryBadge}>{product.category}</Text>
@@ -203,15 +156,40 @@ export default function ProductDetailScreen({ route, navigation }) {
               <Text style={styles.descriptionText}>{product.description}</Text>
               <View style={styles.divider} />
               
-              <TouchableOpacity style={styles.premiumSoldBtn} onPress={handleMarkAsSold}>
+              <TouchableOpacity style={styles.premiumSoldBtn} onPress={() => setShowSoldModal(true)}>
                 <View style={styles.iconCircle}><Icon name="dollar-sign" size={20} color="#FFF" /></View>
                 <Text style={styles.premiumSoldText}>MARCAR COMO VENDIDO</Text>
               </TouchableOpacity>
             </>
           )}
-          <View style={{height: 100}} />
         </View>
       </ScrollView>
+
+      {/* MODAL DE VENTA PERSONALIZADO (REEMPLAZA AL PROMPT QUE FALLABA) */}
+      <Modal visible={showSoldModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Confirmar Venta</Text>
+            <Text style={styles.modalSub}>¿A qué precio se ha vendido finalmente?</Text>
+            <TextInput 
+              style={styles.modalInput} 
+              keyboardType="numeric" 
+              value={soldPrice} 
+              onChangeText={setSoldPrice}
+              autoFocus
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => setShowSoldModal(false)}>
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalConfirm} onPress={confirmSold}>
+                <Text style={styles.modalConfirmText}>Vendido</Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -230,13 +208,11 @@ const styles = StyleSheet.create({
   title: { fontSize: 26, fontWeight: '800', color: '#1A1A2E', marginBottom: 20 },
   descriptionText: { fontSize: 16, color: '#444', lineHeight: 24 },
   divider: { height: 1, backgroundColor: '#F0F0F0', marginVertical: 20 },
-  
-  // BOTÓN VENDIDO PREMIUM
   premiumSoldBtn: { backgroundColor: '#1A1A2E', flexDirection: 'row', alignItems: 'center', padding: 8, borderRadius: 50 },
   iconCircle: { backgroundColor: '#00D9A3', width: 45, height: 45, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
   premiumSoldText: { color: '#FFF', fontWeight: '800', fontSize: 14, flex: 1, textAlign: 'center', marginRight: 40 },
 
-  // FORMULARIO Y VALIDACIÓN (COPIADO DE PRODUCTLIST)
+  // FORMULARIO
   form: { gap: 5 },
   label: { fontSize: 14, fontWeight: '700', color: '#333', marginBottom: 8, marginTop: 10 },
   input: { backgroundColor: '#F8F9FA', borderRadius: 12, padding: 15, fontSize: 16, borderWidth: 1, borderColor: '#EEE' },
@@ -247,5 +223,17 @@ const styles = StyleSheet.create({
   photoActionBtn: { flex: 1, flexDirection: 'row', backgroundColor: '#FF6B3510', padding: 15, borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FF6B3520' },
   photoActionText: { marginLeft: 8, color: '#FF6B35', fontWeight: 'bold' },
   btnSubmit: { backgroundColor: '#FF6B35', padding: 18, borderRadius: 15, alignItems: 'center', marginTop: 20 },
-  btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 }
+  btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+
+  // MODAL VENTA
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+  modalBox: { width: '85%', backgroundColor: '#FFF', borderRadius: 25, padding: 25 },
+  modalTitle: { fontSize: 20, fontWeight: '900', color: '#1A1A2E', textAlign: 'center' },
+  modalSub: { fontSize: 14, color: '#666', textAlign: 'center', marginVertical: 10 },
+  modalInput: { backgroundColor: '#F8F9FA', borderRadius: 15, padding: 15, fontSize: 24, textAlign: 'center', fontWeight: 'bold', color: '#FF6B35', marginVertical: 10 },
+  modalButtons: { flexDirection: 'row', gap: 10, marginTop: 15 },
+  modalCancel: { flex: 1, padding: 15, borderRadius: 15, alignItems: 'center' },
+  modalCancelText: { color: '#999', fontWeight: 'bold' },
+  modalConfirm: { flex: 2, backgroundColor: '#00D9A3', padding: 15, borderRadius: 15, alignItems: 'center' },
+  modalConfirmText: { color: '#FFF', fontWeight: 'bold' }
 });
