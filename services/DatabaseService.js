@@ -88,6 +88,45 @@ static markAsSold(id, soldPrice) {
   } catch (e) { return false; }
 }
 
+// Añade esto a tu clase DatabaseService en DatabaseService.js
+
+static getPerformanceStats() {
+  try {
+    const products = this.getAllProducts();
+    const sold = products.filter(p => p.status === 'sold');
+    
+    if (sold.length === 0) return null;
+
+    // Cálculo de días promedio totales
+    const totalDays = sold.reduce((sum, p) => {
+      const start = new Date(p.createdAt);
+      const end = new Date(p.soldAt);
+      const diff = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+      return sum + diff;
+    }, 0);
+
+    const avgDays = (totalDays / sold.length).toFixed(1);
+
+    // Velocidad por categoría
+    const catStats = {};
+    sold.forEach(p => {
+      const diff = Math.ceil((new Date(p.soldAt) - new Date(p.createdAt)) / (1000 * 60 * 60 * 24));
+      if (!catStats[p.category]) catStats[p.category] = { totalTime: 0, count: 0 };
+      catStats[p.category].totalTime += diff;
+      catStats[p.category].count += 1;
+    });
+
+    const velocityData = Object.keys(catStats).map(cat => ({
+      name: cat,
+      avg: (catStats[cat].totalTime / catStats[cat].count).toFixed(1)
+    })).sort((a, b) => a.avg - b.avg); // De más rápido a más lento
+
+    return { avgDays, velocityData };
+  } catch (e) {
+    return null;
+  }
+}
+
   // --- FUNCIÓN CORREGIDA: ELIMINAR ---
   static deleteProduct(id) {
     try {

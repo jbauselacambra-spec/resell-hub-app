@@ -12,6 +12,7 @@ import ProductsScreen from './screens/ProductsScreen';
 import SoldHistoryScreen from './screens/SoldHistoryScreen'; // NUEVA
 import ProductDetailScreen from './screens/ProductDetailScreen';
 import LogsScreen from './screens/LogsScreen';
+import SoldDetailView from './screens/SoldDetailView';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -44,6 +45,7 @@ export default function App() {
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Main" component={MainTabs} />
           <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
+          <Stack.Screen name="SoldDetail" component={SoldDetailView} />
         </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>
