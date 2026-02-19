@@ -78,19 +78,32 @@ export default function ProductsScreen({ navigation }) {
 
   const runMagiaIA = async () => {
     if (!form.title) return Alert.alert("Aviso", "Escribe un título para que la IA trabaje.");
+    
     setLoadingAI(true);
     try {
       const result = await AIService.analyzeProduct(form.title);
-      setForm({
-        ...form,
-        brand: result.brand || form.brand,
-        price: result.price?.toString() || form.price,
-        description: result.description || form.description,
-        seoTags: result.seoTags || form.seoTags
-      });
-      setErrors({});
+      
+      // Verificamos que 'result' exista y sea un objeto
+      if (result && typeof result === 'object') {
+        setForm(prevForm => ({
+          ...prevForm,
+          // Rellenamos todos los campos solo si la IA los devuelve
+          brand: result.brand || prevForm.brand,
+          title: result.suggestedTitle || prevForm.title,
+          price: result.price ? result.price.toString() : prevForm.price,
+          description: result.description || prevForm.description,
+          seoTags: result.seoTags || prevForm.seoTags
+        }));
+        setErrors({}); // Limpia los errores visuales si la IA tuvo éxito
+      } else {
+        throw new Error("Respuesta de IA no válida");
+      }
     } catch (e) {
-      Alert.alert("Error", "Fallo al conectar con la IA.");
+      console.error("Error detallado en la carga:", e);
+      Alert.alert(
+        "Error de Conexión", 
+        "La IA no pudo procesar el texto. Verifica que tu API KEY sea correcta o intenta con un título más descriptivo."
+      );
     } finally {
       setLoadingAI(false);
     }
