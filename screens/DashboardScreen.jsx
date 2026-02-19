@@ -1,9 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Dimensions, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Dimensions, RefreshControl, TouchableOpacity } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { DatabaseService } from '../services/DatabaseService';
 
 const { width } = Dimensions.get('window');
+
+// MAPA GLOBAL (Pilar 3 - Base de conocimiento)
+const SEASONAL_MAP = {
+  0: { advice: "Céntrate en Abrigos y Tecnología.", tags: ["invierno", "chaqueta", "electrónica", "móvil"] },
+  1: { advice: "Momento de Disfraces y San Valentín.", tags: ["carnaval", "regalo", "joya", "disfraz"] },
+  2: { advice: "Ropa de entretiempo y Deporte.", tags: ["deporte", "zapatillas", "sudadera"] },
+  3: { advice: "Artículos de Jardín y Terraza.", tags: ["hogar", "jardín", "terraza"] },
+  4: { advice: "Preparativos de Comuniones y Bodas.", tags: ["vestido", "traje", "boda", "fiesta"] },
+  5: { advice: "Equipamiento de Verano y Playa.", tags: ["bañador", "piscina", "playa", "gafas"] },
+  6: { advice: "Liquidación de Verano y Viajes.", tags: ["maleta", "viaje", "verano"] },
+  7: { advice: "Preparación 'Vuelta al Cole'.", tags: ["mochila", "libro", "escolar", "estuche"] },
+  8: { advice: "Tecnología y Escritorios.", tags: ["pc", "ordenador", "oficina", "tablet"] },
+  9: { advice: "Ropa de lluvia y Halloween.", tags: ["botas", "disfraz", "halloween", "lluvia"] },
+  10: { advice: "Adelanto de Navidad y Juguetes.", tags: ["juguete", "consola", "regalo", "nintendo", "ps5"] },
+  11: { advice: "Regalos y Ropa de Fiesta.", tags: ["fiesta", "lujo", "reloj", "navidad"] }
+};
 
 export default function DashboardScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
@@ -13,35 +29,67 @@ export default function DashboardScreen({ navigation }) {
     activeCount: 0,
     avgDaysToSell: 0,
     velocityData: [],
-    topCategory: 'N/A'
+    topCategory: 'N/A',
+    coldStockCount: 0,
+    seasonalAdvice: '',
+    personalInsight: 'Analizando...',
+    recommendedCount: 0,
+    targetMonthName: ''
   });
 
   const loadDashboardData = () => {
     const allProducts = DatabaseService.getAllProducts();
     const basicStats = DatabaseService.getStats();
     
-    // Filtrar productos
     const sold = allProducts.filter(p => p.status === 'sold');
     const active = allProducts.filter(p => p.status !== 'sold');
 
-    // Cálculo de Velocidad de Venta (Pilar 1 de tu estrategia)
+    // --- 1. LÓGICA DE ANTICIPACIÓN (Miramos el mes que viene) ---
+    const nextMonthIndex = (new Date().getMonth() + 1) % 12;
+    const monthInfo = SEASONAL_MAP[nextMonthIndex];
+    const targetMonthName = new Date(0, nextMonthIndex).toLocaleDateString('es-ES', { month: 'long' });
+
+    // --- 2. LÓGICA DE APRENDIZAJE PROPIO (Tu Historial) ---
+    // Buscamos qué categorías vendiste tú en ese mes específico en el pasado
+    const historyInTargetMonth = sold.filter(p => {
+      const saleMonth = new Date(p.soldAt).getMonth();
+      return saleMonth === nextMonthIndex;
+    });
+
+    const personalCatCounts = historyInTargetMonth.reduce((acc, p) => {
+      acc[p.category] = (acc[p.category] || 0) + 1;
+      return acc;
+    }, {});
+
+    const bestPersonalCat = Object.keys(personalCatCounts).sort((a, b) => personalCatCounts[b] - personalCatCounts[a])[0] || "Sin historial";
+
+    // --- 3. IDENTIFICAR PRODUCTOS PARA ACCIÓN ---
+    // Productos en stock que coinciden con el mercado global O con tu éxito personal
+    const recommendations = active.filter(p => {
+      const matchesGlobal = monthInfo.tags.some(tag => p.category.toLowerCase().includes(tag) || p.title.toLowerCase().includes(tag));
+      const matchesPersonal = p.category === bestPersonalCat;
+      return matchesGlobal || matchesPersonal;
+    });
+
+    // --- 4. CÁLCULOS GENERALES (Velocidad y Stock Frío) ---
+    const coldStock = active.filter(p => {
+      const diff = Math.ceil((new Date() - new Date(p.createdAt)) / (1000 * 60 * 60 * 24));
+      return diff >= 30;
+    }).length;
+
     let avgDays = 0;
     let categorySpeeds = {};
-
     if (sold.length > 0) {
       const totalDays = sold.reduce((sum, p) => {
-        const start = new Date(p.createdAt);
-        const end = new Date(p.soldAt || new Date());
-        const diff = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+        const diff = Math.ceil((new Date(p.soldAt) - new Date(p.createdAt)) / (1000 * 60 * 60 * 24));
         return sum + Math.max(0, diff);
       }, 0);
       avgDays = (totalDays / sold.length).toFixed(1);
 
-      // Agrupar por categoría para ver cuál rota más rápido
       sold.forEach(p => {
         const diff = Math.ceil((new Date(p.soldAt) - new Date(p.createdAt)) / (1000 * 60 * 60 * 24));
         if (!categorySpeeds[p.category]) categorySpeeds[p.category] = { total: 0, count: 0 };
-        categorySpeeds[p.category].total += Math.max(0, diff);
+        categorySpeeds[p.category].total += diff;
         categorySpeeds[p.category].count += 1;
       });
     }
@@ -49,7 +97,7 @@ export default function DashboardScreen({ navigation }) {
     const velocityArray = Object.keys(categorySpeeds).map(cat => ({
       name: cat,
       avg: (categorySpeeds[cat].total / categorySpeeds[cat].count).toFixed(1)
-    })).sort((a, b) => a.avg - b.avg); // Los más rápidos primero
+    })).sort((a, b) => a.avg - b.avg);
 
     setStats({
       totalRevenue: basicStats.revenue,
@@ -57,7 +105,12 @@ export default function DashboardScreen({ navigation }) {
       activeCount: active.length,
       avgDaysToSell: avgDays,
       velocityData: velocityArray,
-      topCategory: velocityArray.length > 0 ? velocityArray[0].name : 'N/A'
+      topCategory: velocityArray.length > 0 ? velocityArray[0].name : 'N/A',
+      coldStockCount: coldStock,
+      seasonalAdvice: monthInfo.advice,
+      personalInsight: bestPersonalCat,
+      recommendedCount: recommendations.length,
+      targetMonthName: targetMonthName
     });
   };
 
@@ -76,17 +129,16 @@ export default function DashboardScreen({ navigation }) {
   return (
     <ScrollView 
       style={styles.container} 
-      showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       <View style={styles.header}>
         <Text style={styles.dateText}>{new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
-        <Text style={styles.title}>Análisis de Negocio</Text>
+        <Text style={styles.title}>Smart Business</Text>
       </View>
 
-      {/* TARJETA PRINCIPAL: INGRESOS */}
+      {/* TARJETA INGRESOS */}
       <View style={styles.mainCard}>
-        <Text style={styles.mainLabel}>INGRESOS TOTALES</Text>
+        <Text style={styles.mainLabel}>BALANCE TOTAL</Text>
         <Text style={styles.mainValue}>{stats.totalRevenue}€</Text>
         <View style={styles.dividerLight} />
         <View style={styles.mainRow}>
@@ -96,97 +148,113 @@ export default function DashboardScreen({ navigation }) {
           </View>
           <View style={styles.verticalDivider} />
           <View>
-            <Text style={styles.subLabel}>Más Rápido</Text>
+            <Text style={styles.subLabel}>Tu categoría Top</Text>
             <Text style={styles.subValue}>{stats.topCategory}</Text>
           </View>
         </View>
       </View>
 
-      {/* MÉTRICAS DE INVENTARIO */}
-      <Text style={styles.sectionTitle}>Estado del Flujo</Text>
-      <View style={styles.row}>
-        <View style={[styles.miniCard, { borderLeftColor: '#00D9A3', borderLeftWidth: 4 }]}>
-          <Text style={styles.miniLabel}>VENDIDOS</Text>
-          <Text style={styles.miniValue}>{stats.soldCount}</Text>
-        </View>
-        <View style={[styles.miniCard, { borderLeftColor: '#FF6B35', borderLeftWidth: 4 }]}>
-          <Text style={styles.miniLabel}>EN STOCK</Text>
-          <Text style={styles.miniValue}>{stats.activeCount}</Text>
-        </View>
-      </View>
-
-      {/* PILAR 1: ANÁLISIS DE VELOCIDAD POR CATEGORÍA */}
-      <Text style={styles.sectionTitle}>Rotación por Categoría (Días)</Text>
-      <View style={styles.analysisCard}>
-        {stats.velocityData.length > 0 ? stats.velocityData.map((item, i) => (
-          <View key={i} style={styles.catRow}>
-            <View style={styles.catInfo}>
-              <Icon name="zap" size={14} color={item.avg < 7 ? "#00D9A3" : "#999"} />
-              <Text style={styles.catName} numberOfLines={1}>{item.name}</Text>
-            </View>
-            <View style={styles.progressBg}>
-              <View 
-                style={[
-                  styles.progressFill, 
-                  { 
-                    width: `${Math.min(100, (item.avg / 30) * 100)}%`,
-                    backgroundColor: item.avg < 7 ? '#00D9A3' : '#004E89'
-                  }
-                ]} 
-              />
-            </View>
-            <Text style={styles.catValue}>{item.avg}d</Text>
+      {/* PILAR 3 + 4: ESTRATEGIA HÍBRIDA */}
+      <Text style={styles.sectionTitle}>Estrategia de Anticipación</Text>
+      <View style={styles.strategyCard}>
+        <View style={styles.strategyHeader}>
+          <View style={styles.monthBadge}>
+            <Text style={styles.monthBadgeText}>PLANIFICAR {stats.targetMonthName}</Text>
           </View>
-        )) : (
-          <Text style={styles.noData}>Vende productos para ver el análisis de velocidad</Text>
+          <Icon name="zap" size={18} color="#FFD700" />
+        </View>
+        
+        <Text style={styles.strategyAdvice}>{stats.seasonalAdvice}</Text>
+        
+        <View style={styles.personalInsightBox}>
+          <Icon name="activity" size={14} color="#4EA8DE" />
+          <Text style={styles.personalInsightText}>
+            En tu historial, <Text style={{fontWeight:'800'}}>"{stats.personalInsight}"</Text> es lo que mejor te funciona en {stats.targetMonthName}.
+          </Text>
+        </View>
+
+        {stats.recommendedCount > 0 ? (
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={() => navigation.navigate('Inventario')} // Asegúrate que el nombre coincide con tu Tab
+          >
+            <Text style={styles.actionButtonText}>
+              Publicar/Actualizar {stats.recommendedCount} productos ahora
+            </Text>
+            <Icon name="arrow-right" size={16} color="#FFF" />
+          </TouchableOpacity>
+        ) : (
+          <Text style={styles.noStockText}>No tienes stock para la demanda de {stats.targetMonthName}.</Text>
         )}
       </View>
 
-      {/* CONSEJO ESTRATÉGICO */}
-      <View style={styles.adviceCard}>
-        <Icon name="trending-up" size={20} color="#FF6B35" />
-        <Text style={styles.adviceText}>
-          {stats.avgDaysToSell > 15 
-            ? "Tu dinero tarda más de 2 semanas en volver. Considera ajustar precios en categorías lentas." 
-            : "¡Excelente rotación! Tienes un flujo de caja muy saludable."}
+      {/* ALERTAS DE STOCK FRÍO */}
+      <View style={[styles.alertCard, { borderColor: stats.coldStockCount > 0 ? '#FF6B35' : '#00D9A3' }]}>
+        <Icon name="alert-triangle" size={20} color={stats.coldStockCount > 0 ? '#FF6B35' : '#00D9A3'} />
+        <Text style={styles.alertText}>
+          {stats.coldStockCount > 0 
+            ? `Atención: ${stats.coldStockCount} productos estancados (+30 días).`
+            : "¡Inventario optimizado! Sin productos estancados."}
         </Text>
       </View>
-      
+
+      {/* ROTACIÓN POR CATEGORÍA */}
+      <Text style={styles.sectionTitle}>Días para vender</Text>
+      <View style={styles.analysisCard}>
+        {stats.velocityData.map((item, i) => (
+          <View key={i} style={styles.catRow}>
+            <Text style={styles.catName}>{item.name}</Text>
+            <View style={styles.progressBg}>
+              <View style={[styles.progressFill, { 
+                width: `${Math.min(100, (item.avg / 30) * 100)}%`,
+                backgroundColor: item.avg < 7 ? '#00D9A3' : '#4EA8DE' 
+              }]} />
+            </View>
+            <Text style={styles.catValue}>{item.avg}d</Text>
+          </View>
+        ))}
+      </View>
+
       <View style={{ height: 100 }} />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F4F7FA' },
+  container: { flex: 1, backgroundColor: '#F8F9FA' },
   header: { paddingHorizontal: 25, paddingTop: 60, marginBottom: 20 },
   dateText: { color: '#999', fontSize: 13, textTransform: 'uppercase', fontWeight: '700' },
   title: { fontSize: 28, fontWeight: '900', color: '#1A1A2E' },
   
-  mainCard: { marginHorizontal: 25, backgroundColor: '#1A1A2E', borderRadius: 30, padding: 25, elevation: 10, shadowColor: '#1A1A2E', shadowOpacity: 0.3, shadowRadius: 10 },
-  mainLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '800', letterSpacing: 1 },
-  mainValue: { color: '#FFF', fontSize: 42, fontWeight: '900', marginVertical: 5 },
+  mainCard: { marginHorizontal: 25, backgroundColor: '#1A1A2E', borderRadius: 30, padding: 25, elevation: 8 },
+  mainLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '800' },
+  mainValue: { color: '#FFF', fontSize: 38, fontWeight: '900', marginVertical: 5 },
   dividerLight: { height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 15 },
-  mainRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  mainRow: { flexDirection: 'row', justifyContent: 'space-between' },
   verticalDivider: { width: 1, height: 30, backgroundColor: 'rgba(255,255,255,0.1)' },
-  subLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: '700' },
-  subValue: { color: '#00D9A3', fontSize: 16, fontWeight: '800' },
+  subLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: '700' },
+  subValue: { color: '#00D9A3', fontSize: 15, fontWeight: '800' },
 
-  sectionTitle: { marginHorizontal: 25, marginTop: 30, marginBottom: 15, fontSize: 15, fontWeight: '800', color: '#1A1A2E', textTransform: 'uppercase', letterSpacing: 1 },
-  row: { flexDirection: 'row', marginHorizontal: 25, gap: 15 },
-  miniCard: { flex: 1, backgroundColor: '#FFF', padding: 20, borderRadius: 20, elevation: 2 },
-  miniLabel: { fontSize: 11, color: '#999', fontWeight: '800' },
-  miniValue: { fontSize: 28, fontWeight: '900', color: '#1A1A2E', marginTop: 5 },
+  sectionTitle: { marginHorizontal: 25, marginTop: 30, marginBottom: 15, fontSize: 14, fontWeight: '800', color: '#1A1A2E', textTransform: 'uppercase' },
+  
+  strategyCard: { marginHorizontal: 25, backgroundColor: '#FFF', padding: 20, borderRadius: 25, elevation: 4 },
+  strategyHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  monthBadge: { backgroundColor: '#4EA8DE20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  monthBadgeText: { color: '#4EA8DE', fontSize: 10, fontWeight: '800' },
+  strategyAdvice: { fontSize: 16, fontWeight: '800', color: '#1A1A2E', marginBottom: 12 },
+  personalInsightBox: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 15, backgroundColor: '#F8F9FA', padding: 10, borderRadius: 12 },
+  personalInsightText: { fontSize: 12, color: '#555', flex: 1, lineHeight: 18 },
+  actionButton: { backgroundColor: '#1A1A2E', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', padding: 15, borderRadius: 15, gap: 10 },
+  actionButtonText: { color: '#FFF', fontWeight: '700', fontSize: 12 },
+  noStockText: { color: '#999', fontSize: 12, fontStyle: 'italic', textAlign: 'center' },
+
+  alertCard: { marginHorizontal: 25, marginTop: 15, backgroundColor: '#FFF', padding: 15, borderRadius: 20, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1 },
+  alertText: { fontSize: 13, fontWeight: '600', color: '#444' },
 
   analysisCard: { marginHorizontal: 25, backgroundColor: '#FFF', padding: 20, borderRadius: 25, elevation: 2 },
   catRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
-  catInfo: { width: 100, flexDirection: 'row', alignItems: 'center', gap: 5 },
-  catName: { fontSize: 13, fontWeight: '700', color: '#444' },
-  progressBg: { flex: 1, height: 6, backgroundColor: '#F0F0F0', borderRadius: 3, marginHorizontal: 10, overflow: 'hidden' },
+  catName: { width: 85, fontSize: 12, fontWeight: '700', color: '#666' },
+  progressBg: { flex: 1, height: 6, backgroundColor: '#F0F0F0', borderRadius: 3, marginHorizontal: 10 },
   progressFill: { height: '100%', borderRadius: 3 },
-  catValue: { width: 40, fontSize: 13, fontWeight: '800', color: '#1A1A2E', textAlign: 'right' },
-  noData: { textAlign: 'center', color: '#999', padding: 10, fontSize: 13 },
-
-  adviceCard: { marginHorizontal: 25, marginTop: 25, backgroundColor: '#FFF', padding: 20, borderRadius: 20, flexDirection: 'row', gap: 15, alignItems: 'center', borderStyle: 'dashed', borderWidth: 1, borderColor: '#DDD' },
-  adviceText: { flex: 1, fontSize: 13, color: '#666', lineHeight: 18, fontWeight: '600' }
+  catValue: { width: 35, fontSize: 12, fontWeight: '800', color: '#1A1A2E', textAlign: 'right' }
 });
