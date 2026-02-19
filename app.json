@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "scheme": "resellhub",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
@@ -16,19 +17,19 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.yourcompany.resellhub"
+      "bundleIdentifier": "com.perdigon85.resellhub"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FF6B35"
       },
-      "package": "com.yourcompany.resellhub",
+      "package": "com.perdigon85.resellhub",
       "permissions": [
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE",
         "CAMERA",
-        "NOTIFICATIONS"
+        "POST_NOTIFICATIONS"
       ],
       "versionCode": 1
     },
@@ -36,22 +37,23 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/notification-icon.png",
-          "color": "#FF6B35"
-        }        
-        
-      ],
-      [
+  [
+    "expo-notifications",
+    {
+      "icon": "./assets/icon.png",
+      "color": "#FF6B35"
+    }
+  ],
+  [
     "expo-image-picker",
     {
-      "photosPermission": "Permite que ResellHub acceda a tus fotos para subir productos.",
-      "cameraPermission": "Permite que ResellHub use la cámara para fotografiar tus productos."
+      "photosPermission": "Permite acceso a fotos.",
+      "cameraPermission": "Permite uso de cámara."
     }
-  ]
-    ],
+  ],
+  "expo-asset",
+  "expo-font"
+],
     "extra": {
       "eas": {
         "projectId": "7885857d-7423-415c-8683-cac090ec5f79"

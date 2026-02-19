@@ -1,35 +1,38 @@
-class LogService {
-  static logs = [];
-  static listeners = [];
+import { MMKV } from 'react-native-mmkv';
 
-  static add(message) {
-    const entry = {
-      id: Date.now().toString() + Math.random(),
-      time: new Date().toLocaleTimeString(),
-      text: message,
-      type: message.includes('❌') ? 'error' : message.includes('✅') ? 'success' : 'info'
+const storage = new MMKV();
+const LOGS_KEY = 'app_logs';
+
+const LogService = { // Quitamos el 'export' de aquí para usar default al final
+  // Añadimos 'add' como alias de 'log' para que DatabaseService no explote
+  add: (message, type = 'info') => LogService.log(message, type),
+
+  log: (message, type = 'info') => {
+    const newLog = {
+      id: Date.now().toString(),
+      timestamp: new Date().toLocaleString(),
+      message,
+      type, 
     };
-    this.logs.unshift(entry);
-    console.log(`[LOG] ${message}`);
-    
-    // Limitar a 100 logs para no saturar la memoria
-    if (this.logs.length > 100) this.logs.pop();
-    
-    // Avisar a la pantalla si está abierta para que se actualice
-    this.listeners.forEach(listener => listener(this.logs));
-  }
 
-  static subscribe(listener) {
-    this.listeners.push(listener);
-    return () => {
-      this.listeners = this.listeners.filter(l => l !== listener);
-    };
-  }
+    try {
+      const existingLogsRaw = storage.getString(LOGS_KEY);
+      const existingLogs = existingLogsRaw ? JSON.parse(existingLogsRaw) : [];
+      const updatedLogs = [newLog, ...existingLogs].slice(0, 100);
+      storage.set(LOGS_KEY, JSON.stringify(updatedLogs));
+      console.log(`[${type.toUpperCase()}] ${message}`);
+    } catch (e) {
+      console.error("Error en LogService:", e);
+    }
+  },
+  info: (msg) => LogService.log(msg, 'info'),
+  success: (msg) => LogService.log(msg, 'success'),
+  error: (msg) => LogService.log(msg, 'error'),
+  getLogs: () => {
+    const logs = storage.getString(LOGS_KEY);
+    return logs ? JSON.parse(logs) : [];
+  },
+  clear: () => storage.set(LOGS_KEY, JSON.stringify([]))
+};
 
-  static clear() {
-    this.logs = [];
-    this.listeners.forEach(listener => listener(this.logs));
-  }
-}
-
-export default LogService;
+export default LogService; // Exportación por defecto para asegurar la carga

@@ -100,10 +100,11 @@ export class ImageProcessingService {
     }
   }
 
-  /**
-   * Selecciona imagen desde la galería
+
+/**
+   * Selecciona imágenes desde la galería (Múltiple)
    */
-  static async pickImageFromGallery() {
+  static async pickImagesFromGallery() {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       
@@ -114,12 +115,14 @@ export class ImageProcessingService {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: 'images',
-        allowsMultipleSelection: false,
+        allowsMultipleSelection: true, // Habilitamos selección múltiple
+        selectionLimit: 5, // Límite de fotos (opcional)
         quality: 0.8,
       });
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        return result.assets[0];
+      if (!result.canceled && result.assets) {
+        LogService.add(`📸 ${result.assets.length} fotos seleccionadas de galería`);
+        return result.assets; // Devolvemos el array completo de assets
       }
       return null;
     } catch (error) {
