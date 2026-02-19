@@ -159,6 +159,16 @@ export default function ProductsScreen({ navigation }) {
         <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
         <Text style={styles.cardBrand}>{item.brand}</Text>
       </View>
+      <View style={{flexDirection: 'row', gap: 10, marginTop: 4, opacity: 0.6}}>
+  <View style={{flexDirection: 'row', alignItems: 'center', gap: 3}}>
+    <Icon name="eye" size={10} color="#666" />
+    <Text style={{fontSize: 10}}>{item.views || 0}</Text>
+  </View>
+  <View style={{flexDirection: 'row', alignItems: 'center', gap: 3}}>
+    <Icon name="heart" size={10} color="#666" />
+    <Text style={{fontSize: 10}}>{item.favorites || 0}</Text>
+  </View>
+</View>
     </TouchableOpacity>
   );
 

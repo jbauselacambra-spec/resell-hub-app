@@ -192,6 +192,24 @@ export default function ProductDetailScreen({ route, navigation }) {
                   <Text style={styles.brandText}>{product.brand}</Text>
                   <View style={styles.tagChip}><Text style={styles.tagChipText}>{product.condition || 'Usado'}</Text></View>
                 </View>
+                {/* Estadísticas de Vinted */}
+                <View style={{
+                  flexDirection: 'row', 
+                  backgroundColor: '#F8F9FA', 
+                  padding: 12, 
+                  borderRadius: 15, 
+                  marginVertical: 10,
+                  justifyContent: 'space-around'
+                }}>
+                  <View style={{flexDirection: 'row', alignItems: 'center', gap: 5}}>
+                    <Icon name="eye" size={14} color="#666" />
+                    <Text style={{fontSize: 12, color: '#444', fontWeight: 'bold'}}>{product.views || 0} visitas</Text>
+                  </View>
+                  <View style={{flexDirection: 'row', alignItems: 'center', gap: 5}}>
+                    <Icon name="heart" size={14} color="#FF4D4D" />
+                    <Text style={{fontSize: 12, color: '#444', fontWeight: 'bold'}}>{product.favorites || 0} favoritos</Text>
+                  </View>
+                </View>
                 <Text style={styles.price}>{product.price}€</Text>
               </View>
               <Text style={styles.title}>{product.title}</Text>
