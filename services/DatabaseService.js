@@ -1,6 +1,30 @@
 import { MMKV } from 'react-native-mmkv';
 import LogService from './LogService';
 
+
+const CATEGORY_DICTIONARY = {
+  'Juguetes': ['tuc tuc', 'lego', 'playmobil', 'muñeca', 'juguete', 'aeropuerto', 'coche', 'pista'],
+  'Abrigo': ['abrigo', 'chaqueta', 'parka', 'plumífero', 'gabardina', 'sfera'],
+  'Camisetas': ['camiseta', 'top', 't-shirt', 'tshirt'],
+  'Pantalones': ['pantalón', 'pantalon', 'vaquero', 'jean', 'short', 'bermuda'],
+  'Calzado': ['zapatos', 'zapatillas', 'botas', 'deportivas', 'tenis', 'sandalias'],
+  'Libros': ['libro', 'cómic', 'novela', 'tapa dura', 'lectura'],
+  'Accesorios': ['bolso', 'mochila', 'cinturón', 'gafas', 'reloj', 'cartera'],
+  'Lotes': ['lote', 'pack', 'conjunto', 'set'],
+  'Sudaderas': ['sudadera', 'hoodie', 'jersey', 'suéter', 'pull'],
+  'Vestidos': ['vestido', 'falda', 'mono']
+};
+
+// Función auxiliar para detectar categoría
+const detectCategory = (text) => {
+  if (!text) return 'Otros';
+  const cleanText = text.toLowerCase();
+  for (const [category, keywords] of Object.entries(CATEGORY_DICTIONARY)) {
+    if (keywords.some(k => cleanText.includes(k))) return category;
+  }
+  return 'Otros';
+};
+
 let storage;
 try {
   storage = new MMKV();
@@ -24,6 +48,9 @@ export class DatabaseService {
     STATS: 'stats'
   };
 
+  
+
+
   // --- MÉTODOS DE APOYO ---
 
   static getAllProducts() {
@@ -38,6 +65,7 @@ export class DatabaseService {
       return [];
     }
   }
+  
 
   static saveAllProducts(products) {
     try {
@@ -146,44 +174,39 @@ export class DatabaseService {
     }
   }
 
-  static async importFromVinted(newProducts) {
-    console.log("[EAS_LOG] >>> INICIO IMPORTACIÓN MASIVA");
-    try {
-      const currentProducts = this.getAllProducts();
-      const productMap = new Map();
+static async importFromVinted(newProducts) {
+  try {
+    const currentProducts = this.getAllProducts();
+    const productMap = new Map();
+    currentProducts.forEach(p => productMap.set(String(p.id), p));
+    
+    let addedCount = 0;
+    newProducts.forEach(p => {
+      // 1. SALTAMOS productos con IDs inválidos (como "vinted_image")
+      if (!p.id || String(p.id).includes('image')) return;
+
+      const pId = String(p.id);
+      if (!productMap.has(pId)) addedCount++;
       
-      // Mapear actuales
-      currentProducts.forEach(p => productMap.set(String(p.id), p));
-      
-      let addedCount = 0;
-      newProducts.forEach(p => {
-        const pId = String(p.id);
-        if (!productMap.has(pId)) addedCount++;
-        
-        productMap.set(pId, {
-          ...p,
-          price: Number(p.price) || 0,
-          views: Number(p.views) || 0,
-          favorites: Number(p.favorites) || 0,
-          createdAt: p.createdAt || new Date().toISOString()
-        });
+      const originalPrice = Number(p.price) || 0;
+      const detectedCat = detectCategory(`${p.title} ${p.description}`);
+
+      productMap.set(pId, {
+        ...p,
+        category: p.category || detectedCat,
+        price: originalPrice,
+        // Si está vendido, asegurar que soldPrice sea el original si no viene otro
+        soldPrice: p.status === 'sold' ? (p.soldPrice || originalPrice) : null,
+        soldAt: p.status === 'sold' ? (p.soldDate || new Date().toISOString()) : null,
       });
+    });
 
-      const finalList = Array.from(productMap.values());
-      const success = this.saveAllProducts(finalList);
-
-      if (success) {
-        console.log(`[EAS_LOG] >>> IMPORTACIÓN OK: ${addedCount} nuevos.`);
-        LogService.add(`📥 Importación Vinted: ${addedCount} nuevos productos`, "success");
-        return { success: true, count: addedCount };
-      }
-      throw new Error("Error al escribir en disco");
-    } catch (e) {
-      console.error("[EAS_LOG] ERROR_IMPORT:", e.message);
-      LogService.add("❌ Fallo de importación: " + e.message, "error");
-      return { success: false, error: e.message };
-    }
+    this.saveAllProducts(Array.from(productMap.values()));
+    return { success: true, count: addedCount };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
+}
 
   // --- ESTADÍSTICAS ---
 

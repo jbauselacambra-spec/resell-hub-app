@@ -3,7 +3,6 @@ import {
   View, Text, FlatList, StyleSheet, TouchableOpacity, 
   TextInput, Alert, Clipboard, KeyboardAvoidingView, Platform 
 } from 'react-native';
-// REVISA QUE ESTAS RUTAS SEAN LAS CORRECTAS EN TU PROYECTO
 import LogService from '../services/LogService'; 
 import { DatabaseService } from '../services/DatabaseService';
 
@@ -11,19 +10,61 @@ export default function LogsScreen() {
   const [logs, setLogs] = useState([]);
   const [jsonInput, setJsonInput] = useState('');
   
+  // Script restaurado con los selectores exactos de Vinted para visitas/favoritos
   const scriptConsola = `(function(){
-    const items = document.querySelectorAll('[data-testid^="product-item-id-"]');
-    const products = Array.from(items).map(c => ({
-      id: "vinted_" + (c.getAttribute('data-testid')?.split('-').pop() || Math.random()),
-      title: c.querySelector('img')?.alt?.split(',')[0] || "Producto",
-      price: parseFloat(c.innerText.match(/(\d+[,.]\d+)/)?.[0]?.replace(',', '.') || 0),
-      status: 'available',
+  const items = document.querySelectorAll('[data-testid^="product-item-id-"][data-testid$="--container"], .new-item-box__container');
+  
+  const products = Array.from(items).map((container) => {
+    const img = container.querySelector('img');
+    if (!img) return null;
+
+    const rawAlt = img.alt || ""; 
+    const parts = rawAlt.split(', ');
+    
+    const vintedId = container.getAttribute('data-testid')?.replace('product-item-id-', '') || Math.random();
+    
+    // Selectores originales que sí capturaban los datos
+    const visitsText = container.querySelector('[data-testid*="--description-title"]')?.innerText || "0 visitas";
+    const favsText = container.querySelector('[data-testid*="--description-subtitle"]')?.innerText || "0 favoritos";
+    
+    const views = parseInt(visitsText.replace(/[^0-9]/g, '')) || 0;
+    const favorites = parseInt(favsText.replace(/[^0-9]/g, '')) || 0;
+
+    const statusText = container.querySelector('[data-testid*="--status-text"]')?.innerText || "";
+    const isSold = statusText.toLowerCase().includes('vendido');
+
+    let title = parts[0] || "Producto";
+    let brand = "Genérico";
+    let price = 0;
+
+    parts.forEach(part => {
+      if (part.toLowerCase().includes('marca:')) brand = part.replace(/marca: /i, '');
+      if (part.includes('€')) {
+        const val = part.replace(/[^0-9,.]/g, '').replace(',', '.');
+        price = parseFloat(val);
+      }
+    });
+
+    return {
+      id: "vinted_" + vintedId,
+      title: title.trim(),
+      brand: brand.trim(),
+      price: isNaN(price) ? 0 : price,
+      description: title.trim(),
+      images: [img.src],
+      status: isSold ? 'sold' : 'available',
+      views: views,
+      favorites: favorites,
+      soldDate: isSold ? new Date().toISOString().split('T')[0] : null,
       createdAt: new Date().toISOString()
-    }));
-    console.log(JSON.stringify(products));
-    copy(JSON.stringify(products));
-    alert('Copiados ' + products.length + ' productos');
-  })();`;
+    };
+  }).filter(p => p !== null);
+
+  const uniqueProducts = Array.from(new Map(products.map(p => [p.id, p])).values());
+  console.log(JSON.stringify(uniqueProducts, null, 2));
+  copy(JSON.stringify(uniqueProducts, null, 2));
+  alert('✅ ' + uniqueProducts.length + ' productos copiados con estadísticas.');
+})();`;
 
   useEffect(() => {
     const updateLogs = () => setLogs(LogService.getLogs());
@@ -33,28 +74,47 @@ export default function LogsScreen() {
   }, []);
 
   const handleImport = async () => {
-    if (!jsonInput.trim()) return Alert.alert("Error", "Pega el JSON");
+    if (!jsonInput.trim()) return Alert.alert("Aviso", "Pega el JSON primero");
     try {
       const data = JSON.parse(jsonInput);
       const result = await DatabaseService.importFromVinted(Array.isArray(data) ? data : [data]);
       if (result.success) {
         setJsonInput('');
-        Alert.alert("Éxito", `Importados: ${result.count}`);
+        Alert.alert("Éxito", `Procesados: ${Array.isArray(data) ? data.length : 1} productos.`);
       }
     } catch (e) {
-      Alert.alert("Error", "JSON inválido");
+      Alert.alert("Error de Formato", "Asegúrate de copiar el bloque completo de la consola.");
     }
+  };
+
+  const handleClearDatabase = () => {
+    Alert.alert(
+      "🔥 Borrar Todo",
+      "¿Eliminar todos los productos?",
+      [
+        { text: "No", style: "cancel" },
+        { 
+          text: "Sí, borrar", 
+          style: "destructive", 
+          onPress: async () => {
+            await DatabaseService.clearDatabase();
+            LogService.add("Base de datos reseteada", "info");
+            setLogs(LogService.getLogs());
+          } 
+        }
+      ]
+    );
   };
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.container}>
       <View style={styles.importBox}>
-        <Text style={styles.sectionTitle}>IMPORTADOR VINTED</Text>
+        <Text style={styles.sectionTitle}>EXTRACTOR VINTED</Text>
         <TouchableOpacity style={styles.scriptBtn} onPress={() => {
           Clipboard.setString(scriptConsola);
-          Alert.alert("Copiado", "Pégalo en la consola de Vinted");
+          Alert.alert("🚀 Script Copiado", "Pégalo en la consola de Vinted.");
         }}>
-          <Text style={styles.scriptBtnText}>📋 COPIAR SCRIPT</Text>
+          <Text style={styles.scriptBtnText}>📋 COPIAR SCRIPT (CON ESTADÍSTICAS)</Text>
         </TouchableOpacity>
         
         <TextInput
@@ -64,10 +124,15 @@ export default function LogsScreen() {
           multiline
           value={jsonInput}
           onChangeText={setJsonInput}
+          autoCorrect={false}
         />
 
         <TouchableOpacity style={styles.importBtn} onPress={handleImport}>
           <Text style={styles.importBtnText}>CARGAR PRODUCTOS</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.clearDbBtn} onPress={handleClearDatabase}>
+          <Text style={styles.clearDbText}>RESETEAR BASE DE DATOS</Text>
         </TouchableOpacity>
       </View>
 
@@ -98,13 +163,15 @@ export default function LogsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000', padding: 15, paddingTop: 50 },
-  importBox: { backgroundColor: '#111', padding: 20, borderRadius: 20, marginBottom: 20 },
+  importBox: { backgroundColor: '#111', padding: 20, borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: '#222' },
   sectionTitle: { color: '#666', fontSize: 10, fontWeight: 'bold', marginBottom: 10, letterSpacing: 1 },
-  scriptBtn: { backgroundColor: '#222', padding: 10, borderRadius: 10, marginBottom: 10, alignItems: 'center' },
-  scriptBtnText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  input: { backgroundColor: '#000', color: '#00C851', borderRadius: 10, padding: 10, height: 100, textAlignVertical: 'top' },
-  importBtn: { backgroundColor: '#00C851', padding: 15, borderRadius: 10, marginTop: 10, alignItems: 'center' },
+  scriptBtn: { backgroundColor: '#222', padding: 12, borderRadius: 12, marginBottom: 12, alignItems: 'center' },
+  scriptBtnText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
+  input: { backgroundColor: '#000', color: '#00C851', borderRadius: 12, padding: 12, height: 100, textAlignVertical: 'top', fontSize: 12 },
+  importBtn: { backgroundColor: '#00C851', padding: 15, borderRadius: 12, marginTop: 12, alignItems: 'center' },
   importBtnText: { color: '#000', fontWeight: 'bold' },
+  clearDbBtn: { marginTop: 15, alignSelf: 'center' },
+  clearDbText: { color: '#444', fontSize: 10, fontWeight: 'bold', textDecorationLine: 'underline' },
   logHeader: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 5, marginBottom: 10 },
   item: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#111' },
   time: { color: '#444', fontSize: 9 },
