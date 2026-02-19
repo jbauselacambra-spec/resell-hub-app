@@ -1,69 +1,74 @@
-import React from 'react';
-import { View, Text, ScrollView, Image, StyleSheet, Dimensions } from 'react-native';
-import LogService from '../services/LogService';
+import React, { useState } from 'react';
+import { 
+  View, Text, ScrollView, Image, StyleSheet, Dimensions, 
+  TouchableOpacity, Platform 
+} from 'react-native';
+import Icon from 'react-native-vector-icons/Feather';
 
 const { width } = Dimensions.get('window');
 
-export default function ProductDetailScreen({ route }) {
-  // Recibimos el producto por parámetros de navegación
+export default function ProductDetailScreen({ route, navigation }) {
   const { product } = route.params || {};
+  const [activeIndex, setActiveIndex] = useState(0);
 
-  if (!product) {
-    LogService.error("Fallo al cargar detalle: No se recibieron datos del producto");
-    return (
-      <View style={styles.center}><Text>Error al cargar producto</Text></View>
-    );
-  }
+  if (!product) return null;
+
+  const handleScroll = (event) => {
+    const index = Math.round(event.nativeEvent.contentOffset.x / width);
+    setActiveIndex(index);
+  };
 
   return (
-    <ScrollView style={styles.container}>
-      {/* Carrusel de Imágenes */}
-      <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
-        {product.images && product.images.length > 0 ? (
-          product.images.map((uri, i) => (
-            <Image key={i} source={{ uri }} style={styles.image} />
-          ))
-        ) : (
-          <View style={[styles.image, styles.noImage]}><Text>Sin imágenes</Text></View>
-        )}
-      </ScrollView>
+    <View style={styles.container}>
+      <ScrollView showsVerticalScrollIndicator={false}>
+        <View style={styles.carouselWrapper}>
+          <ScrollView 
+            horizontal pagingEnabled 
+            showsHorizontalScrollIndicator={false}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+          >
+            {product.images?.map((uri, i) => (
+              <Image key={i} source={{ uri }} style={styles.mainImage} />
+            ))}
+          </ScrollView>
 
-      <View style={styles.infoContainer}>
-        <Text style={styles.price}>{product.price}€</Text>
-        <Text style={styles.title}>{product.title}</Text>
-        
-        <View style={styles.divider} />
-        
-        <Text style={styles.sectionTitle}>Descripción</Text>
-        <Text style={styles.description}>{product.description || 'Sin descripción disponible.'}</Text>
+          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+            <Icon name="chevron-left" size={28} color="#1A1A2E" />
+          </TouchableOpacity>
 
-        <View style={styles.divider} />
-
-        <Text style={styles.sectionTitle}>Etiquetas SEO (Meta-data)</Text>
-        <View style={styles.tagContainer}>
-          {product.tags.split(',').map((tag, i) => (
-            <View key={i} style={styles.tag}>
-              <Text style={styles.tagText}>#{tag.trim()}</Text>
-            </View>
-          ))}
+          <View style={styles.pagination}>
+            {product.images?.map((_, i) => (
+              <View key={i} style={[styles.dot, activeIndex === i ? styles.activeDot : styles.inactiveDot]} />
+            ))}
+          </View>
         </View>
-      </View>
-    </ScrollView>
+
+        <View style={styles.content}>
+          <Text style={styles.categoryBadge}>{product.category}</Text>
+          <Text style={styles.title}>{product.title}</Text>
+          <Text style={styles.price}>{product.price}€</Text>
+          <View style={styles.divider} />
+          <Text style={styles.descriptionText}>{product.description}</Text>
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  image: { width: width, height: 350, resizeMode: 'cover' },
-  noImage: { backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' },
-  infoContainer: { padding: 20 },
-  price: { fontSize: 28, fontWeight: 'bold', color: '#FF6B35', marginBottom: 5 },
-  title: { fontSize: 22, fontWeight: '600', color: '#333' },
-  divider: { height: 1, backgroundColor: '#eee', marginVertical: 15 },
-  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#666', marginBottom: 10 },
-  description: { fontSize: 15, color: '#444', lineHeight: 22 },
-  tagContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  tag: { backgroundColor: '#f0faff', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15, borderWidth: 1, borderColor: '#bcdff1' },
-  tagText: { color: '#2a7596', fontSize: 12, fontWeight: '500' }
+  container: { flex: 1, backgroundColor: '#FFF' },
+  carouselWrapper: { position: 'relative', height: 400 },
+  mainImage: { width: width, height: 400, resizeMode: 'cover' },
+  backBtn: { position: 'absolute', top: 50, left: 20, backgroundColor: '#FFF', padding: 10, borderRadius: 15 },
+  pagination: { position: 'absolute', bottom: 25, flexDirection: 'row', alignSelf: 'center' },
+  dot: { height: 8, borderRadius: 4, marginHorizontal: 4 },
+  activeDot: { width: 22, backgroundColor: '#FF6B35' },
+  inactiveDot: { width: 8, backgroundColor: '#FFF' },
+  content: { padding: 25, marginTop: -30, backgroundColor: '#FFF', borderTopLeftRadius: 30, borderTopRightRadius: 30 },
+  categoryBadge: { color: '#FF6B35', fontWeight: 'bold', marginBottom: 10 },
+  title: { fontSize: 26, fontWeight: '800' },
+  price: { fontSize: 32, fontWeight: '900', color: '#FF6B35' },
+  divider: { height: 1, backgroundColor: '#F0F0F0', marginVertical: 20 },
+  descriptionText: { fontSize: 16, color: '#4A4A4A', lineHeight: 24 }
 });
