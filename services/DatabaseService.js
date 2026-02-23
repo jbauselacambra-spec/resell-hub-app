@@ -393,4 +393,118 @@ static updatePriceWithHistory(productId, newPrice) {
   return false;
 }
 
+/**
+ * Registra cambios de precio y actualiza la fecha de actividad.
+ * Vital para saber si un producto está "estancado".
+ */
+static updateProductSmart(productId, updates) {
+  const products = this.getAllProducts();
+  const index = products.findIndex(p => String(p.id) === String(productId));
+  
+  if (index !== -1) {
+    const oldProduct = products[index];
+    const priceHistory = oldProduct.priceHistory || [];
+
+    // Si el precio cambia, guardamos el rastro
+    if (updates.price && Number(updates.price) !== Number(oldProduct.price)) {
+      priceHistory.push({
+        oldPrice: oldProduct.price,
+        newPrice: updates.price,
+        date: new Date().toISOString()
+      });
+    }
+
+    products[index] = {
+      ...oldProduct,
+      ...updates,
+      priceHistory,
+      lastActivity: new Date().toISOString() // Marca de tiempo para algoritmo de estancamiento
+    };
+    
+    return this.saveProducts(products);
+  }
+  return false;
+}
+
+/**
+ * Detecta productos que llevan tiempo sin venderse ni editarse.
+ * @param {number} daysThreshold - Días de inactividad (por defecto 45)
+ */
+static getStagnantProducts(daysThreshold = 45) {
+  const all = this.getAllProducts().filter(p => p.status !== 'sold');
+  const now = new Date();
+  
+  return all.filter(p => {
+    const lastAction = new Date(p.lastActivity || p.firstUploadDate || p.createdAt);
+    const diffDays = (now - lastAction) / (1000 * 60 * 60 * 24);
+    return diffDays > daysThreshold;
+  });
+}
+
+// Añadir a DatabaseService.js
+
+/**
+ * Genera alertas basadas en el inventario actual comparando 
+ * el tiempo en stock vs la media de su categoría.
+ */
+static getSmartAlerts() {
+  // 1. Intentar obtener los productos y la configuración
+  const products = this.getAllProducts().filter(p => p.status !== 'sold');
+  const stats = this.getAdvancedStats();
+  
+  // AQUÍ ESTABA EL ERROR: Necesitamos obtener la config guardada
+  const config = this.getConfig() || {}; 
+  
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const alerts = [];
+
+  // Extraer valores de la config con valores por defecto por si no existen
+  const multiplier = parseFloat(config.staleMultiplier || 1.5);
+  const criticalMonths = parseInt(config.criticalMonthThreshold || 6);
+  const seasonalMap = config.seasonalMap || {};
+
+  products.forEach(p => {
+    const cat = p.category || 'Otros';
+    const uploadDate = new Date(p.firstUploadDate || p.createdAt || now);
+    const daysInStock = Math.floor((now - uploadDate) / (1000 * 60 * 60 * 24));
+    
+    // Regla de Estancamiento
+    const catMedia = stats[cat] ? Math.round(stats[cat].totalDays / stats[cat].count) : 30;
+    if (daysInStock > catMedia * multiplier) {
+      alerts.push({
+        type: 'stale',
+        priority: daysInStock > (catMedia * multiplier * 2) ? 'high' : 'medium',
+        title: p.title,
+        message: `Estancado: lleva ${daysInStock}d.`,
+        action: 'REVISAR PRECIO'
+      });
+    }
+
+    // Regla de Estacionalidad (Configurada en Settings)
+    if (seasonalMap[currentMonth] === cat) {
+      alerts.push({
+        type: 'seasonal',
+        priority: 'high',
+        title: `🔥 Mes de ${cat}`,
+        message: `${p.title} es prioritario este mes según tu estrategia.`,
+        action: 'REPUBLICAR / SUBIR'
+      });
+    }
+
+    // Regla Crítica
+    if (daysInStock > (criticalMonths * 30)) {
+      alerts.push({
+        type: 'critical',
+        priority: 'high',
+        title: `CRÍTICO: ${p.title}`,
+        message: `Supera el límite de ${criticalMonths} meses.`,
+        action: 'REPUBLICAR URGENTE'
+      });
+    }
+  });
+
+  return alerts.sort((a, b) => (a.priority === 'high' ? -1 : 1));
+}
+
 }
