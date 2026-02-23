@@ -104,43 +104,50 @@ static async importFromVinted(newProducts) {
   try {
     const currentProducts = this.getAllProducts();
     const productMap = new Map();
-    currentProducts.forEach(p => productMap.set(String(p.id), p));
+    
+    // 1. Cargamos lo que ya tenemos en el móvil. 
+    // Forzamos el ID a String para evitar fallos de comparación.
+    currentProducts.forEach(p => {
+      if (p.id) productMap.set(String(p.id), p);
+    });
     
     newProducts.forEach(p => {
       if (!p.id || String(p.id).includes('image')) return;
       const pId = String(p.id);
       
-      // BUSCAMOS SI EL PRODUCTO YA EXISTÍA EN NUESTRA BASE DE DATOS
-      const existingProduct = productMap.get(pId);
+      // 2. BUSCAMOS EL PRODUCTO EXISTENTE
+      const existing = productMap.get(pId);
 
+      // 3. LÓGICA DE DETECCIÓN INICIAL (Solo si el producto es nuevo)
       const detectedCat = this.detectCategory(`${p.title} ${p.description}`);
-      const seoTags = this.generateSEOTags(detectedCat, p.brand, p.title);
+      const initialSeoTags = this.generateSEOTags(detectedCat, p.brand, p.title);
 
+      // 4. EL MERGE (Fusión): Prioridad total a lo guardado en el móvil
       productMap.set(pId, {
-        ...p,
-        // --- LÓGICA DE PERSISTENCIA ---
-        // Si ya existía, mantenemos su fecha de subida real. Si es nuevo, usamos la del JSON.
-        firstUploadDate: existingProduct?.firstUploadDate || p.createdAt || new Date().toISOString(),
+        ...p, // Datos del JSON (vistas, favoritos, etc.)
         
-        // Mantenemos los campos manuales si ya habían sido rellenados
-        soldPriceReal: existingProduct?.soldPriceReal || null,
-        isBundleSale: existingProduct?.isBundleSale || false,
+        // CAMPOS BLINDADOS: Si existen en el móvil, NO se tocan
+        category: existing?.category || p.category || detectedCat,
+        firstUploadDate: existing?.firstUploadDate || p.createdAt || new Date().toISOString(),
+        seoTags: existing?.seoTags || initialSeoTags,
+        isBundle: existing?.isBundle !== undefined ? existing.isBundle : false,
         
-        // Datos que sí se actualizan del JSON (visitas, favoritos, etc)
-        category: p.category || detectedCat,
-        seoTags: seoTags,
-        price: Number(p.price) || 0,
-        status: p.status,
-        views: p.views,
-        favorites: p.favorites,
-        createdAt: p.createdAt // Mantenemos esta como "Fecha de última importación"
+        // DATOS DE VENTA: Se mantienen si ya los habías editado
+        soldPrice: existing?.soldPrice || p.soldPrice || null,
+        soldDate: existing?.soldDate || p.soldAt || null,
+        
+        // Sincronizamos estados importantes
+        status: p.status || 'active',
+        lastSync: new Date().toISOString()
       });
     });
 
-    this.saveAllProducts(Array.from(productMap.values()));
-    LogService.add("Importación inteligente finalizada (Fechas protegidas)", "success");
+    const finalArray = Array.from(productMap.values());
+    this.saveAllProducts(finalArray);
+    LogService.add(`✅ Sincronización: ${finalArray.length} productos protegidos`, "success");
     return { success: true };
   } catch (e) {
+    console.error("Error en import:", e);
     return { success: false, error: e.message };
   }
 }
@@ -242,24 +249,27 @@ static updateManualFields(productId, data) {
     }
   }
 
-  static updateProduct(updatedProduct) {
+static updateProduct(updatedProduct) {
   try {
     const all = this.getAllProducts();
-    const index = all.findIndex(p => p.id === updatedProduct.id);
+    // Aseguramos comparación de IDs como String
+    const index = all.findIndex(p => String(p.id) === String(updatedProduct.id));
+    
     if (index !== -1) {
-      // Fusionamos los datos existentes con los nuevos para no perder campos persistentes
       all[index] = {
         ...all[index],
         ...updatedProduct,
-        // Forzamos que la fecha sea válida
-        firstUploadDate: updatedProduct.firstUploadDate || all[index].firstUploadDate || new Date().toISOString()
+        // Aseguramos que los campos clave no se guarden como undefined
+        category: updatedProduct.category || all[index].category,
+        firstUploadDate: updatedProduct.firstUploadDate || all[index].firstUploadDate,
+        seoTags: updatedProduct.seoTags || all[index].seoTags
       };
       this.saveAllProducts(all);
       return true;
     }
     return false;
   } catch (e) {
-    console.error("Error al actualizar producto:", e);
+    console.error("Error al actualizar:", e);
     return false;
   }
 }

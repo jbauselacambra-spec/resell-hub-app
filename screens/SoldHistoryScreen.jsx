@@ -1,103 +1,170 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, Image, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react';
+import { View, Text, FlatList, TouchableOpacity, Image, StyleSheet, Dimensions } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { DatabaseService } from '../services/DatabaseService';
 
+const { width } = Dimensions.get('window');
+
 export default function SoldHistoryScreen({ navigation }) {
   const [soldProducts, setSoldProducts] = useState([]);
+  const [filterType, setFilterType] = useState('date'); // 'date' o 'profit'
 
   const loadSoldData = () => {
     try {
-      const data = DatabaseService.getAllProducts();
-      
-      // LOG DE DEPURACIÓN: Verás esto en tu consola de terminal
-      console.log("DEBUG: Total en DB:", data.length);
-
-      // Filtramos con una validación extra para evitar errores si status es undefined
+      const data = DatabaseService.getAllProducts() || [];
       const filtered = data.filter(p => p && p.status === 'sold');
-      
-      console.log("DEBUG: Total Vendidos:", filtered.length);
-
-      // Ordenar por fecha de venta
-      const sorted = filtered.sort((a, b) => {
-        return new Date(b.soldAt || 0) - new Date(a.soldAt || 0);
-      });
-
-      setSoldProducts(sorted);
+      setSoldProducts(filtered);
     } catch (error) {
       console.error("Error cargando historial:", error);
     }
   };
 
   useEffect(() => {
-    // 1. CARGA INICIAL: Importante para cuando la pantalla se monta por primera vez
     loadSoldData();
-
-    // 2. CARGA AL ENTRAR: Para cuando vuelves de la pantalla de detalle
-    const unsubscribe = navigation.addListener('focus', () => {
-      loadSoldData();
-    });
-
+    const unsubscribe = navigation.addListener('focus', loadSoldData);
     return unsubscribe;
   }, [navigation]);
+
+  // --- LÓGICA DE ESTADÍSTICAS PARA EL PANEL (Estilo ProductList) ---
+  const stats = useMemo(() => {
+    const totalRevenue = soldProducts.reduce((sum, p) => sum + Number(p.soldPrice || p.price || 0), 0);
+    const totalProfit = soldProducts.reduce((sum, p) => {
+      const diff = Number(p.soldPrice || p.price || 0) - Number(p.price || 0);
+      return sum + diff;
+    }, 0);
+
+    return {
+      monthlySales: soldProducts.length,
+      revenue: totalRevenue.toFixed(2),
+      profit: totalProfit.toFixed(2)
+    };
+  }, [soldProducts]);
+
+  // --- ORDENACIÓN ---
+  const sortedProducts = useMemo(() => {
+    let result = [...soldProducts];
+    if (filterType === 'date') {
+      result.sort((a, b) => new Date(b.soldDate || b.soldAt) - new Date(a.soldDate || a.soldAt));
+    } else {
+      result.sort((a, b) => {
+        const profitA = Number(a.soldPrice || a.price) - Number(a.price);
+        const profitB = Number(b.soldPrice || b.price) - Number(b.price);
+        return profitB - profitA;
+      });
+    }
+    return result;
+  }, [soldProducts, filterType]);
+
+  const renderItem = ({ item }) => {
+    const original = Number(item.price || 0);
+    const sold = Number(item.soldPrice || item.price || 0);
+    const diff = sold - original;
+
+    return (
+      <TouchableOpacity 
+        style={styles.soldCard}             
+        onPress={() => navigation.navigate('SoldEditDetail', { product: item })}
+      >
+        <Image source={{ uri: item.images?.[0] }} style={styles.thumbnail} />
+        
+        <View style={styles.cardInfo}>
+          <View style={styles.titleRow}>
+            <Text style={styles.productTitle} numberOfLines={1}>{item.title}</Text>
+            {item.isBundle && (
+              <View style={styles.bundleBadge}>
+                <Text style={styles.bundleText}>LOTE</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Categoría y Fecha */}
+          <View style={styles.metaRow}>
+            <Text style={styles.categoryText}>{item.category || 'Otros'}</Text>
+            <Text style={styles.dot}>•</Text>
+            <Text style={styles.soldDateText}>
+              {new Date(item.soldDate || item.soldAt).toLocaleDateString()}
+            </Text>
+          </View>
+
+          {/* Comparativa de Precios */}
+          <View style={styles.priceRow}>
+            <View>
+              <Text style={styles.priceLabel}>INICIAL</Text>
+              <Text style={styles.originalPrice}>{original}€</Text>
+            </View>
+            <Icon name="arrow-right" size={12} color="#CCC" style={{ marginHorizontal: 5, marginTop: 10 }} />
+            <View>
+              <Text style={styles.priceLabel}>FINAL</Text>
+              <Text style={styles.finalPrice}>{sold}€</Text>
+            </View>
+            <View style={[styles.diffBadge, { backgroundColor: diff >= 0 ? '#E8FBF6' : '#FFEBEB' }]}>
+              <Text style={[styles.diffText, { color: diff >= 0 ? '#00D9A3' : '#FF4D4D' }]}>
+                {diff >= 0 ? '+' : ''}{diff.toFixed(2)}€
+              </Text>
+            </View>
+          </View>
+
+          {/* Visitas y Favoritos */}
+          <View style={styles.statsRow}>
+            <View style={styles.statMini}>
+              <Icon name="eye" size={12} color="#999" />
+              <Text style={styles.statMiniText}>{item.views || 0}</Text>
+            </View>
+            <View style={styles.statMini}>
+              <Icon name="heart" size={12} color="#999" />
+              <Text style={styles.statMiniText}>{item.favorites || 0}</Text>
+            </View>
+          </View>
+        </View>
+        <Icon name="chevron-right" size={18} color="#EEE" />
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Historial de Ventas</Text>
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{soldProducts.length} Items</Text>
+
+        {/* PANEL RECOMPANEL (Mismo diseño que ProductList) */}
+        <View style={styles.recomPanel}>
+          <View style={styles.recomIcon}>
+            <Icon name="trending-up" size={20} color="#FF6B35" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.recomTitle}>Estado del Mes</Text>
+            <Text style={styles.recomDesc}>
+              Llevas {stats.monthlySales} ventas finalizadas. El beneficio acumulado es de {stats.profit}€.
+            </Text>
+          </View>
         </View>
       </View>
 
+      {/* FILTROS DE ORDENACIÓN */}
+      <View style={styles.filterContainer}>
+        <TouchableOpacity 
+          style={[styles.filterBtn, filterType === 'date' && styles.filterBtnActive]}
+          onPress={() => setFilterType('date')}
+        >
+          <Icon name="calendar" size={14} color={filterType === 'date' ? '#FFF' : '#1A1A2E'} />
+          <Text style={[styles.filterBtnText, filterType === 'date' && { color: '#FFF' }]}>Por Fecha</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={[styles.filterBtn, filterType === 'profit' && styles.filterBtnActive]}
+          onPress={() => setFilterType('profit')}
+        >
+          <Icon name="trending-up" size={14} color={filterType === 'profit' ? '#FFF' : '#1A1A2E'} />
+          <Text style={[styles.filterBtnText, filterType === 'profit' && { color: '#FFF' }]}>Por Ganancia</Text>
+        </TouchableOpacity>
+      </View>
+
       <FlatList
-        data={soldProducts}
+        data={sortedProducts}
         keyExtractor={item => item.id.toString()}
+        renderItem={renderItem}
         contentContainerStyle={{ paddingBottom: 100 }}
-        renderItem={({ item }) => (
-          <TouchableOpacity 
-            style={styles.soldCard}             
-            onPress={() => navigation.navigate('SoldDetail', { product: item })}
-          >
-            <Image 
-              source={{ uri: item.images && item.images[0] ? item.images[0] : 'https://via.placeholder.com/150' }} 
-              style={styles.thumbnail} 
-            />
-            <View style={styles.cardInfo}>
-              <Text style={styles.productTitle} numberOfLines={1}>{item.title}</Text>
-              <Text style={styles.soldDate}>
-                Vendido el {item.soldAt ? new Date(item.soldAt).toLocaleDateString() : 'Fecha desconocida'}
-              </Text>
-              <View style={styles.priceRow}>
-                <Text style={styles.originalPrice}>{item.price}€</Text>
-                <Icon name="arrow-right" size={14} color="#CCC" />
-                <Text style={styles.finalPrice}>{item.soldPrice}€</Text>
-              </View>
-            </View>
-            <View style={{flexDirection: 'row', gap: 10, marginTop: 4, opacity: 0.6}}>
-            <View style={{flexDirection: 'row', alignItems: 'center', gap: 3}}>
-              <Icon name="eye" size={10} color="#666" />
-              <Text style={{fontSize: 10}}>{item.views || 0}</Text>
-            </View>
-            <View style={{flexDirection: 'row', alignItems: 'center', gap: 3}}>
-              <Icon name="heart" size={10} color="#666" />
-              <Text style={{fontSize: 10}}>{item.favorites || 0}</Text>
-            </View>
-          </View>
-            <View style={styles.checkIcon}>
-              <Icon name="check-circle" size={24} color="#00D9A3" />
-            </View>
-          </TouchableOpacity>
-        )}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <View style={styles.emptyIconCircle}>
-              <Icon name="shopping-cart" size={40} color="#DDD" />
-            </View>
-            <Text style={styles.emptyText}>No hay ventas registradas</Text>
-            <Text style={styles.emptySubText}>Los productos que vendas aparecerán aquí automáticamente.</Text>
-          </View>
-        }
+        showsVerticalScrollIndicator={false}
       />
     </View>
   );
@@ -105,43 +172,41 @@ export default function SoldHistoryScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F9FA' },
-  header: { 
-    padding: 25, 
-    paddingTop: 60, 
-    backgroundColor: '#FFF', 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0'
-  },
-  headerTitle: { fontSize: 24, fontWeight: '800', color: '#1A1A2E' },
-  badge: { backgroundColor: '#E8FBF6', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10 },
-  badgeText: { color: '#00D9A3', fontWeight: 'bold', fontSize: 12 },
-  soldCard: { 
-    flexDirection: 'row', 
-    backgroundColor: '#FFF', 
-    marginHorizontal: 20, 
-    marginTop: 15, 
-    padding: 12, 
-    borderRadius: 20, 
-    alignItems: 'center', 
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 5
-  },
-  thumbnail: { width: 70, height: 70, borderRadius: 15, backgroundColor: '#F0F0F0' },
+  header: { padding: 25, paddingTop: 60, backgroundColor: '#FFF' },
+  headerTitle: { fontSize: 24, fontWeight: '900', color: '#1A1A2E', marginBottom: 20 },
+  
+  // PANEL RECOMPANEL (COPIADO DE PRODUCTLIST)
+  recomPanel: { flexDirection: 'row', backgroundColor: '#FFF5F2', padding: 15, borderRadius: 20, alignItems: 'center', gap: 15, borderWidth: 1, borderColor: '#FFE0D6' },
+  recomIcon: { width: 40, height: 40, backgroundColor: '#FFF', borderRadius: 12, justifyContent: 'center', alignItems: 'center', elevation: 2 },
+  recomTitle: { fontSize: 14, fontWeight: '800', color: '#1A1A2E' },
+  recomDesc: { fontSize: 12, color: '#666', marginTop: 2 },
+
+  filterContainer: { flexDirection: 'row', paddingHorizontal: 25, paddingVertical: 10, gap: 10 },
+  filterBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FFF', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: '#EEE' },
+  filterBtnActive: { backgroundColor: '#1A1A2E', borderColor: '#1A1A2E' },
+  filterBtnText: { fontSize: 12, fontWeight: '800', color: '#1A1A2E' },
+
+  soldCard: { flexDirection: 'row', backgroundColor: '#FFF', marginHorizontal: 20, marginBottom: 12, padding: 12, borderRadius: 22, alignItems: 'center', elevation: 2 },
+  thumbnail: { width: 85, height: 85, borderRadius: 18 },
   cardInfo: { flex: 1, marginLeft: 15 },
-  productTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A2E' },
-  soldDate: { fontSize: 12, color: '#999', marginVertical: 2 },
-  priceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-  originalPrice: { fontSize: 13, color: '#BBB', textDecorationLine: 'line-through' },
-  finalPrice: { fontSize: 16, fontWeight: '800', color: '#00D9A3' },
-  checkIcon: { marginLeft: 10 },
-  emptyContainer: { alignItems: 'center', marginTop: 100, paddingHorizontal: 40 },
-  emptyIconCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', marginBottom: 20, elevation: 2 },
-  emptyText: { color: '#1A1A2E', fontSize: 18, fontWeight: '700' },
-  emptySubText: { color: '#999', textAlign: 'center', marginTop: 8, lineHeight: 20 }
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  productTitle: { fontSize: 14, fontWeight: '800', color: '#1A1A2E', maxWidth: '70%' },
+  bundleBadge: { backgroundColor: '#F0EFFF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  bundleText: { color: '#6C63FF', fontSize: 8, fontWeight: '900' },
+  
+  metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
+  categoryText: { fontSize: 10, fontWeight: '900', color: '#FF6B35' },
+  dot: { marginHorizontal: 5, color: '#CCC' },
+  soldDateText: { fontSize: 10, color: '#999', fontWeight: '600' },
+
+  priceRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
+  priceLabel: { fontSize: 7, fontWeight: '900', color: '#BBB', marginBottom: -2 },
+  originalPrice: { fontSize: 13, fontWeight: '700', color: '#BBB', textDecorationLine: 'line-through' },
+  finalPrice: { fontSize: 18, fontWeight: '900', color: '#1A1A2E' },
+  diffBadge: { marginLeft: 10, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  diffText: { fontSize: 10, fontWeight: '900' },
+
+  statsRow: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  statMini: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  statMiniText: { fontSize: 11, fontWeight: '700', color: '#999' }
 });
