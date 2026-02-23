@@ -13,6 +13,15 @@ const DEFAULT_DICTIONARY = {
   'Otros': []
 };
 
+const CONFIG_KEY = 'app_user_config';
+
+const DEFAULT_CONFIG = {
+  daysInvisible: '60',
+  viewsInvisible: '20',
+  daysDesinterest: '45',
+  daysCritical: '90'
+};
+
 let storage;
 try {
   storage = new MMKV();
@@ -22,13 +31,62 @@ try {
 }
 
 export class DatabaseService {
-  static KEYS = { PRODUCTS: 'products' };
+  static KEYS = {
+    PRODUCTS: 'products',
+    CONFIG: 'app_config'
+  };
+
+
+  /**
+ * Recupera la configuración de alertas del usuario.
+ * Si no existe, devuelve los valores por defecto.
+ */
+static getConfig() {
+    try {
+      const stored = storage.getString(CONFIG_KEY);
+      return stored ? JSON.parse(stored) : DEFAULT_CONFIG;
+    } catch (e) {
+      LogService.add("❌ Error al recuperar configuración", "error");
+      return DEFAULT_CONFIG;
+    }
+  }
+
+/**
+ * Guarda la nueva configuración en el almacenamiento persistente.
+ */
+static saveConfig(newConfig) {
+    try {
+      storage.set(CONFIG_KEY, JSON.stringify(newConfig));
+      LogService.add("⚙️ Configuración de alertas actualizada", "info");
+      return true;
+    } catch (e) {
+      LogService.add("❌ Error al guardar configuración: " + e.message, "error");
+      return false;
+    }
+  }
 
   // --- GESTIÓN DEL DICCIONARIO PERSISTENTE ---
   
-  static getDictionary() {
-    const stored = storage.getString(DICTIONARY_KEY);
-    return stored ? JSON.parse(stored) : DEFAULT_DICTIONARY;
+ static getDictionary() {
+    try {
+      const stored = storage.getString(DICTIONARY_KEY);
+      return stored ? JSON.parse(stored) : DEFAULT_DICTIONARY;
+    } catch (e) {
+      LogService.add("❌ Error al recuperar diccionario", "error");
+      return DEFAULT_DICTIONARY;
+    }
+  }
+
+  // MÉTODO AÑADIDO Y ACTUALIZADO
+  static saveDictionary(newDict) {
+    try {
+      storage.set(DICTIONARY_KEY, JSON.stringify(newDict));
+      LogService.add("📚 Diccionario de categorías actualizado", "info");
+      return true;
+    } catch (e) {
+      LogService.add("❌ Error al guardar diccionario: " + e.message, "error");
+      return false;
+    }
   }
 
   static addKeywordToDictionary(category, newKeyword) {
@@ -196,9 +254,13 @@ static updateManualFields(productId, data) {
 
   // --- MÉTODOS BASE ---
 
-  static getAllProducts() {
-    const data = storage.getString(this.KEYS.PRODUCTS);
-    return data ? JSON.parse(data) : [];
+ static getAllProducts() {
+    try {
+      const data = storage.getString(this.KEYS.PRODUCTS);
+      return data ? JSON.parse(data) : [];
+    } catch (e) {
+      return [];
+    }
   }
 
   static saveAllProducts(products) {
@@ -272,6 +334,63 @@ static updateProduct(updatedProduct) {
     console.error("Error al actualizar:", e);
     return false;
   }
+}
+
+static getAdvancedStats() {
+  const all = this.getAllProducts().filter(p => p.status === 'sold');
+  
+  const stats = all.reduce((acc, p) => {
+    const cat = p.category || 'Otros';
+    if (!acc[cat]) acc[cat] = { count: 0, totalDiff: 0, totalDays: 0 };
+    
+    // Cálculo de tiempo (Diferencia entre subida y venta)
+    const start = new Date(p.firstUploadDate || p.createdAt);
+    const end = new Date(p.soldDate || p.soldAt);
+    const days = Math.max(1, Math.round((end - start) / (1000 * 60 * 60 * 24)));
+    
+    // Cálculo de beneficio real
+    const diff = Number(p.soldPrice || p.price) - Number(p.price);
+
+    acc[cat].count++;
+    acc[cat].totalDiff += diff;
+    acc[cat].totalDays += days;
+    
+    return acc;
+  }, {});
+
+  return stats;
+}
+
+static saveProducts(products) {
+    try {
+      storage.set(this.KEYS.PRODUCTS, JSON.stringify(products));
+      return true;
+    } catch (e) {
+      console.error("Error al guardar:", e);
+      return false;
+    }
+  }
+
+// Añadir esto a tu DatabaseService.js
+static updatePriceWithHistory(productId, newPrice) {
+  const products = this.getAllProducts();
+  const index = products.findIndex(p => p.id === productId);
+  
+  if (index !== -1) {
+    const product = products[index];
+    // Inicializar el historial si no existe
+    if (!product.priceHistory) product.priceHistory = [];
+    
+    // Guardar el precio anterior antes de cambiarlo
+    product.priceHistory.push({
+      price: product.price,
+      date: new Date().toISOString()
+    });
+    
+    product.price = newPrice;
+    return this.saveProducts(products);
+  }
+  return false;
 }
 
 }

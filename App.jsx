@@ -13,6 +13,8 @@ import SoldHistoryScreen from './screens/SoldHistoryScreen'; // NUEVA
 import ProductDetailScreen from './screens/ProductDetailScreen';
 import LogsScreen from './screens/LogsScreen';
 import SoldEditDetailView from './screens/SoldEditDetailView';
+import AdvancedStatsScreen from './screens/AdvancedStatsScreen';
+import SettingsScreen from './screens/SettingsScreen'; // NUEVA
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -33,6 +35,8 @@ function MainTabs() {
       <Tab.Screen name="Home" component={DashboardScreen} options={{ tabBarLabel: 'Inicio', tabBarIcon: ({color}) => <Icon name="trending-up" size={22} color={color}/> }} />
       <Tab.Screen name="Stock" component={ProductsScreen} options={{ tabBarLabel: 'Inventario', tabBarIcon: ({color}) => <Icon name="package" size={22} color={color}/> }} />
       <Tab.Screen name="History" component={SoldHistoryScreen} options={{ tabBarLabel: 'Vendidos', tabBarIcon: ({color}) => <Icon name="check-circle" size={22} color={color}/> }} />
+      <Tab.Screen name="Stats" component={AdvancedStatsScreen} options={{ tabBarLabel: 'Stats', tabBarIcon: ({color}) => <Icon name="bar-chart-2" size={22} color={color}/> }} />  
+      <Tab.Screen name="Settings" component={SettingsScreen} options={{ tabBarLabel: 'Config', tabBarIcon: ({color}) => <Icon name="settings" size={22} color={color}/> }} />
       <Tab.Screen name="Debug" component={LogsScreen} options={{ tabBarLabel: 'Logs', tabBarIcon: ({color}) => <Icon name="terminal" size={22} color={color}/> }} />
     </Tab.Navigator>
   );
