@@ -37,23 +37,24 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-  [
-    "expo-notifications",
-    {
-      "icon": "./assets/icon.png",
-      "color": "#FF6B35"
-    }
-  ],
-  [
-    "expo-image-picker",
-    {
-      "photosPermission": "Permite acceso a fotos.",
-      "cameraPermission": "Permite uso de cámara."
-    }
-  ],
-  "expo-asset",
-  "expo-font"
-],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#FF6B35"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Permite acceso a fotos.",
+          "cameraPermission": "Permite uso de cámara."
+        }
+      ],
+      "expo-asset",
+      "expo-font",
+      "@react-native-community/datetimepicker"
+    ],
     "extra": {
       "eas": {
         "projectId": "7885857d-7423-415c-8683-cac090ec5f79"

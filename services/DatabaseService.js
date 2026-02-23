@@ -1,178 +1,104 @@
 import { MMKV } from 'react-native-mmkv';
 import LogService from './LogService';
 
+const DICTIONARY_KEY = 'custom_dictionary';
 
-const CATEGORY_DICTIONARY = {
-  'Juguetes': ['tuc tuc', 'lego', 'playmobil', 'muñeca', 'juguete', 'aeropuerto', 'coche', 'pista'],
-  'Abrigo': ['abrigo', 'chaqueta', 'parka', 'plumífero', 'gabardina', 'sfera'],
-  'Camisetas': ['camiseta', 'top', 't-shirt', 'tshirt'],
-  'Pantalones': ['pantalón', 'pantalon', 'vaquero', 'jean', 'short', 'bermuda'],
-  'Calzado': ['zapatos', 'zapatillas', 'botas', 'deportivas', 'tenis', 'sandalias'],
-  'Libros': ['libro', 'cómic', 'novela', 'tapa dura', 'lectura'],
-  'Accesorios': ['bolso', 'mochila', 'cinturón', 'gafas', 'reloj', 'cartera'],
+// Valores por defecto
+const DEFAULT_DICTIONARY = {
+  'Juguetes': ['tuc tuc', 'lego', 'playmobil', 'muñeca', 'juguete', 'aeropuerto', 'coche', 'pista', 'tren', 'barco', 'avión', 'peluche'],
+  'Ropa': ['abrigo', 'chaqueta', 'parka', 'plumífero', 'gabardina', 'sfera', 'zara', 'bershka', 'h&m', 'mango', 'pull&bear', 'stradivarius', 'primark'],
   'Lotes': ['lote', 'pack', 'conjunto', 'set'],
-  'Sudaderas': ['sudadera', 'hoodie', 'jersey', 'suéter', 'pull'],
-  'Vestidos': ['vestido', 'falda', 'mono']
-};
-
-// Función auxiliar para detectar categoría
-const detectCategory = (text) => {
-  if (!text) return 'Otros';
-  const cleanText = text.toLowerCase();
-  for (const [category, keywords] of Object.entries(CATEGORY_DICTIONARY)) {
-    if (keywords.some(k => cleanText.includes(k))) return category;
-  }
-  return 'Otros';
+  'Calzado': ['zapatos', 'zapatillas', 'botas', 'deportivas', 'tenis', 'sandalias'],
+  'Entretenimiento': ['Videojuegos', 'Juego de mesa', 'Dados', 'cartas', 'Muñecos', 'Coleccionables', 'Figuras de acción', 'Puzzles', 'Rompecabezas', 'Drones', 'Vehículos RC'],
+  'Otros': []
 };
 
 let storage;
 try {
   storage = new MMKV();
   console.log("[EAS_LOG] 🚀 MMKV Iniciado");
-  LogService.add("✅ Database: Conexión establecida", "success");
 } catch (e) {
   console.error("[EAS_LOG] ❌ Fallo crítico MMKV:", e);
-  LogService.add("⚠️ MMKV falló. Usando memoria temporal.", "error");
-  const backupStorage = new Map();
-  storage = {
-    getString: (key) => backupStorage.get(key),
-    set: (key, value) => backupStorage.set(key, value),
-    delete: (key) => backupStorage.delete(key),
-    contains: (key) => backupStorage.has(key),
-  };
 }
 
 export class DatabaseService {
-  static KEYS = {
-    PRODUCTS: 'products',
-    STATS: 'stats'
-  };
+  static KEYS = { PRODUCTS: 'products' };
 
+  // --- GESTIÓN DEL DICCIONARIO PERSISTENTE ---
   
+  static getDictionary() {
+    const stored = storage.getString(DICTIONARY_KEY);
+    return stored ? JSON.parse(stored) : DEFAULT_DICTIONARY;
+  }
 
-
-  // --- MÉTODOS DE APOYO ---
-
-  static getAllProducts() {
+  static addKeywordToDictionary(category, newKeyword) {
     try {
-      const data = storage.getString(this.KEYS.PRODUCTS);
-      const products = data ? JSON.parse(data) : [];
-      console.log(`[EAS_LOG] READ: ${products.length} productos cargados.`);
-      return products;
+      const dict = this.getDictionary();
+      if (!dict[category]) dict[category] = [];
+      
+      const keyword = newKeyword.toLowerCase().trim();
+      if (!dict[category].includes(keyword)) {
+        dict[category].push(keyword);
+        storage.set(DICTIONARY_KEY, JSON.stringify(dict));
+        LogService.add(`🧠 Diccionario: "${keyword}" -> ${category}`, "success");
+        return true;
+      }
+      return false;
     } catch (e) {
-      console.error("[EAS_LOG] ERROR_READ:", e.message);
-      LogService.add("❌ Error leyendo DB: " + e.message, "error");
-      return [];
+      LogService.add("❌ Error actualizando diccionario", "error");
+      return false;
     }
+  }
+
+  static detectCategory(text) {
+    if (!text) return 'Otros';
+    const dict = this.getDictionary();
+    const cleanText = text.toLowerCase();
+    for (const [category, keywords] of Object.entries(dict)) {
+      if (keywords.some(k => cleanText.includes(k))) return category;
+    }
+    return 'Otros';
+  }
+
+  // --- IMPORTACIÓN Y SEO ---
+
+ // ... dentro de la clase DatabaseService ...
+
+static generateSEOTags(category, brand, title) {
+  const tags = new Set();
+  const dict = this.getDictionary(); // Obtenemos el diccionario actualizado
+  
+  // 1. Añadimos la categoría como etiqueta principal
+  tags.add(category.toLowerCase());
+  
+  // 2. Añadimos la marca si no es genérica
+  if (brand && brand.toLowerCase() !== 'genérico') {
+    tags.add(brand.toLowerCase());
   }
   
-
-  static saveAllProducts(products) {
-    try {
-      // Limpieza de seguridad: quitar duplicados por ID antes de guardar físicamente
-      const uniqueMap = new Map();
-      products.forEach(p => { if(p.id) uniqueMap.set(String(p.id), p); });
-      const cleanList = Array.from(uniqueMap.values());
-
-      storage.set(this.KEYS.PRODUCTS, JSON.stringify(cleanList));
-      console.log(`[EAS_LOG] WRITE: ${cleanList.length} productos guardados físicamente.`);
-      return true;
-    } catch (e) {
-      console.error("[EAS_LOG] ERROR_WRITE:", e.message);
-      LogService.add("❌ Error de escritura física: " + e.message, "error");
-      return false;
-    }
-  }
-
-  // --- GESTIÓN DE PRODUCTOS ---
-
-  static saveProduct(product) {
-    console.log("[EAS_LOG] Intentando guardar producto individual...");
-    try {
-      const products = this.getAllProducts();
-      const newProduct = {
-        ...product,
-        id: product.id || `local_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-        createdAt: product.createdAt || new Date().toISOString(),
-        status: product.status || 'active'
-      };
-
-      products.push(newProduct);
-      const success = this.saveAllProducts(products);
+  // 3. Añadimos palabras clave del título que coincidan con nuestro diccionario
+  const titleWords = title.toLowerCase().split(' ');
+  titleWords.forEach(word => {
+    if (word.length > 3) {
+      tags.add(word);
       
-      if (success) {
-        LogService.add(`✅ Producto guardado: ${newProduct.title || newProduct.id}`, "success");
-        return newProduct;
+      // Si la palabra existe en alguna categoría del diccionario, reforzamos el SEO
+      for (const [cat, keywords] of Object.entries(dict)) {
+        if (keywords.includes(word)) {
+          tags.add(cat.toLowerCase());
+        }
       }
-      throw new Error("No se pudo persistir en MMKV");
-    } catch (e) {
-      LogService.add("❌ Error guardando: " + e.message, "error");
-      return null;
     }
-  }
+  });
 
-  static updateProduct(updatedProduct) {
-    console.log(`[EAS_LOG] Actualizando producto: ${updatedProduct.id}`);
-    try {
-      const products = this.getAllProducts();
-      const index = products.findIndex(p => p.id === updatedProduct.id);
-      
-      if (index !== -1) {
-        products[index] = { ...products[index], ...updatedProduct };
-        this.saveAllProducts(products);
-        LogService.add(`✅ Actualizado: ${updatedProduct.id}`, "success");
-        return true;
-      }
-      LogService.add(`⚠️ No se encontró ID para actualizar: ${updatedProduct.id}`, "info");
-      return false;
-    } catch (e) {
-      LogService.add("❌ Error actualizando: " + e.message, "error");
-      return false;
-    }
-  }
+  // 4. Etiquetas fijas para mejorar visibilidad
+  tags.add('importado');
+  tags.add('vinted');
 
-  static deleteProduct(id) {
-    console.log(`[EAS_LOG] Eliminando producto: ${id}`);
-    try {
-      const products = this.getAllProducts();
-      const filtered = products.filter(p => p.id !== id);
-      const success = this.saveAllProducts(filtered);
-      
-      if(success) {
-        LogService.add(`🗑️ Producto eliminado: ${id}`, "info");
-        return true;
-      }
-      return false;
-    } catch (e) {
-      LogService.add("❌ Error eliminando: " + e.message, "error");
-      return false;
-    }
-  }
+  return Array.from(tags).join(', ');
+}
 
-  // --- IMPORTACIÓN Y VENTAS ---
-
-  static markAsSold(id, soldPrice) {
-    console.log(`[EAS_LOG] Marcando como vendido: ${id} por ${soldPrice}€`);
-    try {
-      const products = this.getAllProducts();
-      const index = products.findIndex(p => p.id === id);
-      if (index !== -1) {
-        products[index] = {
-          ...products[index],
-          status: 'sold',
-          soldPrice: parseFloat(soldPrice) || 0,
-          soldAt: new Date().toISOString()
-        };
-        this.saveAllProducts(products);
-        LogService.add(`💰 Vendido: ${products[index].title || id}`, "success");
-        return true;
-      }
-      return false;
-    } catch (e) {
-      LogService.add("❌ Error en venta: " + e.message, "error");
-      return false;
-    }
-  }
+// ... dentro de la clase DatabaseService en DatabaseService.js ...
 
 static async importFromVinted(newProducts) {
   try {
@@ -180,91 +106,162 @@ static async importFromVinted(newProducts) {
     const productMap = new Map();
     currentProducts.forEach(p => productMap.set(String(p.id), p));
     
-    let addedCount = 0;
     newProducts.forEach(p => {
-      // 1. SALTAMOS productos con IDs inválidos (como "vinted_image")
       if (!p.id || String(p.id).includes('image')) return;
-
       const pId = String(p.id);
-      if (!productMap.has(pId)) addedCount++;
       
-      const originalPrice = Number(p.price) || 0;
-      const detectedCat = detectCategory(`${p.title} ${p.description}`);
+      // BUSCAMOS SI EL PRODUCTO YA EXISTÍA EN NUESTRA BASE DE DATOS
+      const existingProduct = productMap.get(pId);
+
+      const detectedCat = this.detectCategory(`${p.title} ${p.description}`);
+      const seoTags = this.generateSEOTags(detectedCat, p.brand, p.title);
 
       productMap.set(pId, {
         ...p,
+        // --- LÓGICA DE PERSISTENCIA ---
+        // Si ya existía, mantenemos su fecha de subida real. Si es nuevo, usamos la del JSON.
+        firstUploadDate: existingProduct?.firstUploadDate || p.createdAt || new Date().toISOString(),
+        
+        // Mantenemos los campos manuales si ya habían sido rellenados
+        soldPriceReal: existingProduct?.soldPriceReal || null,
+        isBundleSale: existingProduct?.isBundleSale || false,
+        
+        // Datos que sí se actualizan del JSON (visitas, favoritos, etc)
         category: p.category || detectedCat,
-        price: originalPrice,
-        // Si está vendido, asegurar que soldPrice sea el original si no viene otro
-        soldPrice: p.status === 'sold' ? (p.soldPrice || originalPrice) : null,
-        soldAt: p.status === 'sold' ? (p.soldDate || new Date().toISOString()) : null,
+        seoTags: seoTags,
+        price: Number(p.price) || 0,
+        status: p.status,
+        views: p.views,
+        favorites: p.favorites,
+        createdAt: p.createdAt // Mantenemos esta como "Fecha de última importación"
       });
     });
 
     this.saveAllProducts(Array.from(productMap.values()));
-    return { success: true, count: addedCount };
+    LogService.add("Importación inteligente finalizada (Fechas protegidas)", "success");
+    return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
   }
 }
 
-  // --- ESTADÍSTICAS ---
-
-  static getStats() {
-    try {
-      const products = this.getAllProducts();
-      const soldProducts = products.filter(p => p.status === 'sold');
-      const revenue = soldProducts.reduce((sum, p) => sum + (parseFloat(p.soldPrice) || 0), 0);
-      return { sold: soldProducts.length, revenue: revenue.toFixed(2) };
-    } catch (e) {
-      return { sold: 0, revenue: "0.00" };
+// NUEVO MÉTODO: Para actualizar los campos manuales desde la pantalla de detalle o ventas
+static updateManualFields(productId, data) {
+  try {
+    const all = this.getAllProducts();
+    const index = all.findIndex(p => p.id === productId);
+    if (index !== -1) {
+      all[index] = {
+        ...all[index],
+        soldPriceReal: data.soldPriceReal !== undefined ? data.soldPriceReal : all[index].soldPriceReal,
+        isBundleSale: data.isBundleSale !== undefined ? data.isBundleSale : all[index].isBundleSale,
+        firstUploadDate: data.firstUploadDate || all[index].firstUploadDate
+      };
+      this.saveAllProducts(all);
+      return true;
     }
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+
+// NUEVO MÉTODO: Para actualizar los campos manuales desde la pantalla de detalle o ventas
+static updateManualFields(productId, data) {
+  try {
+    const all = this.getAllProducts();
+    const index = all.findIndex(p => p.id === productId);
+    if (index !== -1) {
+      all[index] = {
+        ...all[index],
+        soldPriceReal: data.soldPriceReal !== undefined ? data.soldPriceReal : all[index].soldPriceReal,
+        isBundleSale: data.isBundleSale !== undefined ? data.isBundleSale : all[index].isBundleSale,
+        firstUploadDate: data.firstUploadDate || all[index].firstUploadDate
+      };
+      this.saveAllProducts(all);
+      return true;
+    }
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+
+  // --- MÉTODOS BASE ---
+
+  static getAllProducts() {
+    const data = storage.getString(this.KEYS.PRODUCTS);
+    return data ? JSON.parse(data) : [];
   }
 
-  static getPerformanceStats() {
-    try {
-      const products = this.getAllProducts();
-      const sold = products.filter(p => p.status === 'sold' && p.createdAt && p.soldAt);
-      
-      if (sold.length === 0) return null;
-
-      const totalDays = sold.reduce((sum, p) => {
-        const diff = Math.ceil((new Date(p.soldAt) - new Date(p.createdAt)) / (1000 * 60 * 60 * 24));
-        return sum + Math.max(0, diff);
-      }, 0);
-
-      const avgDays = (totalDays / sold.length).toFixed(1);
-
-      const catStats = {};
-      sold.forEach(p => {
-        const cat = p.category || 'Sin categoría';
-        const diff = Math.ceil((new Date(p.soldAt) - new Date(p.createdAt)) / (1000 * 60 * 60 * 24));
-        if (!catStats[cat]) catStats[cat] = { totalTime: 0, count: 0 };
-        catStats[cat].totalTime += Math.max(0, diff);
-        catStats[cat].count += 1;
-      });
-
-      const velocityData = Object.keys(catStats).map(cat => ({
-        name: cat,
-        avg: (catStats[cat].totalTime / catStats[cat].count).toFixed(1)
-      })).sort((a, b) => a.avg - b.avg);
-
-      return { avgDays, velocityData };
-    } catch (e) {
-      console.error("[EAS_LOG] ERROR_PERFORMANCE_STATS:", e);
-      return null;
-    }
+  static saveAllProducts(products) {
+    storage.set(this.KEYS.PRODUCTS, JSON.stringify(products));
+    return true;
   }
 
   static async clearDatabase() {
+    storage.set(this.KEYS.PRODUCTS, JSON.stringify([]));
+    LogService.add("🔥 Base de datos borrada", "info");
+    return true;
+  }
+
+
+// Método para obtener estadísticas rápidas de ventas
+  static getStats() {
     try {
-      storage.set(this.KEYS.PRODUCTS, JSON.stringify([]));
-      console.log("[EAS_LOG] 🔥 BASE DE DATOS BORRADA");
-      LogService.add("🔥 Base de datos reseteada", "info");
-      return true;
+      const all = this.getAllProducts();
+      const now = new Date();
+      const firstDayMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      const soldThisMonth = all.filter(p => 
+        p.status === 'sold' && 
+        p.soldAt && 
+        new Date(p.soldAt) >= firstDayMonth
+      ).length;
+
+      return { sold: soldThisMonth };
     } catch (e) {
-      console.error("[EAS_LOG] ERROR_CLEARING_DB:", e);
+      return { sold: 0 };
+    }
+  }
+
+ static markAsRepublicated(productId) {
+    try {
+      const all = this.getAllProducts();
+      const index = all.findIndex(p => p.id === productId);
+      if (index !== -1) {
+        // Al marcar como resubido, la fecha de subida real pasa a ser el momento actual
+        all[index].firstUploadDate = new Date().toISOString();
+        this.saveAllProducts(all);
+        LogService.add(`🔄 Resubido: ${all[index].title || productId}`, "success");
+        return true;
+      }
+      return false;
+    } catch (e) {
       return false;
     }
   }
+
+  static updateProduct(updatedProduct) {
+  try {
+    const all = this.getAllProducts();
+    const index = all.findIndex(p => p.id === updatedProduct.id);
+    if (index !== -1) {
+      // Fusionamos los datos existentes con los nuevos para no perder campos persistentes
+      all[index] = {
+        ...all[index],
+        ...updatedProduct,
+        // Forzamos que la fecha sea válida
+        firstUploadDate: updatedProduct.firstUploadDate || all[index].firstUploadDate || new Date().toISOString()
+      };
+      this.saveAllProducts(all);
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.error("Error al actualizar producto:", e);
+    return false;
+  }
+}
+
 }

@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   View, Text, ScrollView, Image, StyleSheet, Dimensions, 
-  TouchableOpacity, Alert, TextInput, Modal, KeyboardAvoidingView, Platform 
+  TouchableOpacity, Alert, TextInput, Modal, Platform 
 } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
 import Icon from 'react-native-vector-icons/Feather';
 import { DatabaseService } from '../services/DatabaseService';
 import LogService from '../services/LogService';
@@ -12,311 +11,278 @@ const { width } = Dimensions.get('window');
 
 export default function ProductDetailScreen({ route, navigation }) {
   const { product: initialProduct } = route.params || {};
-  
   const [product, setProduct] = useState(initialProduct);
   const [isEditing, setIsEditing] = useState(false);
-  const [editForm, setEditForm] = useState({ ...initialProduct });
-  const [errors, setErrors] = useState({}); 
-  const [showSoldModal, setShowSoldModal] = useState(false);
-  const [soldPrice, setSoldPrice] = useState(initialProduct?.price?.toString() || "");
+  const [showCalendar, setShowCalendar] = useState(false);
   
-  const [existingTags, setExistingTags] = useState([]);
-  const [existingBrands, setExistingBrands] = useState([]);
+  const [navDate, setNavDate] = useState(new Date(initialProduct?.firstUploadDate || initialProduct?.createdAt || new Date()));
+  
+  const [editForm, setEditForm] = useState({ 
+    ...initialProduct,
+    seoTags: initialProduct?.seoTags || "",
+    category: initialProduct?.category || "Otros",
+    firstUploadDate: initialProduct?.firstUploadDate || initialProduct?.createdAt || new Date().toISOString()
+  });
 
-  useEffect(() => {
-    const data = DatabaseService.getAllProducts() || [];
-    const brands = data.map(p => p.brand).filter(b => b);
-    setExistingBrands([...new Set(brands)]);
-    const tags = data.flatMap(p => p.tags ? p.tags.split(',').map(t => t.trim()) : []);
-    setExistingTags([...new Set(tags)].filter(t => t));
-  }, []);
+  const categories = ["Juguetes", "Abrigo", "Camisetas", "Pantalones", "Calzado", "Libros", "Accesorios", "Lotes", "Sudaderas", "Vestidos", "Otros"];
 
-  const filteredBrands = existingBrands.filter(b => 
-    editForm.brand && b.toLowerCase().includes(editForm.brand.toLowerCase()) && b.toLowerCase() !== editForm.brand.toLowerCase()
-  ).slice(0, 5);
-
-  const filteredTags = existingTags.filter(t => {
-    const lastTag = (editForm.seoTags || "").split(',').pop().trim().toLowerCase();
-    return lastTag && t.toLowerCase().includes(lastTag) && !(editForm.seoTags || "").toLowerCase().includes(t.toLowerCase());
-  }).slice(0, 5);
-
-  const handleQuickAdd = (type, value) => {
-    if (type === 'brand') {
-      setEditForm({ ...editForm, brand: value });
-    } else {
-      const parts = (editForm.seoTags || "").split(',').map(t => t.trim());
-      parts.pop();
-      const newTags = [...parts, value].join(', ');
-      setEditForm({ ...editForm, seoTags: newTags + ', ' });
-    }
-  };
-
-  const pickImage = async (fromCamera = false) => {
-    const result = fromCamera 
-      ? await ImagePicker.launchCameraAsync({ quality: 0.7 })
-      : await ImagePicker.launchImageLibraryAsync({ allowsMultipleSelection: true, quality: 0.7 });
-
-    if (!result.canceled) {
-      const uris = result.assets.map(a => a.uri);
-      setEditForm({ ...editForm, images: [...editForm.images, ...uris] });
-    }
-  };
+  // Lógica de Temperatura sincronizada con ProductList (45 días)
+  const statusInfo = useMemo(() => {
+    const now = new Date();
+    const uploadDate = new Date(product.firstUploadDate || product.createdAt);
+    const daysOld = Math.floor((now - uploadDate) / (1000 * 60 * 60 * 24));
+    
+    return {
+      daysOld,
+      isNew: daysOld <= 7,
+      isHot: (product.views > 50 || product.favorites > 10) && daysOld < 30,
+      isCold: daysOld >= 45 // Sincronizado a 45 días
+    };
+  }, [product]);
 
   const handleSaveEdit = () => {
-    let currentErrors = {};
-    if (!editForm.title?.trim()) currentErrors.title = "Obligatorio";
-    if (!editForm.brand?.trim()) currentErrors.brand = "Obligatorio";
-    if (!editForm.price?.toString().trim()) currentErrors.price = "Falta precio";
-    if (!editForm.description?.trim()) currentErrors.description = "Obligatorio";
-    if (!editForm.seoTags?.trim()) currentErrors.seoTags = "Añade etiquetas";
-    if (editForm.images.length < 3) currentErrors.images = "Mínimo 3 fotos";
-
-    setErrors(currentErrors);
-    if (Object.keys(currentErrors).length > 0) return;
-
-    if (DatabaseService.updateProduct(editForm)) {
-      setProduct(editForm);
+    const updatedData = { ...product, ...editForm };
+    if (DatabaseService.updateProduct(updatedData)) {
+      setProduct(updatedData);
       setIsEditing(false);
-      LogService.success("Producto actualizado");
+      LogService.add("✅ Cambios guardados", "success");
+    } else {
+      Alert.alert("Error", "No se pudo actualizar la base de datos.");
     }
   };
 
-  const handleDelete = () => {
-    Alert.alert(
-      "Eliminar Producto",
-      "¿Estás seguro de que quieres eliminar este artículo para siempre?",
-      [
-        { text: "Cancelar", style: "cancel" },
-        { 
-          text: "Sí, Eliminar", 
-          style: "destructive", 
-          onPress: () => {
-            DatabaseService.deleteProduct(product.id);
-            navigation.goBack();
-          } 
+  const handleMarkRepublicated = () => {
+    Alert.alert("🔄 Confirmar Resubida", "¿Has resubido este artículo? Se reseteará la fecha a hoy.", [
+      { text: "No" },
+      { text: "Sí, Resubido", onPress: () => {
+          const now = new Date().toISOString();
+          const updatedProduct = { ...product, firstUploadDate: now };
+          if (DatabaseService.updateProduct(updatedProduct)) {
+             setProduct(updatedProduct);
+             setEditForm(prev => ({ ...prev, firstUploadDate: now }));
+             LogService.add("🚀 Fecha reseteada", "success");
+          }
         }
-      ]
-    );
+      }
+    ]);
   };
 
-  const confirmSold = () => {
-    if (DatabaseService.markAsSold(product.id, soldPrice)) {
-      setShowSoldModal(false);
-      navigation.goBack(); 
-    }
+  const renderCalendarPicker = () => {
+    const year = navDate.getFullYear();
+    const month = navDate.getMonth();
+    const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+    return (
+      <Modal visible={showCalendar} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.calendarCard}>
+            <View style={styles.calHeader}>
+              <TouchableOpacity onPress={() => setNavDate(new Date(year + (-1), month, 1))}><Icon name="chevrons-left" size={20} color="#FF6B35" /></TouchableOpacity>
+              <TouchableOpacity onPress={() => setNavDate(new Date(year, month - 1, 1))}><Icon name="chevron-left" size={20} color="#FF6B35" /></TouchableOpacity>
+              <View style={styles.monthYearTitle}>
+                <Text style={styles.monthText}>{monthNames[month]}</Text>
+                <Text style={styles.yearText}>{year}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setNavDate(new Date(year, month + 1, 1))}><Icon name="chevron-right" size={20} color="#FF6B35" /></TouchableOpacity>
+              <TouchableOpacity onPress={() => setNavDate(new Date(year + 1, month, 1))}><Icon name="chevrons-right" size={20} color="#FF6B35" /></TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={styles.daysGrid}>
+              {days.map(d => {
+                const isSelected = new Date(editForm.firstUploadDate).getDate() === d && 
+                                   new Date(editForm.firstUploadDate).getMonth() === month &&
+                                   new Date(editForm.firstUploadDate).getFullYear() === year;
+                return (
+                  <TouchableOpacity 
+                    key={d} 
+                    style={[styles.dayCircle, isSelected && styles.dayCircleActive]}
+                    onPress={() => {
+                      setEditForm({...editForm, firstUploadDate: new Date(year, month, d).toISOString()});
+                      setShowCalendar(false);
+                    }}
+                  >
+                    <Text style={[styles.dayText, isSelected && styles.dayTextActive]}>{d}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <TouchableOpacity style={styles.closeCal} onPress={() => setShowCalendar(false)}>
+              <Text style={styles.closeCalText}>CERRAR</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
   };
 
   return (
     <View style={styles.container}>
+      {renderCalendarPicker()}
       <ScrollView showsVerticalScrollIndicator={false}>
-        <View style={styles.carouselWrapper}>
-          <ScrollView horizontal pagingEnabled>
-            {(isEditing ? editForm.images : product.images).map((uri, i) => (
-              <View key={i} style={{width}}>
-                <Image source={{ uri }} style={styles.mainImage} />
-                {isEditing && (
-                   <TouchableOpacity 
-                    style={styles.removePhotoBadge} 
-                    onPress={() => setEditForm({...editForm, images: editForm.images.filter((_, idx) => idx !== i)})}
-                   >
-                     <Icon name="x" size={16} color="#FFF" />
-                   </TouchableOpacity>
-                )}
-              </View>
-            ))}
-          </ScrollView>
-          <View style={styles.topActions}>
-            <TouchableOpacity style={styles.circleBtn} onPress={() => navigation.goBack()}><Icon name="arrow-left" size={24} color="#1A1A2E" /></TouchableOpacity>
-          </View>
+        <View style={styles.imageContainer}>
+          <Image source={{ uri: product.images[0] }} style={styles.mainImage} />
+          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+            <Icon name="arrow-left" size={22} color="#1A1A2E" />
+          </TouchableOpacity>
         </View>
 
-        <View style={styles.content}>
+        <View style={styles.contentCard}>
           {isEditing ? (
-            <View style={styles.form}>
-              <Text style={[styles.label, errors.images && {color: '#FF4D4D'}]}>FOTOS *</Text>
-              <View style={styles.photoRow}>
-                <TouchableOpacity style={[styles.photoActionBtn, errors.images && styles.inputError]} onPress={() => pickImage(true)}><Icon name="camera" size={18} color="#FF6B35" /><Text style={styles.photoActionText}>Cámara</Text></TouchableOpacity>
-                <TouchableOpacity style={[styles.photoActionBtn, errors.images && styles.inputError]} onPress={() => pickImage(false)}><Icon name="image" size={18} color="#FF6B35" /><Text style={styles.photoActionText}>Galería</Text></TouchableOpacity>
-              </View>
-              {errors.images && <Text style={styles.errorText}>{errors.images}</Text>}
+            <View>
+              <Text style={styles.editTitle}>Editar Información</Text>
+              
+              <Text style={styles.label}>FECHA DE SUBIDA REAL</Text>
+              <TouchableOpacity style={styles.calendarTrigger} onPress={() => {
+                setNavDate(new Date(editForm.firstUploadDate));
+                setShowCalendar(true);
+              }}>
+                <Icon name="calendar" size={18} color="#FF6B35" />
+                <Text style={styles.calendarTriggerText}>
+                  {new Date(editForm.firstUploadDate).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}
+                </Text>
+              </TouchableOpacity>
 
-              <Text style={styles.label}>TÍTULO *</Text>
-              <TextInput style={[styles.input, errors.title && styles.inputError]} value={editForm.title} onChangeText={t => setEditForm({...editForm, title: t})} />
-              {errors.title && <Text style={styles.errorText}>{errors.title}</Text>}
-
-              <Text style={styles.label}>MARCA *</Text>
-              <TextInput style={[styles.input, errors.brand && styles.inputError]} value={editForm.brand} onChangeText={t => setEditForm({...editForm, brand: t})} />
-              <View style={styles.suggestionRow}>
-                {filteredBrands.map(b => (
-                  <TouchableOpacity key={b} style={styles.tagChip} onPress={() => handleQuickAdd('brand', b)}><Text style={styles.tagChipText}>+{b}</Text></TouchableOpacity>
-                ))}
-              </View>
-
-              <Text style={styles.label}>PRECIO (€) *</Text>
-              <TextInput style={[styles.input, errors.price && styles.inputError]} value={editForm.price?.toString()} keyboardType="numeric" onChangeText={t => setEditForm({...editForm, price: t})} />
-
-              <Text style={styles.label}>ESTADO</Text>
-              <View style={styles.suggestionRow}>
-                {['Nuevo', 'Muy bueno', 'Bueno', 'Aceptable'].map(cond => (
-                  <TouchableOpacity key={cond} style={[styles.tagChip, editForm.condition === cond && {backgroundColor: '#FF6B35'}]} onPress={() => setEditForm({...editForm, condition: cond})}>
-                    <Text style={[styles.tagChipText, editForm.condition === cond && {color: '#FFF'}]}>{cond}</Text>
+              <Text style={styles.label}>CATEGORÍA</Text>
+              <View style={styles.catGrid}>
+                {categories.map(cat => (
+                  <TouchableOpacity 
+                    key={cat} 
+                    style={[styles.catBtn, editForm.category === cat && styles.catBtnActive]}
+                    onPress={() => setEditForm({...editForm, category: cat})}
+                  >
+                    <Text style={[styles.catBtnText, editForm.category === cat && styles.catBtnTextActive]}>{cat}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
 
-              <Text style={styles.label}>DESCRIPCIÓN *</Text>
-              <TextInput style={[styles.input, styles.textArea, errors.description && styles.inputError]} value={editForm.description} multiline onChangeText={t => setEditForm({...editForm, description: t})} />
+              <Text style={styles.label}>ETIQUETAS SEO</Text>
+              <TextInput 
+                style={styles.input} 
+                multiline value={editForm.seoTags} 
+                placeholder="Ej: vintage, oversized, cotton..."
+                onChangeText={t => setEditForm({...editForm, seoTags: t})}
+              />
 
-              <Text style={styles.label}>ETIQUETAS SEO *</Text>
-              <TextInput style={[styles.input, errors.seoTags && styles.inputError]} value={editForm.seoTags} onChangeText={t => setEditForm({...editForm, seoTags: t})} />
-              <View style={styles.suggestionRow}>
-                {filteredTags.map(t => (
-                  <TouchableOpacity key={t} style={styles.tagChip} onPress={() => handleQuickAdd('tag', t)}><Text style={styles.tagChipText}>+{t}</Text></TouchableOpacity>
-                ))}
-              </View>
-              {errors.seoTags && <Text style={styles.errorText}>{errors.seoTags}</Text>}
-
-              <View style={styles.actionButtonsRow}>
-                <TouchableOpacity style={styles.btnActionDelete} onPress={handleDelete}>
-                  <Icon name="trash-2" size={20} color="#FF4D4D" />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.btnActionSave} onPress={handleSaveEdit}>
-                  <Text style={styles.btnSaveText}>GUARDAR CAMBIOS</Text>
-                </TouchableOpacity>
+              <View style={styles.editActions}>
+                <TouchableOpacity style={styles.btnSave} onPress={handleSaveEdit}><Text style={styles.btnSaveText}>Guardar</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.btnCancel} onPress={() => setIsEditing(false)}><Text style={styles.btnCancelText}>Cerrar</Text></TouchableOpacity>
               </View>
             </View>
           ) : (
             <>
-              <View style={styles.headerInfo}>
-                <View style={styles.brandGroup}>
-                  <Text style={styles.brandText}>{product.brand}</Text>
-                  <View style={styles.tagChip}><Text style={styles.tagChipText}>{product.condition || 'Usado'}</Text></View>
+              <View style={styles.topRow}>
+                <Text style={styles.brandText}>{product.brand || 'Vinted'}</Text>
+                <View style={styles.categoryBadge}>
+                   <Text style={styles.categoryBadgeText}>{product.category || 'Otros'}</Text>
                 </View>
-                {/* Estadísticas de Vinted */}
-                <View style={{
-                  flexDirection: 'row', 
-                  backgroundColor: '#F8F9FA', 
-                  padding: 12, 
-                  borderRadius: 15, 
-                  marginVertical: 10,
-                  justifyContent: 'space-around'
+              </View>
+              
+              <Text style={styles.titleText}>{product.title}</Text>
+              
+              <View style={styles.statsPanel}>
+                <View style={styles.stat}><Text style={styles.statLabel}>VISTAS</Text><Text style={styles.statVal}>{product.views || 0}</Text></View>
+                <View style={styles.stat}>
+                  <Text style={styles.statLabel}>DÍAS</Text>
+                  <Text style={[styles.statVal, statusInfo.isCold && {color: '#FF4D4D'}]}>{statusInfo.daysOld}</Text>
+                </View>
+                <View style={styles.stat}>
+                  <Text style={styles.statLabel}>TEMP</Text>
+                  <Icon name={statusInfo.isHot ? "zap" : (statusInfo.isCold ? "wind" : "activity")} size={16} color={statusInfo.isHot ? "#FF4D4D" : (statusInfo.isCold ? "#33b5e5" : "#CCC")} />
+                </View>
+              </View>
+
+              <Text style={styles.sectionTitle}>Descripción</Text>
+              <Text style={styles.descText}>{product.description}</Text>
+
+              {product.seoTags ? (
+                <View style={styles.tagSection}>
+                  <Text style={styles.sectionTitle}>Etiquetas SEO</Text>
+                  <View style={styles.tagCloud}>
+                    {product.seoTags.split(',').map((tag, i) => (
+                      <View key={i} style={styles.seoTag}><Text style={styles.seoTagText}>#{tag.trim()}</Text></View>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+
+              <View style={styles.bottomActionsRow}>
+                <TouchableOpacity style={styles.actionBtn} onPress={() => setIsEditing(true)}>
+                  <Icon name="edit-3" size={18} color="#1A1A2E" />
+                  <Text style={styles.actionBtnText}>Editar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#33b5e515'}]} onPress={handleMarkRepublicated}>
+                  <Icon name="refresh-cw" size={18} color="#33b5e5" />
+                  <Text style={[styles.actionBtnText, {color: '#33b5e5'}]}>Resubido</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#FF4D4D15'}]} onPress={() => {
+                  DatabaseService.deleteProduct(product.id);
+                  navigation.goBack();
                 }}>
-                  <View style={{flexDirection: 'row', alignItems: 'center', gap: 5}}>
-                    <Icon name="eye" size={14} color="#666" />
-                    <Text style={{fontSize: 12, color: '#444', fontWeight: 'bold'}}>{product.views || 0} visitas</Text>
-                  </View>
-                  <View style={{flexDirection: 'row', alignItems: 'center', gap: 5}}>
-                    <Icon name="heart" size={14} color="#FF4D4D" />
-                    <Text style={{fontSize: 12, color: '#444', fontWeight: 'bold'}}>{product.favorites || 0} favoritos</Text>
-                  </View>
-                </View>
-                <Text style={styles.price}>{product.price}€</Text>
-              </View>
-              <Text style={styles.title}>{product.title}</Text>
-              <Text style={styles.descriptionText}>{product.description}</Text>
-              <View style={styles.suggestionRow}>
-                {(product.seoTags || "").split(',').map((tag, i) => tag.trim() ? (
-                  <View key={i} style={styles.seoBadge}><Text style={styles.seoBadgeText}>#{tag.trim()}</Text></View>
-                ) : null)}
-              </View>
-
-              <View style={styles.divider} />
-
-              {/* TRES BOTONES JUNTOS: EDITAR, VENDER Y ELIMINAR (A LA DERECHA) */}
-              <View style={styles.mainActionsRow}>
-                  <TouchableOpacity 
-                  style={styles.premiumSoldBtn} 
-                  onPress={() => setShowSoldModal(true)}
-                >
-                  <View style={styles.iconCircle}><Icon name="dollar-sign" size={20} color="#FFF" /></View>
-                  <Text style={styles.premiumSoldText}>Vendido</Text>
+                  <Icon name="trash-2" size={18} color="#FF4D4D" />
+                  <Text style={[styles.actionBtnText, {color: '#FF4D4D'}]}>Borrar</Text>
                 </TouchableOpacity>
-                
-                <TouchableOpacity 
-                  style={styles.actionCircleBtnDelete} 
-                  onPress={handleDelete}
-                >
-                  <Icon name="trash-2" size={22} color="#FF4D4D" />
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                  style={styles.actionCircleBtnEdit} 
-                  onPress={() => { setIsEditing(true); setEditForm({...product}); }}
-                >
-                  <Icon name="edit-2" size={22} color="#1A1A2E" />
-                </TouchableOpacity>                
               </View>
             </>
           )}
         </View>
       </ScrollView>
-
-      <Modal visible={showSoldModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Confirmar Venta</Text>
-            <TextInput style={styles.modalInput} keyboardType="numeric" value={soldPrice} onChangeText={setSoldPrice} autoFocus />
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalCancel} onPress={() => setShowSoldModal(false)}><Text style={styles.modalCancelText}>Cancelar</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.modalConfirm} onPress={confirmSold}><Text style={styles.modalConfirmText}>Vendido</Text></TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </View>
-      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F9FA' },
-  carouselWrapper: { height: 400, position: 'relative' },
-  mainImage: { width: width, height: 400, resizeMode: 'cover' },
-  removePhotoBadge: { position: 'absolute', top: 120, right: 20, backgroundColor: '#FF4D4D', width: 30, height: 30, borderRadius: 15, justifyContent: 'center', alignItems: 'center' },
-  topActions: { position: 'absolute', top: 50, left: 20, right: 20, flexDirection: 'row', justifyContent: 'space-between' },
-  circleBtn: { backgroundColor: '#FFF', width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', elevation: 5 },
-  content: { padding: 25, marginTop: -30, backgroundColor: '#FFF', borderTopLeftRadius: 30, borderTopRightRadius: 30, minHeight: 400 },
-  headerInfo: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 },
-  brandGroup: { gap: 8 },
-  brandText: { fontSize: 14, fontWeight: '900', color: '#FF6B35', textTransform: 'uppercase' },
-  price: { fontSize: 32, fontWeight: '900', color: '#1A1A2E' },
-  title: { fontSize: 24, fontWeight: '800', color: '#1A1A2E', marginBottom: 15 },
-  descriptionText: { fontSize: 15, color: '#555', lineHeight: 22, marginBottom: 20 },
-  divider: { height: 1, backgroundColor: '#EEE', marginVertical: 25 },
-  
-  // FILA DE ACCIONES PRINCIPALES
-  mainActionsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  premiumSoldBtn: { flex: 1, backgroundColor: '#1A1A2E', flexDirection: 'row', alignItems: 'center', padding: 8, borderRadius: 20, height: 60 },
-  iconCircle: { backgroundColor: '#00D9A3', width: 44, height: 44, borderRadius: 15, justifyContent: 'center', alignItems: 'center' },
-  premiumSoldText: { color: '#FFF', fontWeight: '900', fontSize: 14, flex: 1, textAlign: 'center', marginRight: 10 },
-  actionCircleBtnDelete: { backgroundColor: '#FFF2F2', width: 60, height: 60, borderRadius: 20, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FF4D4D15' },
-  actionCircleBtnEdit: { backgroundColor: '#F8F9FA', width: 60, height: 60, borderRadius: 20, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#EEE' },
-
-  label: { fontSize: 10, fontWeight: '900', color: '#1A1A2E', marginBottom: 8, marginTop: 15, letterSpacing: 1 },
-  input: { backgroundColor: '#F8F9FA', borderRadius: 15, padding: 15, fontSize: 15, borderWidth: 1, borderColor: '#EEE' },
-  inputError: { borderColor: '#FF4D4D', backgroundColor: '#FFF8F8' },
-  errorText: { color: '#FF4D4D', fontSize: 10, fontWeight: '800', marginTop: 5 },
-  textArea: { height: 110, textAlignVertical: 'top' },
-  photoRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
-  photoActionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#F8F9FA', padding: 15, borderRadius: 15, borderWidth: 1, borderColor: '#EEE' },
-  photoActionText: { fontSize: 12, fontWeight: '800', color: '#1A1A2E' },
-  suggestionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-  tagChip: { backgroundColor: '#FF6B3515', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
-  tagChipText: { fontSize: 11, color: '#FF6B35', fontWeight: '800' },
-  seoBadge: { backgroundColor: '#F0F0F0', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 },
-  seoBadgeText: { fontSize: 11, color: '#666', fontWeight: '700' },
-  
-  actionButtonsRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 30 },
-  btnActionSave: { flex: 1, backgroundColor: '#1A1A2E', padding: 20, borderRadius: 20, alignItems: 'center' },
-  btnActionDelete: { backgroundColor: '#FFF2F2', padding: 18, borderRadius: 20, borderWidth: 1, borderColor: '#FF4D4D20', justifyContent: 'center', alignItems: 'center' },
-  btnSaveText: { color: '#FFF', fontWeight: '900', fontSize: 15 },
-
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
-  modalBox: { width: '85%', backgroundColor: '#FFF', borderRadius: 25, padding: 25 },
-  modalTitle: { fontSize: 20, fontWeight: '900', color: '#1A1A2E', textAlign: 'center' },
-  modalInput: { backgroundColor: '#F8F9FA', borderRadius: 15, padding: 15, fontSize: 24, textAlign: 'center', fontWeight: 'bold', color: '#FF6B35', marginVertical: 15 },
-  modalButtons: { flexDirection: 'row', gap: 10 },
-  modalCancel: { flex: 1, padding: 15, borderRadius: 15, alignItems: 'center' },
-  modalCancelText: { color: '#999', fontWeight: 'bold' },
-  modalConfirm: { flex: 2, backgroundColor: '#00D9A3', padding: 15, borderRadius: 15, alignItems: 'center' },
-  modalConfirmText: { color: '#FFF', fontWeight: 'bold' }
+  imageContainer: { height: 350 },
+  mainImage: { width: width, height: 350 },
+  backBtn: { position: 'absolute', top: 50, left: 20, backgroundColor: '#FFF', width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', elevation: 5 },
+  contentCard: { flex: 1, backgroundColor: '#FFF', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 25, marginTop: -30 },
+  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
+  brandText: { color: '#FF6B35', fontWeight: '900', fontSize: 11, letterSpacing: 1 },
+  categoryBadge: { backgroundColor: '#F0F9FF', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
+  categoryBadgeText: { color: '#33b5e5', fontSize: 10, fontWeight: '800' },
+  titleText: { fontSize: 22, fontWeight: '900', color: '#1A1A2E' },
+  statsPanel: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: '#F8F9FA', padding: 15, borderRadius: 20, marginVertical: 20 },
+  stat: { alignItems: 'center' },
+  statLabel: { fontSize: 9, color: '#999', fontWeight: '800' },
+  statVal: { fontSize: 16, fontWeight: '900', color: '#1A1A2E' },
+  sectionTitle: { fontSize: 12, fontWeight: '900', color: '#1A1A2E', marginBottom: 8, marginTop: 10 },
+  descText: { fontSize: 14, color: '#666', lineHeight: 20, marginBottom: 15 },
+  tagSection: { marginBottom: 20 },
+  tagCloud: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  seoTag: { backgroundColor: '#F0F0F0', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  seoTagText: { fontSize: 11, color: '#444', fontWeight: '700' },
+  bottomActionsRow: { flexDirection: 'row', gap: 10, marginTop: 10, marginBottom: 30 },
+  actionBtn: { flex: 1, alignItems: 'center', gap: 8, backgroundColor: '#F0F0F0', paddingVertical: 15, borderRadius: 20 },
+  actionBtnText: { fontSize: 11, fontWeight: '800', color: '#1A1A2E' },
+  editTitle: { fontSize: 18, fontWeight: '900', marginBottom: 15 },
+  label: { fontSize: 10, fontWeight: '900', color: '#999', marginTop: 15, marginBottom: 8 },
+  calendarTrigger: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 15, backgroundColor: '#F8F9FA', borderRadius: 15, borderWidth: 1, borderColor: '#EEE' },
+  calendarTriggerText: { fontWeight: '700', color: '#1A1A2E' },
+  input: { backgroundColor: '#F8F9FA', borderRadius: 12, padding: 12, minHeight: 60, textAlignVertical: 'top', borderWidth: 1, borderColor: '#EEE' },
+  catGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  catBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: '#F0F0F0' },
+  catBtnActive: { backgroundColor: '#1A1A2E' },
+  catBtnText: { fontSize: 11, color: '#666', fontWeight: '700' },
+  catBtnTextActive: { color: '#FFF' },
+  editActions: { flexDirection: 'row', gap: 10, marginTop: 25 },
+  btnSave: { flex: 2, backgroundColor: '#1A1A2E', padding: 15, borderRadius: 15, alignItems: 'center' },
+  btnSaveText: { color: '#FFF', fontWeight: '900' },
+  btnCancel: { flex: 1, backgroundColor: '#EEE', padding: 15, borderRadius: 15, alignItems: 'center' },
+  btnCancelText: { color: '#666', fontWeight: '800' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  calendarCard: { width: '90%', maxHeight: '70%', backgroundColor: '#FFF', borderRadius: 25, padding: 20, alignItems: 'center' },
+  calHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: 20, borderBottomWidth: 1, borderBottomColor: '#EEE', paddingBottom: 15 },
+  monthYearTitle: { alignItems: 'center' },
+  monthText: { fontSize: 16, fontWeight: '900', color: '#1A1A2E' },
+  yearText: { fontSize: 12, color: '#FF6B35', fontWeight: '800' },
+  daysGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' },
+  dayCircle: { width: 40, height: 40, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginBottom: 5 },
+  dayCircleActive: { backgroundColor: '#1A1A2E' },
+  dayText: { fontSize: 14, fontWeight: '600', color: '#1A1A2E' },
+  dayTextActive: { color: '#FFF' },
+  closeCal: { marginTop: 15, padding: 10 },
+  closeCalText: { fontWeight: '900', color: '#999', fontSize: 12 }
 });
