@@ -1,0 +1,82 @@
+const scriptConsola = (() => {
+    console.log("🚀 Iniciando extracción ultra-precisa...");
+    
+    // Seleccionamos SOLO los contenedores de nivel superior para evitar duplicados
+    const items = document.querySelectorAll('.new-item-box__container');
+    const products = [];
+    const now = new Date().toISOString();
+
+    items.forEach((item) => {
+        try {
+            // 1. Extraer ID limpio (solo números) del data-testid
+            const testId = item.getAttribute('data-testid') || "";
+            const rawId = testId.split('-').pop(); 
+            const id = `vinted_${rawId}`;
+
+            // Evitar procesar si ya existe este ID en esta ejecución
+            if (products.find(p => p.id === id)) return;
+
+            // 2. Extraer información del ALT de la imagen
+            const imgElement = item.querySelector('img');
+            const altText = imgElement ? imgElement.alt : "";
+            
+            // Limpieza de Título: Tomamos solo lo que hay ANTES de la primera coma
+            // Ejemplo: "Capa de baño Mayoral, marca: Mayoral..." -> "Capa de baño Mayoral"
+            const title = altText.split(',')[0] || "Producto sin título";
+
+            // Extraer Marca usando regex para buscar el patrón "marca: X"
+            const brandMatch = altText.match(/marca:\s*([^,]+)/);
+            const brand = brandMatch ? brandMatch[1] : "Genérico";
+
+            // 3. Imagen
+            const imageUrl = imgElement ? imgElement.src : "";
+
+            // 4. Estado (Vendido / Disponible)
+            // Buscamos el texto "Vendido" dentro de este contenedor específico
+            const statusText = item.innerText.toLowerCase();
+            const isSold = statusText.includes('vendido');
+
+            // 5. Vistas y Favoritos (Selectores específicos del nuevo diseño)
+            const viewsElement = item.querySelector('[data-testid$="--description-title"]');
+            const favsElement = item.querySelector('[data-testid$="--description-subtitle"]');
+            
+            const views = viewsElement ? parseInt(viewsElement.innerText.replace(/[^0-9]/g, '')) || 0 : 0;
+            const favorites = favsElement ? parseInt(favsElement.innerText.replace(/[^0-9]/g, '')) || 0 : 0;
+
+            // 6. Precio (Limpieza de moneda)
+            const priceElement = item.querySelector('[data-testid$="--price-text"]');
+            const priceText = priceElement ? priceElement.innerText : "0";
+            const price = parseFloat(priceText.replace(/[^0-9,.]/g, '').replace(',', '.')) || 0;
+
+            products.push({
+                id: id,
+                title: title.trim(),
+                brand: brand.trim(),
+                price: price,
+                description: title.trim(),
+                images: [imageUrl],
+                status: isSold ? 'sold' : 'available',
+                views: views,
+                favorites: favorites,
+                soldDate: isSold ? now : null,
+                createdAt: now
+            });
+        } catch (err) {
+            console.error("Error en item:", err);
+        }
+    });
+
+    // Descarga automática
+    if (products.length > 0) {
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(products, null, 2));
+        const downloadAnchorNode = document.createElement('a');
+        downloadAnchorNode.setAttribute("href", dataStr);
+        downloadAnchorNode.setAttribute("download", `vinted_limpio_${new Date().getTime()}.json`);
+        document.body.appendChild(downloadAnchorNode);
+        downloadAnchorNode.click();
+        downloadAnchorNode.remove();
+        console.log(`✅ ¡Éxito! ${products.length} productos únicos descargados.`);
+    } else {
+        console.error("❌ No se encontraron productos. Asegúrate de estar en tu escaparate.");
+    }
+})();
