@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { MMKV } from 'react-native-mmkv';
 import LogService, { LOG_CTX } from './LogService';
 
@@ -181,6 +182,20 @@ try {
 } catch (e) {
   LogService.add('❌ Fallo crítico MMKV: ' + e.message, 'error');
 }
+// ─────────────────────────────────────────────
+// PRODUCCION O DESARROLLO  
+// ─────────────────────────────────────────────
+export const getEnv = () => {
+  // __DEV__ es una variable global de React Native que es true 
+  // cuando corres la app localmente y false cuando es una build de producción
+  if (__DEV__) return 'development';
+  
+  // Si no es dev, revisamos el owner o el perfil de EAS
+  const isPreview = Constants.expoConfig.releaseChannel === 'preview';
+  return isPreview ? 'preview' : 'production';
+};
+
+const ENV = getEnv();
 
 // ─────────────────────────────────────────────
 // DATABASE SERVICE
@@ -193,6 +208,15 @@ export class DatabaseService {
     try {
       const raw = storage.getString(KEYS.CONFIG);
       const saved = raw ? JSON.parse(raw) : {};
+
+    if (ENV === 'development') {
+        console.log("🛠️ Estás en modo Desarrollo");
+    }
+    else if (ENV === 'preview') { 
+        console.log("👀 Estás en modo Preview") ;
+    }
+
+
       // Normalizar seasonalMap: garantizar arrays
       if (saved.seasonalMap) {
         for (let i = 0; i < 12; i++) {

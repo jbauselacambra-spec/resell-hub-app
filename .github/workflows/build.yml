@@ -1,0 +1,36 @@
+name: Mobile Build CI/CD
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🏗 Checkout
+        uses: actions/checkout@v3
+
+      - name: ⚙️ Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: 🛠 Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 📦 Install dependencies
+        run: npm install
+
+      - name: 🚀 Build APK (Preview)
+        if: github.event_name == 'pull_request'
+        run: eas build --platform android --profile preview --non-interactive
+
+      - name: 🏆 Build Production (AAB)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: eas build --platform android --profile production --non-interactive
