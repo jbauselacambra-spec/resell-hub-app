@@ -1,8 +1,8 @@
 name: Mobile Build CI/CD
 on:
-  pull_request:
-    branches: [ main ]
   push:
+    branches: [ main ]
+  pull_request:
     branches: [ main ]
 
 jobs:
@@ -16,7 +16,8 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: 18
-          cache: 'npm'
+          # Eliminamos la opción automática de cache para evitar el error 400
+          # npm install ya es bastante rápido con package-lock.json
 
       - name: 🛠 Setup EAS
         uses: expo/expo-github-action@v8
@@ -25,12 +26,18 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: 📦 Install dependencies
-        run: npm install
+        run: |
+          npm ci --legacy-peer-deps
+          # Usamos 'npm ci' en lugar de 'npm install' porque es más rápido
+          # y está diseñado específicamente para entornos de integración continua (CI)
+          # ya que usa exactamente lo que hay en tu package-lock.json
 
       - name: 🚀 Build APK (Preview)
+        # Si es un Pull Request, genera solo el APK de pruebas
         if: github.event_name == 'pull_request'
         run: eas build --platform android --profile preview --non-interactive
 
-      - name: 🏆 Build Production (AAB)
+      - name: 🏆 Build Production
+        # Si es un Push a main, genera la versión de producción
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: eas build --platform android --profile production --non-interactive
