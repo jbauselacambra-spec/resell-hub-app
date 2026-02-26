@@ -1,9 +1,7 @@
 name: Mobile Build CI/CD
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches: [ main, develop ] # Escucha cambios en ambas ramas
 
 jobs:
   build:
@@ -15,23 +13,24 @@ jobs:
       - name: ⚙️ Setup Node
         uses: actions/setup-node@v3
         with:
-          node-version: 20 # <--- CAMBIADO de 18 a 20 para ser compatible con EAS CLI
+          node-version: 20
 
       - name: 🛠 Setup EAS
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
-          packager: npm # <--- FORZAMOS npm para evitar el error de Yarn
+          packager: npm
 
       - name: 📦 Install dependencies
-        run: |
-          npm ci --legacy-peer-deps
+        run: npm ci --legacy-peer-deps
 
-      - name: 🚀 Build APK (Preview)
-        if: github.event_name == 'pull_request'
-        run: eas build --platform android --profile preview --non-interactive
+      # --- LÓGICA DE DESARROLLO ---
+      - name: 🛠 Build Development APK
+        if: github.ref == 'refs/heads/develop'
+        run: eas build --platform android --profile development --non-interactive
 
-      - name: 🏆 Build Production
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      # --- LÓGICA DE PRODUCCIÓN ---
+      - name: 🚀 Build Production APK
+        if: github.ref == 'refs/heads/main'
         run: eas build --platform android --profile production --non-interactive
