@@ -1,0 +1,22 @@
+Ejemplo 1 (Para crear una nueva pantalla):
+
+"@UI_SPECIALIST: Crea la pantalla de detalles del producto. Usa una lista optimizada y asegúrate de que el diseño sea moderno. Usa los colores definidos en el tema."
+
+Ejemplo 2 (Para lógica de datos):
+
+"@ARCHITECT: Necesito sincronizar los productos de la API con MMKV. Diseña el servicio para que sea eficiente y no bloquee el hilo principal."
+
+Ejemplo 3 (Para subir el trabajo):
+
+"@DEVOPS: Revisa si he modificado alguna variable de entorno que deba añadir al secreto de GitHub antes de hacer el push a develop."
+
+4. Estandarización de Calidad (Checklist del Agente)
+Para que el proceso sea profesional, añade este "Checklist de Calidad" a tu archivo .cursorrules. Obliga a los agentes a cumplirlo antes de darte el código:
+
+Typing: ¿Están definidos los tipos o PropTypes?
+
+Performance: ¿Se están usando memo o useCallback en componentes pesados?
+
+Logs: ¿Hay logs informativos para depurar en el APK de desarrollo?
+
+Git: ¿El mensaje de commit sigue la convención feat:, fix:, o chore:?
