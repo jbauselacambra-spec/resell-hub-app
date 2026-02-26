@@ -1,5 +1,5 @@
 import 'react-native-gesture-handler';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -15,6 +15,8 @@ import LogsScreen from './screens/LogsScreen';
 import SoldEditDetailView from './screens/SoldEditDetailView';
 import AdvancedStatsScreen from './screens/AdvancedStatsScreen';
 import SettingsScreen from './screens/SettingsScreen'; // NUEVA
+import LoginScreen from './src/screens/LoginScreen';
+import AuthService from './src/services/authService';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -43,14 +45,46 @@ function MainTabs() {
 }
 
 export default function App() {
+  const [isReady, setIsReady] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    try {
+      const token = AuthService.getToken();
+      setIsAuthenticated(!!token);
+    } finally {
+      setIsReady(true);
+    }
+  }, []);
+
+  if (!isReady) {
+    return null;
+  }
+
   return (
     <SafeAreaProvider>
       <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="Main" component={MainTabs} />
-          <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
-          <Stack.Screen name="SoldEditDetail" component={SoldEditDetailView} />
-        </Stack.Navigator>
+        {isAuthenticated ? (
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Main" component={MainTabs} />
+            <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
+            <Stack.Screen name="SoldEditDetail" component={SoldEditDetailView} />
+          </Stack.Navigator>
+        ) : (
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Login">
+              {(props) => (
+                <LoginScreen
+                  {...props}
+                  onLogin={() => setIsAuthenticated(true)}
+                />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="Main" component={MainTabs} />
+            <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
+            <Stack.Screen name="SoldEditDetail" component={SoldEditDetailView} />
+          </Stack.Navigator>
+        )}
       </NavigationContainer>
     </SafeAreaProvider>
   );
