@@ -1,7 +1,7 @@
 name: Mobile Build CI/CD
 on:
   push:
-    branches: [ main, develop ] # Escucha cambios en ambas ramas
+    branches: [ main, develop ] # Asegúrate de que tu rama se llama exactamente 'develop'
 
 jobs:
   build:
@@ -27,10 +27,11 @@ jobs:
 
       # --- LÓGICA DE DESARROLLO ---
       - name: 🛠 Build Development APK
-        if: github.ref == 'refs/heads/develop'
+        # Esta condición es más flexible: detecta si la rama es 'develop'
+        if: github.ref_name == 'develop'
         run: eas build --platform android --profile development --non-interactive
 
       # --- LÓGICA DE PRODUCCIÓN ---
       - name: 🚀 Build Production APK
-        if: github.ref == 'refs/heads/main'
+        if: github.ref_name == 'main'
         run: eas build --platform android --profile production --non-interactive
