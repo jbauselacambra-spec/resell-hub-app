@@ -1,0 +1,609 @@
+{
+  "version": "3.0.0",
+  "project": "ResellHub",
+  "description": "Sistema de Skills para Agentes de IA - Inteligencia de Resubida & Gestión de Inventario Vinted",
+  "last_updated": "2025-02-27",
+  "design_system_ref": "@DESIGN_SYSTEM.md",
+
+  "agents": {
+
+    "PRODUCT_OWNER": {
+      "id": "PO",
+      "icon": "👔",
+      "color": "#004E89",
+      "mission": "Guardiána de la visión de producto y maximización del GMV",
+      "skills": [
+        {
+          "id": "PO-001",
+          "name": "feature_gating",
+          "description": "Validar que cada feature nueva respete la capa de campos protegidos antes de implementar.",
+          "trigger": "Antes de implementar cualquier feature nueva",
+          "protected_fields": ["firstUploadDate", "category", "title", "brand"],
+          "forbidden_fields": ["seoTags"],
+          "validation_rule": "Si la propuesta toca firstUploadDate o category sin una razón de arquitectura crítica, RECHAZAR y proponer alternativa.",
+          "output": "Documento de validación: [APROBADO|RECHAZADO] + razón + alternativa si aplica"
+        },
+        {
+          "id": "PO-002",
+          "name": "roadmap_prioritization",
+          "description": "Priorizar features basándose en impacto en ventas (GMV) vs esfuerzo de implementación.",
+          "matrix": {
+            "high_impact_low_effort": "Implementar inmediatamente",
+            "high_impact_high_effort": "Planificar en sprint",
+            "low_impact_low_effort": "Backlog",
+            "low_impact_high_effort": "Descartar"
+          },
+          "kpis_to_track": ["TTS_medio", "tasa_resubida", "conversion_rate", "dead_stock_count"]
+        },
+        {
+          "id": "PO-003",
+          "name": "acceptance_criteria",
+          "description": "Definir criterios de aceptación claros para QA_ENGINEER antes de marcar una feature como 'done'.",
+          "template": "DADO [contexto] CUANDO [acción] ENTONCES [resultado esperado]",
+          "mandatory_checks": ["no_regression_firstUploadDate", "log_service_coverage", "ui_grid_compliance"]
+        }
+      ]
+    },
+
+    "ARCHITECT": {
+      "id": "ARCH",
+      "icon": "🏛️",
+      "color": "#1A1A2E",
+      "mission": "Robustez de datos, Clean Architecture y fusión inteligente de productos",
+      "skills": [
+        {
+          "id": "ARCH-001",
+          "name": "smart_merge",
+          "description": "Detectar y fusionar correctamente resubidas de productos usando título+marca como clave única.",
+          "algorithm": {
+            "detection_key": ["title_normalized", "brand_normalized"],
+            "merge_strategy": "Preservar firstUploadDate original + actualizar imageHash + incrementar republishCount",
+            "collision_resolution": "Si el hash de imagen es distinto pero title+brand coinciden → ES RESUBIDA. Si imagen coincide → DUPLICADO."
+          },
+          "files": ["DatabaseService.js", "ProductModel.js"],
+          "forbidden_action": "Nunca sobreescribir firstUploadDate en un merge"
+        },
+        {
+          "id": "ARCH-002",
+          "name": "image_pipeline",
+          "description": "Pipeline de procesamiento de imagen: detección de formato → conversión → recorte de metadatos → hash.",
+          "steps": [
+            "1. Detectar formato (webp, png, jpg, heic)",
+            "2. Convertir a JPEG con quality: 92",
+            "3. Recortar 1px por cada lado (top, right, bottom, left) → invalida metadata Vinted",
+            "4. Calcular MD5 hash del buffer resultante",
+            "5. Guardar en /processed con timestamp en filename",
+            "6. Registrar en DB: {originalPath, processedPath, imageHash, processedAt}"
+          ],
+          "libraries": ["sharp (Node.js)", "expo-image-manipulator (React Native)"],
+          "output_format": "JPEG",
+          "quality": 92,
+          "crop_px": 1
+        },
+        {
+          "id": "ARCH-003",
+          "name": "directory_watcher",
+          "description": "Monitorizar carpeta de entrada en tiempo real para detectar nuevas subcarpetas de productos.",
+          "watch_pattern": "/ResellHub/inbox/*/",
+          "trigger": "Nueva carpeta detectada → iniciar pipeline automáticamente",
+          "debounce_ms": 2000,
+          "metadata_to_extract": ["product_name", "brand", "category", "description", "avg_price_secondhand", "tags"],
+          "ai_model_for_extraction": "Vision API (Claude claude-opus-4-6 o GPT-4V)",
+          "fallback": "Si la IA falla → marcar como PENDING_MANUAL_REVIEW"
+        },
+        {
+          "id": "ARCH-004",
+          "name": "data_schema_v3",
+          "description": "Esquema canónico de producto en la base de datos MMKV.",
+          "schema": {
+            "id": "string (UUID)",
+            "title": "string (requerido)",
+            "brand": "string (requerido)",
+            "category": "string (requerido)",
+            "subcategory": "string (opcional)",
+            "description": "string",
+            "tags": "string[]",
+            "estimatedPrice": "number",
+            "priceHistory": "{ price: number, date: ISO8601 }[]",
+            "images": "{ original: string, processed: string, hash: string, processedAt: ISO8601 }[]",
+            "status": "enum: pending | active | stale | sold | archived",
+            "firstUploadDate": "ISO8601 (PROTEGIDO - nunca sobreescribir)",
+            "lastPublishedDate": "ISO8601",
+            "soldDate": "ISO8601 | null",
+            "republishCount": "number (default: 0)",
+            "tts_days": "number | null (calculado: soldDate - firstUploadDate)",
+            "staleness_score": "number 0-100 (calculado por DATA_SCIENTIST)",
+            "views": "number",
+            "favorites": "number",
+            "createdAt": "ISO8601",
+            "updatedAt": "ISO8601"
+          }
+        }
+      ]
+    },
+
+    "UI_SPECIALIST": {
+      "id": "UI",
+      "icon": "🎨",
+      "color": "#FF6B35",
+      "mission": "Minimalismo Vibrante optimizado para Poco X7 Pro (Android)",
+      "skills": [
+        {
+          "id": "UI-001",
+          "name": "atomic_design_rn",
+          "description": "Construcción de pantallas React Native usando grid de 8pt y sistema de diseño canónico.",
+          "grid": "8pt base (4pt para micro-ajustes)",
+          "spacing_scale": [4, 8, 12, 16, 24, 32, 48, 64],
+          "typography": {
+            "display": "Sora-Bold (36pt, headlines de dashboard)",
+            "heading": "Sora-SemiBold (24pt, títulos de sección)",
+            "subheading": "Sora-Medium (18pt)",
+            "body": "Inter-Regular (14pt)",
+            "caption": "Inter-Regular (12pt)",
+            "micro": "Inter-Regular (10pt)"
+          },
+          "colors": {
+            "primary": "#FF6B35",
+            "secondary": "#004E89",
+            "success": "#00C896",
+            "warning": "#FFB800",
+            "danger": "#FF3B30",
+            "stale": "#8B8FA8",
+            "bg_dark": "#0D0D14",
+            "bg_card": "#16161F",
+            "bg_surface": "#1E1E2E",
+            "text_primary": "#F0F0F8",
+            "text_secondary": "#8B8FA8"
+          },
+          "device_target": {
+            "name": "Poco X7 Pro",
+            "screen": "6.67 inch AMOLED, 1220x2712px, 446ppi",
+            "safe_area_bottom": "34pt",
+            "status_bar_height": "48pt"
+          }
+        },
+        {
+          "id": "UI-002",
+          "name": "dashboard_hierarchy",
+          "description": "Jerarquía visual del Dashboard principal ordenada por prioridad de atención del usuario.",
+          "screen_sections": [
+            {
+              "order": 1,
+              "name": "Header KPIs",
+              "height": "120pt",
+              "content": "3 métricas clave: Stock Activo | Vendidos Este Mes | Alertas Pendientes",
+              "visual_weight": "MÁXIMO"
+            },
+            {
+              "order": 2,
+              "name": "Alertas de Resubida",
+              "height": "variable",
+              "content": "Cards de productos con >60 días sin vender, ordenadas por staleness_score DESC",
+              "visual_weight": "CRÍTICO - color #FF3B30"
+            },
+            {
+              "order": 3,
+              "name": "Smart Insights",
+              "height": "variable",
+              "content": "Recomendaciones del GROWTH_HACKER: Relámpago | Ancla | Estacional",
+              "visual_weight": "ALTO"
+            },
+            {
+              "order": 4,
+              "name": "Estadísticas & Gráficos",
+              "height": "variable",
+              "content": "TTS por categoría, heatmap mensual, top performers",
+              "visual_weight": "MEDIO"
+            }
+          ]
+        },
+        {
+          "id": "UI-003",
+          "name": "interaction_states",
+          "description": "Estados de interacción estandarizados para todos los componentes.",
+          "states": {
+            "default": "opacity: 1, scale: 1",
+            "pressed": "opacity: 0.85, scale: 0.97, haptic: light",
+            "long_press": "scale: 0.95, haptic: medium → mostrar context menu",
+            "disabled": "opacity: 0.4, no haptic",
+            "loading": "skeleton shimmer con gradiente #16161F → #1E1E2E",
+            "error": "border-color: #FF3B30, shake animation 300ms",
+            "success": "border-color: #00C896, pulse animation 500ms"
+          }
+        },
+        {
+          "id": "UI-004",
+          "name": "notification_cards",
+          "description": "Sistema de tarjetas de notificación para alertas de resubida y stock frío.",
+          "card_types": {
+            "STALE_ALERT": {
+              "icon": "⚠️",
+              "color": "#FF3B30",
+              "title_template": "{title} lleva {days} días sin moverse",
+              "action_primary": "Reprocesar y Resubir",
+              "action_secondary": "Ignorar 7 días"
+            },
+            "FLASH_OPPORTUNITY": {
+              "icon": "⚡",
+              "color": "#FFB800",
+              "title_template": "{category} vende un {pct}% más rápido este mes",
+              "action_primary": "Ver productos de esta categoría"
+            },
+            "SEASONAL_TIP": {
+              "icon": "📅",
+              "color": "#004E89",
+              "title_template": "En {month} históricamente vendes más {category}",
+              "action_primary": "Ver estrategia"
+            },
+            "SOLD_CONFIRM": {
+              "icon": "✅",
+              "color": "#00C896",
+              "title_template": "¡{title} vendido! TTS: {tts_days} días",
+              "action_primary": "Marcar como vendido",
+              "action_secondary": "Buscar reposición"
+            }
+          }
+        }
+      ]
+    },
+
+    "DATA_SCIENTIST": {
+      "id": "DS",
+      "icon": "🧠",
+      "color": "#7B61FF",
+      "mission": "Motor de Inteligencia de Resubida y predicción de TTS",
+      "skills": [
+        {
+          "id": "DS-001",
+          "name": "tts_calculator",
+          "description": "Calcular Time-to-Sell para productos vendidos y proyectar para activos.",
+          "formula": "TTS = (soldDate || currentDate) - firstUploadDate (en días)",
+          "segmentation": {
+            "relampago": "TTS < 7 días → acción: subir precio +10%",
+            "normal": "TTS 7-30 días → sin acción",
+            "lento": "TTS 30-90 días → acción: bajar precio -5% o mejorar fotos",
+            "ancla": "TTS > 90 días → acción: bajar precio -15% + resubir inmediatamente",
+            "muerto": "TTS > 180 días → acción: considerar donar o archivar"
+          }
+        },
+        {
+          "id": "DS-002",
+          "name": "staleness_score",
+          "description": "Algoritmo de puntuación 0-100 para priorizar alertas de resubida.",
+          "formula": {
+            "days_weight": 0.40,
+            "views_decay_weight": 0.25,
+            "favorites_decay_weight": 0.20,
+            "category_avg_tts_weight": 0.15,
+            "calculation": "score = (days_factor * 0.4) + (view_decay * 0.25) + (fav_decay * 0.2) + (cat_deviation * 0.15)",
+            "score_100": "Producto absolutamente estancado, acción inmediata",
+            "score_0": "Producto recién subido o vendido"
+          },
+          "update_frequency": "cada 24 horas o al abrir la app"
+        },
+        {
+          "id": "DS-003",
+          "name": "seasonal_calendar",
+          "description": "Calendario de oportunidades basado en historial de ventas por mes.",
+          "logic": "Para cada mes M, calcular: qué categorías tienen TTS < media_global en ese mes",
+          "output": "{ month: 1-12, hot_categories: string[], cold_categories: string[], confidence: 0-1 }",
+          "min_data_points": 5,
+          "fallback": "Si no hay suficientes datos, usar datos de mercado genéricos de Vinted España"
+        },
+        {
+          "id": "DS-004",
+          "name": "price_optimizer",
+          "description": "Sugerir precio óptimo basado en TTS actual y precio de mercado.",
+          "inputs": ["estimatedPrice", "priceHistory", "category_avg_tts", "current_tts"],
+          "strategy": {
+            "if_tts_relampago": "Precio actual * 1.10 (redondear a X.99)",
+            "if_tts_normal": "Mantener precio",
+            "if_tts_lento": "Precio actual * 0.95",
+            "if_tts_ancla": "max(Precio actual * 0.85, coste_minimo)"
+          },
+          "output": "{ suggested_price: number, reasoning: string, confidence: 0-1 }"
+        },
+        {
+          "id": "DS-005",
+          "name": "interest_decay_curve",
+          "description": "Modelar la curva de decaimiento de interés de un producto.",
+          "model": "Exponential decay: interest(t) = I0 * e^(-λt)",
+          "lambda_by_category": {
+            "ropa_mujer": 0.08,
+            "tecnologia": 0.12,
+            "zapatillas": 0.06,
+            "libros": 0.03,
+            "default": 0.07
+          },
+          "optimal_repost_day": "Cuando interest(t) < 0.3 * I0 → republicar"
+        }
+      ]
+    },
+
+    "GROWTH_HACKER": {
+      "id": "GH",
+      "icon": "💰",
+      "color": "#00C896",
+      "mission": "Maximizar GMV, rotación de inventario y conversión de resubidas",
+      "skills": [
+        {
+          "id": "GH-001",
+          "name": "republish_strategy",
+          "description": "Estrategia óptima de republicación basada en data de staleness y calendario estacional.",
+          "optimal_times": {
+            "day_of_week": "Martes, Miércoles, Jueves (mayor engagement en Vinted España)",
+            "time_of_day": "19:00-21:00 hora local",
+            "avoid": "Lunes mañana, Viernes noche"
+          },
+          "checklist_before_repost": [
+            "Reprocesar imagen (recortar 1px) para invalidar caché Vinted",
+            "Revisar precio con price_optimizer",
+            "Actualizar descripción si lleva >45 días",
+            "Añadir nuevas tags si las sugeridas por IA difieren"
+          ]
+        },
+        {
+          "id": "GH-002",
+          "name": "category_intelligence",
+          "description": "Identificar categorías Relámpago vs Ancla para redirigir esfuerzos de sourcing.",
+          "flash_threshold_days": 7,
+          "anchor_threshold_days": 30,
+          "action_flash": "Buscar más stock de esta categoría + subir precio +10%",
+          "action_anchor": "Bajar precio, mejorar fotos, considerar bundle"
+        },
+        {
+          "id": "GH-003",
+          "name": "bundle_detector",
+          "description": "Detectar productos de la misma marca/categoría que podrían venderse juntos.",
+          "trigger": "Dos o más productos con TTS > 45 días en misma categoría",
+          "suggestion": "¿Quieres hacer un lote? Bundle sugerido: {products} por {bundle_price}€"
+        }
+      ]
+    },
+
+    "DEVOPS": {
+      "id": "DO",
+      "icon": "🚀",
+      "color": "#FF6B35",
+      "mission": "Pipeline de CI/CD, builds Android y automatización del directorio watcher",
+      "skills": [
+        {
+          "id": "DO-001",
+          "name": "android_build_pipeline",
+          "description": "Gestión del proceso de build local con Android Studio y EAS CLI.",
+          "build_commands": {
+            "local_debug": "npx expo run:android",
+            "local_release": "npx expo build:android --type apk",
+            "eas_preview": "eas build --platform android --profile preview",
+            "eas_production": "eas build --platform android --profile production"
+          },
+          "pre_build_checks": [
+            "npm run lint --fix",
+            "npx tsc --noEmit",
+            "Verificar que MMKV no tiene migración pendiente",
+            "Comprobar que .env tiene todas las keys de IA necesarias"
+          ],
+          "post_build": "Ejecutar ./agent-deploy.ps1 si build exitoso"
+        },
+        {
+          "id": "DO-002",
+          "name": "directory_watcher_service",
+          "description": "Servicio de background que monitoriza la carpeta de entrada de productos.",
+          "implementation": "expo-background-fetch + expo-file-system",
+          "watch_interval_ms": 30000,
+          "folder_structure": {
+            "inbox": "/ResellHub/inbox/{product_folder}/",
+            "processed": "/ResellHub/processed/{YYYY-MM-DD}/{product_id}/",
+            "archive": "/ResellHub/archive/"
+          },
+          "folder_detection": "Comparar listado actual con snapshot anterior → nuevas carpetas = nuevos productos"
+        },
+        {
+          "id": "DO-003",
+          "name": "notification_scheduler",
+          "description": "Programar notificaciones locales para alertas de resubida.",
+          "library": "expo-notifications",
+          "notification_types": {
+            "STALE_DAILY": "Una vez al día a las 10:00 si hay productos con staleness > 70",
+            "REPUBLISH_REMINDER": "3 días después de detectar TTS > 60 días",
+            "SEASONAL_OPPORTUNITY": "El día 1 de cada mes con el calendario de oportunidades"
+          }
+        }
+      ]
+    },
+
+    "QA_ENGINEER": {
+      "id": "QA",
+      "icon": "🧪",
+      "color": "#FFB800",
+      "mission": "Cero bugs, trazabilidad total y LogService v2.0 en cada función",
+      "skills": [
+        {
+          "id": "QA-001",
+          "name": "log_service_v2",
+          "description": "Implementación estandarizada de logging en cada función crítica.",
+          "log_levels": {
+            "debug": "Solo en desarrollo. LogService.debug(context, message, data)",
+            "info": "Eventos de negocio normales. LogService.info('PRODUCT_PROCESSED', {id})",
+            "warn": "Situaciones inesperadas no críticas. LogService.warn('IMAGE_FALLBACK', {reason})",
+            "error": "Errores recuperables. LogService.error('MERGE_FAILED', {product, error})",
+            "critical": "Errores de integridad de datos. LogService.critical('DB_CORRUPTION', {table})"
+          },
+          "mandatory_contexts": ["ARCHITECT", "DATA_SCIENTIST", "DEVOPS", "UI"],
+          "rule": "Todo catch() debe tener al mínimo LogService.error(). Nunca console.log en producción."
+        },
+        {
+          "id": "QA-002",
+          "name": "protected_fields_test",
+          "description": "Test automático que verifica que firstUploadDate nunca se sobreescribe.",
+          "test_cases": [
+            "Resubida de producto: firstUploadDate debe ser idéntico al original",
+            "Merge por title+brand: firstUploadDate del registro más antiguo prevalece",
+            "Importación JSON: Si firstUploadDate existe, no sobrescribir aunque el JSON nuevo tenga fecha diferente"
+          ]
+        },
+        {
+          "id": "QA-003",
+          "name": "image_pipeline_validation",
+          "description": "Validar que el pipeline de imagen funciona correctamente.",
+          "checks": [
+            "Output siempre es JPEG (verificar magic bytes FF D8 FF)",
+            "Dimensiones = originales - 2px en width y height",
+            "Hash MD5 diferente al original (metadatos invalidados)",
+            "Tamaño de archivo razonable (no > 5MB, no < 10KB)"
+          ]
+        }
+      ]
+    },
+
+    "LIBRARIAN": {
+      "id": "LIB",
+      "icon": "📚",
+      "color": "#8B8FA8",
+      "mission": "Mantener @DESIGN_SYSTEM.md como fuente única de verdad sincronizada",
+      "skills": [
+        {
+          "id": "LIB-001",
+          "name": "auto_documentation",
+          "description": "Actualizar DESIGN_SYSTEM.md tras cada cambio de arquitectura o UI.",
+          "trigger": "Cualquier cambio en: schema de datos, componentes UI, algoritmos DS, o nuevas features",
+          "sections_to_update": [
+            "## Modelo de Datos → si ARCHITECT cambia el schema",
+            "## Design Tokens → si UI_SPECIALIST cambia colores/tipografía",
+            "## Algoritmos → si DATA_SCIENTIST añade/modifica un modelo",
+            "## Changelog → siempre, con versión semántica"
+          ],
+          "output_format": "Diff markdown mostrando qué cambió: ```diff\n- campo_viejo\n+ campo_nuevo\n```",
+          "versioning": "SemVer: MAJOR.MINOR.PATCH"
+        },
+        {
+          "id": "LIB-002",
+          "name": "skills_sync",
+          "description": "Mantener skills.json sincronizado con capacidades reales de los agentes.",
+          "sync_trigger": "Cada vez que un agente adquiere una nueva skill o modifica una existente",
+          "validation": "Cada skill debe tener: id único, description, trigger/formula/algorithm según tipo"
+        }
+      ]
+    },
+
+    "SECURITY_OFFICER": {
+      "id": "SEC",
+      "icon": "🛡️",
+      "color": "#FF3B30",
+      "mission": "Proteger cuenta Vinted, datos MMKV y prevenir baneos",
+      "skills": [
+        {
+          "id": "SEC-001",
+          "name": "vinted_safety",
+          "description": "Asegurar que las resubidas no activen sistemas anti-spam de Vinted.",
+          "rules": [
+            "Mínimo 48h entre resubidas del mismo producto",
+            "Máximo 10 resubidas por día en total",
+            "Randomizar hora de publicación ±30 minutos del óptimo calculado",
+            "La invalidación de imagen (crop 1px) es obligatoria en cada resubida"
+          ],
+          "risk_level": {
+            "safe": "< 5 resubidas/día, intervalo > 72h",
+            "caution": "5-10 resubidas/día, intervalo 48-72h",
+            "danger": "> 10 resubidas/día o intervalo < 48h → BLOQUEAR y alertar"
+          }
+        },
+        {
+          "id": "SEC-002",
+          "name": "data_privacy",
+          "description": "Proteger información sensible en logs y backups.",
+          "rules": [
+            "LogService NUNCA debe loguear tokens de API, passwords o datos bancarios",
+            "Los backups de MMKV deben estar cifrados",
+            "Las imágenes originales de productos no se suben a servicios externos sin consentimiento"
+          ]
+        }
+      ]
+    },
+
+    "MARKET_ANALYST": {
+      "id": "MA",
+      "icon": "🕵️",
+      "color": "#004E89",
+      "mission": "Radar externo: tendencias Vinted, algoritmos de visibilidad y competencia",
+      "skills": [
+        {
+          "id": "MA-001",
+          "name": "trend_monitoring",
+          "description": "Detectar tendencias emergentes en Vinted España antes de que aparezcan en datos internos.",
+          "sources": ["Vinted trending categories", "Google Trends ES", "Instagram/TikTok moda", "Wallapop trending"],
+          "alert_threshold": "Si una categoría pierde >20% de ventas en el mercado externo → alertar al GROWTH_HACKER",
+          "update_frequency": "Semanal"
+        },
+        {
+          "id": "MA-002",
+          "name": "algorithm_watch",
+          "description": "Monitorizar cambios en el algoritmo de visibilidad de Vinted.",
+          "signals_to_watch": [
+            "Cambios en el boost de 'Nuevo hoy'",
+            "Impacto de responder mensajes rápido en el ranking",
+            "Efecto de las valoraciones en visibilidad",
+            "Cambios en política de resubidas"
+          ],
+          "output": "Briefing semanal para GROWTH_HACKER y SECURITY_OFFICER"
+        }
+      ]
+    }
+  },
+
+  "orchestration": {
+    "version": "3.0",
+    "workflows": [
+      {
+        "name": "NEW_PRODUCT_PIPELINE",
+        "trigger": "Nueva carpeta detectada en /inbox",
+        "sequence": [
+          "DEVOPS.directory_watcher_service → detecta nueva carpeta",
+          "ARCHITECT.image_pipeline → convierte y recorta imágenes",
+          "ARCHITECT.directory_watcher → extrae metadata con IA Vision",
+          "DATA_SCIENTIST.staleness_score → inicializa score = 0",
+          "UI_SPECIALIST → muestra producto en estado 'pending' con animación de entrada",
+          "QA_ENGINEER.log_service_v2 → LogService.info('PRODUCT_INGESTED', {id, title, brand})",
+          "LIBRARIAN → actualiza contador de productos en DESIGN_SYSTEM.md si es milestone"
+        ]
+      },
+      {
+        "name": "DAILY_STALENESS_AUDIT",
+        "trigger": "Cada día a las 09:00",
+        "sequence": [
+          "DATA_SCIENTIST.staleness_score → recalcular todos los productos activos",
+          "DATA_SCIENTIST.interest_decay_curve → identificar productos en zona crítica",
+          "GROWTH_HACKER.republish_strategy → generar lista de resubidas recomendadas",
+          "SECURITY_OFFICER.vinted_safety → filtrar lista según límites de seguridad",
+          "DEVOPS.notification_scheduler → disparar notificación si hay > 0 alertas críticas",
+          "UI_SPECIALIST → actualizar dashboard con nuevos datos"
+        ]
+      },
+      {
+        "name": "PRODUCT_REPUBLISH",
+        "trigger": "Usuario confirma resubida de un producto",
+        "sequence": [
+          "SECURITY_OFFICER.vinted_safety → validar que es seguro republicar ahora",
+          "ARCHITECT.image_pipeline → reprocesar imágenes (nuevo crop 1px)",
+          "DATA_SCIENTIST.price_optimizer → calcular precio óptimo",
+          "GROWTH_HACKER.republish_strategy → confirmar timing óptimo",
+          "ARCHITECT.smart_merge → actualizar DB: republishCount++, lastPublishedDate = now",
+          "UI_SPECIALIST → mostrar card con datos listos para copiar en Vinted",
+          "QA_ENGINEER.log_service_v2 → LogService.info('PRODUCT_REPUBLISHED', {id, newPrice})"
+        ]
+      },
+      {
+        "name": "MARK_AS_SOLD",
+        "trigger": "Usuario marca producto como vendido",
+        "sequence": [
+          "ARCHITECT → actualizar: status='sold', soldDate=now",
+          "DATA_SCIENTIST.tts_calculator → calcular TTS final y actualizar categoría stats",
+          "GROWTH_HACKER.category_intelligence → recalibrar umbrales Relámpago/Ancla",
+          "UI_SPECIALIST → mover a sección 'Vendidos' con animación de celebración ✅",
+          "DATA_SCIENTIST.seasonal_calendar → actualizar modelo de estacionalidad",
+          "QA_ENGINEER → LogService.info('PRODUCT_SOLD', {id, tts_days, price, category})"
+        ]
+      }
+    ]
+  }
+}

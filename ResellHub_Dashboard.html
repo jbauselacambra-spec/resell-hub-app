@@ -1,0 +1,1118 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ResellHub — Dashboard v3.0</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --primary: #FF6B35;
+    --primary-dim: rgba(255, 107, 53, 0.15);
+    --secondary: #004E89;
+    --secondary-dim: rgba(0, 78, 137, 0.15);
+    --success: #00C896;
+    --success-dim: rgba(0, 200, 150, 0.12);
+    --warning: #FFB800;
+    --warning-dim: rgba(255, 184, 0, 0.15);
+    --danger: #FF3B30;
+    --danger-dim: rgba(255, 59, 48, 0.15);
+    --violet: #7B61FF;
+    --stale: #8B8FA8;
+
+    --bg: #0A0A12;
+    --bg-card: #13131E;
+    --bg-surface: #1A1A28;
+    --bg-elevated: #222235;
+
+    --text: #F0F0F8;
+    --text-2: #A8ACBF;
+    --text-3: #5C6080;
+
+    --border: rgba(255,255,255,0.06);
+    --border-bright: rgba(255,255,255,0.12);
+
+    --radius: 20px;
+    --radius-sm: 12px;
+    --radius-xs: 8px;
+
+    --font: 'Sora', sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 24px 16px;
+  }
+
+  /* Phone frame */
+  .phone {
+    width: 390px;
+    min-height: 844px;
+    background: var(--bg);
+    border-radius: 50px;
+    border: 2px solid var(--border-bright);
+    overflow: hidden;
+    position: relative;
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.04),
+      0 80px 160px -20px rgba(0,0,0,0.9),
+      inset 0 1px 0 rgba(255,255,255,0.08);
+  }
+
+  /* Status Bar */
+  .status-bar {
+    height: 48px;
+    padding: 14px 24px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-2);
+  }
+  .status-bar .time { font-size: 14px; font-weight: 700; color: var(--text); }
+  .status-icons { display: flex; gap: 6px; align-items: center; }
+  .status-icons span { font-size: 11px; }
+
+  /* Scroll area */
+  .scroll-area {
+    height: calc(100% - 48px - 72px);
+    overflow-y: auto;
+    scroll-behavior: smooth;
+    padding: 0 0 16px;
+  }
+  .scroll-area::-webkit-scrollbar { display: none; }
+
+  /* Header */
+  .app-header {
+    padding: 20px 20px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .app-header .greeting { font-size: 13px; color: var(--text-2); font-weight: 500; margin-bottom: 2px; }
+  .app-header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+  .app-header h1 span { color: var(--primary); }
+  .notif-btn {
+    width: 40px; height: 40px;
+    background: var(--bg-surface);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    position: relative;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    transition: all 0.2s;
+  }
+  .notif-btn:hover { background: var(--bg-elevated); transform: scale(0.96); }
+  .notif-badge {
+    position: absolute; top: -4px; right: -4px;
+    width: 16px; height: 16px;
+    background: var(--danger);
+    border-radius: 50%;
+    border: 2px solid var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 8px; font-weight: 700;
+  }
+
+  /* ── KPI STRIP ── */
+  .kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    padding: 0 16px 20px;
+  }
+  .kpi-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .kpi-card:hover { transform: translateY(-2px); border-color: var(--border-bright); }
+  .kpi-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent-color, var(--primary));
+  }
+  .kpi-label { font-size: 9px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .kpi-value { font-size: 24px; font-weight: 800; letter-spacing: -1px; line-height: 1; }
+  .kpi-sub { font-size: 10px; color: var(--text-2); margin-top: 4px; }
+  .kpi-icon { font-size: 18px; position: absolute; top: 10px; right: 10px; opacity: 0.5; }
+
+  /* ── SECTION HEADER ── */
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 16px 12px;
+  }
+  .section-title {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 15px; font-weight: 700; letter-spacing: -0.3px;
+  }
+  .section-title .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--dot-color, var(--primary));
+    box-shadow: 0 0 8px var(--dot-color, var(--primary));
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(0.8); } }
+  .section-action { font-size: 12px; color: var(--primary); font-weight: 600; cursor: pointer; }
+
+  /* ── STALE ALERTS ── */
+  .stale-card {
+    margin: 0 16px 10px;
+    background: var(--bg-card);
+    border: 1px solid rgba(255, 59, 48, 0.25);
+    border-radius: var(--radius);
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.25s;
+  }
+  .stale-card:hover { transform: translateX(4px); border-color: rgba(255, 59, 48, 0.5); }
+  .stale-card-inner { display: flex; gap: 0; }
+  .stale-img {
+    width: 90px; height: 90px;
+    background: var(--bg-surface);
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+  }
+  .stale-img-placeholder {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px;
+    background: linear-gradient(135deg, var(--bg-surface), var(--bg-elevated));
+  }
+  .stale-img .days-badge {
+    position: absolute; bottom: 4px; left: 4px;
+    background: rgba(255, 59, 48, 0.9);
+    color: white;
+    font-size: 9px; font-weight: 700;
+    padding: 2px 5px; border-radius: 4px;
+    font-family: var(--mono);
+  }
+  .stale-info { flex: 1; padding: 10px 12px; display: flex; flex-direction: column; justify-content: space-between; }
+  .stale-title { font-size: 13px; font-weight: 600; line-height: 1.3; margin-bottom: 3px; }
+  .stale-meta { font-size: 11px; color: var(--text-2); }
+  .stale-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .btn-repost {
+    flex: 1; padding: 6px 0;
+    background: var(--primary);
+    color: white; border: none;
+    border-radius: var(--radius-xs);
+    font-size: 11px; font-weight: 700;
+    cursor: pointer; font-family: var(--font);
+    transition: all 0.2s;
+  }
+  .btn-repost:hover { background: #ff8055; transform: scale(0.98); }
+  .btn-skip {
+    padding: 6px 10px;
+    background: transparent;
+    border: 1px solid var(--border-bright);
+    color: var(--text-2);
+    border-radius: var(--radius-xs);
+    font-size: 10px; font-weight: 600;
+    cursor: pointer; font-family: var(--font);
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .btn-skip:hover { border-color: var(--stale); color: var(--text); }
+
+  /* Staleness bar */
+  .staleness-bar {
+    height: 3px;
+    background: var(--bg-elevated);
+    position: relative;
+    margin-top: 6px;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .staleness-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--warning), var(--danger));
+    transition: width 0.6s ease;
+  }
+
+  /* ── SMART INSIGHTS ── */
+  .insight-scroll {
+    display: flex; gap: 10px;
+    padding: 0 16px 4px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+  }
+  .insight-scroll::-webkit-scrollbar { display: none; }
+  .insight-card {
+    min-width: 200px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    scroll-snap-align: start;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .insight-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at top right, var(--glow-color, transparent) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .insight-card:hover { transform: translateY(-3px); }
+  .insight-icon { font-size: 22px; margin-bottom: 8px; }
+  .insight-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--chip-color, var(--text-2)); margin-bottom: 4px; }
+  .insight-text { font-size: 12px; line-height: 1.5; color: var(--text); }
+  .insight-text strong { color: var(--chip-color, var(--primary)); }
+  .insight-action { font-size: 10px; color: var(--chip-color, var(--primary)); font-weight: 700; margin-top: 8px; cursor: pointer; }
+
+  /* ── TTS CHART ── */
+  .chart-card {
+    margin: 0 16px 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+  }
+  .chart-title { font-size: 13px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+  .chart-subtitle { font-size: 10px; color: var(--text-2); font-weight: 400; }
+  .chart-bars { display: flex; gap: 6px; align-items: flex-end; height: 80px; margin-bottom: 8px; }
+  .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .bar {
+    width: 100%;
+    border-radius: 5px 5px 2px 2px;
+    position: relative;
+    transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    cursor: pointer;
+    min-height: 4px;
+  }
+  .bar:hover { filter: brightness(1.2); transform: scaleY(1.04); transform-origin: bottom; }
+  .bar-label { font-size: 8px; color: var(--text-3); font-weight: 600; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 36px; }
+  .bar-value { font-size: 9px; font-weight: 700; font-family: var(--mono); }
+
+  /* Legend */
+  .chart-legend { display: flex; gap: 12px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text-2); }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── MINI HEATMAP ── */
+  .heatmap-card {
+    margin: 0 16px 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+  }
+  .heatmap-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-top: 10px; }
+  .heat-cell {
+    aspect-ratio: 1;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .heat-cell:hover { transform: scale(1.3); z-index: 10; }
+  .heat-day-labels { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: 3px; }
+  .heat-day-label { font-size: 8px; color: var(--text-3); text-align: center; font-weight: 600; }
+
+  /* ── PRODUCT GRID ── */
+  .product-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 0 16px;
+    margin-bottom: 10px;
+  }
+  .product-thumb {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .product-thumb:hover { transform: scale(0.98); border-color: var(--border-bright); }
+  .product-thumb-img {
+    height: 110px;
+    background: var(--bg-surface);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 32px;
+    position: relative;
+  }
+  .product-thumb-info { padding: 8px; }
+  .product-thumb-title { font-size: 11px; font-weight: 600; line-height: 1.3; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .product-thumb-price { font-size: 13px; font-weight: 800; color: var(--primary); font-family: var(--mono); }
+  .product-thumb-tts { font-size: 9px; color: var(--text-3); }
+  .status-chip {
+    position: absolute; top: 6px; right: 6px;
+    padding: 2px 7px;
+    border-radius: 20px;
+    font-size: 9px; font-weight: 700;
+    backdrop-filter: blur(8px);
+  }
+  .chip-active { background: rgba(0, 200, 150, 0.2); color: var(--success); border: 1px solid rgba(0, 200, 150, 0.3); }
+  .chip-stale { background: rgba(255, 59, 48, 0.2); color: var(--danger); border: 1px solid rgba(255, 59, 48, 0.3); }
+  .chip-sold { background: rgba(0, 78, 137, 0.3); color: #60B3FF; border: 1px solid rgba(0, 78, 137, 0.5); }
+
+  /* ── BOTTOM NAV ── */
+  .bottom-nav {
+    height: 72px;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    padding: 0 8px;
+    padding-bottom: 8px;
+  }
+  .nav-item {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3px; cursor: pointer;
+    border-radius: 12px;
+    padding: 6px 0;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .nav-item:hover { background: var(--bg-surface); }
+  .nav-item.active { background: var(--primary-dim); }
+  .nav-icon { font-size: 20px; line-height: 1; }
+  .nav-label { font-size: 9px; font-weight: 600; color: var(--text-3); }
+  .nav-item.active .nav-label { color: var(--primary); }
+  .nav-item.active .nav-icon { filter: drop-shadow(0 0 6px var(--primary)); }
+  .nav-badge {
+    position: absolute; top: 4px; right: 12px;
+    width: 14px; height: 14px;
+    background: var(--danger);
+    border-radius: 50%;
+    font-size: 8px; font-weight: 700; color: white;
+    display: flex; align-items: center; justify-content: center;
+    border: 2px solid var(--bg-card);
+  }
+
+  /* ── SECTION SPACER ── */
+  .spacer { height: 16px; }
+  .spacer-sm { height: 10px; }
+
+  /* ── SEPARATOR ── */
+  .sep { height: 1px; background: var(--border); margin: 4px 16px 16px; }
+
+  /* ── SCANNING ANIMATION ── */
+  .scan-banner {
+    margin: 0 16px 10px;
+    background: linear-gradient(135deg, var(--secondary-dim), rgba(123, 97, 255, 0.1));
+    border: 1px solid rgba(0, 78, 137, 0.3);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .scan-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--violet); animation: scan-pulse 1.2s infinite; }
+  @keyframes scan-pulse { 0% { box-shadow: 0 0 0 0 rgba(123, 97, 255, 0.6); } 70% { box-shadow: 0 0 0 8px rgba(123, 97, 255, 0); } 100% { box-shadow: 0 0 0 0 rgba(123, 97, 255, 0); } }
+  .scan-text { font-size: 12px; }
+  .scan-text strong { color: var(--violet); }
+  .scan-text small { display: block; font-size: 10px; color: var(--text-2); }
+
+  /* ── SOLD PILL ── */
+  .sold-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--success-dim);
+    border: 1px solid rgba(0, 200, 150, 0.2);
+    color: var(--success);
+    padding: 2px 8px; border-radius: 20px;
+    font-size: 10px; font-weight: 700;
+  }
+
+  /* Progress ring */
+  .ring-wrap { position: relative; width: 50px; height: 50px; flex-shrink: 0; }
+  .ring-wrap svg { transform: rotate(-90deg); }
+  .ring-bg { fill: none; stroke: var(--bg-elevated); stroke-width: 4; }
+  .ring-fill { fill: none; stroke-width: 4; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
+  .ring-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; font-family: var(--mono); }
+
+  /* ── TABS ── */
+  .tab-bar { display: flex; gap: 4px; padding: 0 16px 12px; }
+  .tab { padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+  .tab.active { background: var(--primary); color: white; }
+  .tab:not(.active) { background: var(--bg-surface); color: var(--text-2); }
+  .tab:not(.active):hover { color: var(--text); }
+
+  /* ── SIDEBAR PREVIEW ── */
+  .info-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .info-row:last-child { border-bottom: none; }
+  .info-key { font-size: 11px; color: var(--text-2); }
+  .info-val { font-size: 11px; font-weight: 600; font-family: var(--mono); }
+
+  /* Global document context */
+  .page-context {
+    display: flex; flex-direction: column; gap: 24px;
+    max-width: 960px; margin: 0 auto; width: 100%;
+  }
+  .page-title { font-family: var(--font); font-size: 28px; font-weight: 800; color: var(--text); letter-spacing: -1px; }
+  .page-title span { color: var(--primary); }
+  .page-subtitle { font-size: 14px; color: var(--text-2); margin-top: 4px; }
+  .phones-row { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
+  .phone-label { text-align: center; font-size: 12px; color: var(--text-2); margin-bottom: 12px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; }
+
+  /* Docs section */
+  .docs-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+  }
+  .docs-h2 { font-size: 18px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+  .docs-h3 { font-size: 14px; font-weight: 700; color: var(--text-2); margin: 16px 0 8px; text-transform: uppercase; letter-spacing: 0.5px; font-size: 11px; }
+  .docs-p { font-size: 13px; line-height: 1.7; color: var(--text-2); margin-bottom: 12px; }
+  .docs-code {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    padding: 12px 16px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--success);
+    overflow-x: auto;
+    margin-bottom: 12px;
+  }
+  .docs-tag {
+    display: inline-block;
+    background: var(--primary-dim);
+    color: var(--primary);
+    border: 1px solid rgba(255, 107, 53, 0.2);
+    padding: 2px 8px; border-radius: 6px;
+    font-size: 11px; font-weight: 600; font-family: var(--mono);
+    margin: 2px;
+  }
+  .skill-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--bg-surface); border: 1px solid var(--border);
+    border-radius: 20px; padding: 4px 10px;
+    font-size: 11px; color: var(--text-2);
+    margin: 3px;
+  }
+  .agent-row {
+    display: flex; gap: 12px; align-items: center;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+  }
+  .agent-row:last-child { border-bottom: none; }
+  .agent-icon { font-size: 22px; width: 40px; height: 40px; background: var(--bg-surface); border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .agent-name { font-size: 12px; font-weight: 700; }
+  .agent-skill { font-size: 11px; color: var(--text-2); }
+  .workflow-step { display: flex; gap: 10px; padding: 8px 0; align-items: flex-start; }
+  .step-num { width: 20px; height: 20px; background: var(--primary-dim); border: 1px solid var(--primary); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; color: var(--primary); flex-shrink: 0; margin-top: 2px; }
+  .step-text { font-size: 12px; line-height: 1.5; color: var(--text-2); }
+  .step-text strong { color: var(--text); }
+
+  @media (max-width: 500px) {
+    .phones-row { flex-direction: column; align-items: center; }
+    .phone { width: 100%; max-width: 390px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page-context">
+  <div>
+    <div class="page-title">ResellHub <span>v3.0</span></div>
+    <div class="page-subtitle">Dashboard de Monitorización · Poco X7 Pro · Android · React Native</div>
+  </div>
+
+  <div class="phones-row">
+
+    <!-- PHONE 1: DASHBOARD PRINCIPAL -->
+    <div>
+      <div class="phone-label">📊 Dashboard Principal</div>
+      <div class="phone">
+        <!-- Status Bar -->
+        <div class="status-bar">
+          <span class="time">19:42</span>
+          <div class="status-icons">
+            <span>📶</span><span>🔋</span>
+          </div>
+        </div>
+
+        <div class="scroll-area">
+          <!-- Header -->
+          <div class="app-header">
+            <div>
+              <div class="greeting">Hola, reseller 👋</div>
+              <h1>Tu Stock <span>Vivo</span></h1>
+            </div>
+            <div class="notif-btn">
+              🔔
+              <div class="notif-badge">3</div>
+            </div>
+          </div>
+
+          <!-- KPI Strip -->
+          <div class="kpi-strip">
+            <div class="kpi-card" style="--accent-color: var(--success);">
+              <div class="kpi-icon">📦</div>
+              <div class="kpi-label">Activos</div>
+              <div class="kpi-value" style="color: var(--success);">24</div>
+              <div class="kpi-sub">+3 esta semana</div>
+            </div>
+            <div class="kpi-card" style="--accent-color: var(--primary);">
+              <div class="kpi-icon">💸</div>
+              <div class="kpi-label">Vendidos</div>
+              <div class="kpi-value" style="color: var(--primary);">8</div>
+              <div class="kpi-sub">Este mes</div>
+            </div>
+            <div class="kpi-card" style="--accent-color: var(--danger);">
+              <div class="kpi-icon">⚠️</div>
+              <div class="kpi-label">Alertas</div>
+              <div class="kpi-value" style="color: var(--danger);">5</div>
+              <div class="kpi-sub">&gt;60 días</div>
+            </div>
+          </div>
+
+          <!-- Scanning Banner -->
+          <div class="scan-banner">
+            <div class="scan-dot"></div>
+            <div class="scan-text">
+              <strong>Analizando /inbox/zapatillas_nike/</strong>
+              <small>Extrayendo marca, precio y etiquetas con IA · 2 imágenes</small>
+            </div>
+          </div>
+
+          <!-- Stale Alerts -->
+          <div class="section-header">
+            <div class="section-title">
+              <div class="dot" style="--dot-color: var(--danger);"></div>
+              Resubir Ahora
+            </div>
+            <div class="section-action">Ver todos (5)</div>
+          </div>
+
+          <!-- Stale Card 1 -->
+          <div class="stale-card">
+            <div class="stale-card-inner">
+              <div class="stale-img">
+                <div class="stale-img-placeholder">👟</div>
+                <div class="days-badge">87d</div>
+              </div>
+              <div class="stale-info">
+                <div>
+                  <div class="stale-title">Zapatillas Nike Air Max 90</div>
+                  <div class="stale-meta">Nike · Zapatillas · 39€ sugerido</div>
+                  <div class="staleness-bar"><div class="staleness-fill" style="width: 87%;"></div></div>
+                </div>
+                <div class="stale-actions">
+                  <button class="btn-repost">⚡ Reprocesar</button>
+                  <button class="btn-skip">Skip 7d</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Stale Card 2 -->
+          <div class="stale-card">
+            <div class="stale-card-inner">
+              <div class="stale-img">
+                <div class="stale-img-placeholder">👗</div>
+                <div class="days-badge">63d</div>
+              </div>
+              <div class="stale-info">
+                <div>
+                  <div class="stale-title">Vestido Zara Verano</div>
+                  <div class="stale-meta">Zara · Ropa Mujer · 15€ sugerido</div>
+                  <div class="staleness-bar"><div class="staleness-fill" style="width: 63%;"></div></div>
+                </div>
+                <div class="stale-actions">
+                  <button class="btn-repost">⚡ Reprocesar</button>
+                  <button class="btn-skip">Skip 7d</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="spacer-sm"></div>
+
+          <!-- Smart Insights -->
+          <div class="section-header">
+            <div class="section-title">
+              <div class="dot" style="--dot-color: var(--warning);"></div>
+              Smart Insights
+            </div>
+            <div class="section-action">Config</div>
+          </div>
+
+          <div class="insight-scroll">
+            <div class="insight-card" style="--chip-color: var(--warning); --glow-color: rgba(255,184,0,0.06);">
+              <div class="insight-icon">⚡</div>
+              <div class="insight-label">Categoría Relámpago</div>
+              <div class="insight-text"><strong>Zapatillas</strong> se venden un 40% más rápido este mes. ¡Busca más stock!</div>
+              <div class="insight-action">Subir precio +10% →</div>
+            </div>
+            <div class="insight-card" style="--chip-color: #60B3FF; --glow-color: rgba(0,78,137,0.1);">
+              <div class="insight-icon">📅</div>
+              <div class="insight-label">Predicción Mensual</div>
+              <div class="insight-text">Estamos en <strong>Feb</strong>: Históricamente tu stock de <strong>Tecnología</strong> sube 15%.</div>
+              <div class="insight-action">Ver estrategia →</div>
+            </div>
+            <div class="insight-card" style="--chip-color: var(--danger); --glow-color: rgba(255,59,48,0.06);">
+              <div class="insight-icon">🧊</div>
+              <div class="insight-label">Stock Frío</div>
+              <div class="insight-text"><strong>5 Libros</strong> sin movimiento. Baja un 10% o crea un lote.</div>
+              <div class="insight-action">Aplicar descuento →</div>
+            </div>
+          </div>
+
+          <div class="spacer"></div>
+
+          <!-- TTS Chart -->
+          <div class="section-header">
+            <div class="section-title">
+              <div class="dot" style="--dot-color: var(--violet);"></div>
+              TTS por Categoría
+            </div>
+            <div class="section-action">Detalle</div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-title">
+              Time-to-Sell <span class="chart-subtitle">— días promedio</span>
+            </div>
+            <div class="chart-bars">
+              <!-- Bars from bottom up -->
+              <div class="bar-wrap">
+                <div class="bar-value" style="color: var(--success);">5d</div>
+                <div class="bar" style="height: 70%; background: linear-gradient(180deg, #00C896, #009970);"></div>
+                <div class="bar-label">Zapatillas</div>
+              </div>
+              <div class="bar-wrap">
+                <div class="bar-value" style="color: var(--warning);">18d</div>
+                <div class="bar" style="height: 45%; background: linear-gradient(180deg, #FFB800, #CC9200);"></div>
+                <div class="bar-label">Ropa</div>
+              </div>
+              <div class="bar-wrap">
+                <div class="bar-value" style="color: var(--primary);">12d</div>
+                <div class="bar" style="height: 55%; background: linear-gradient(180deg, #FF6B35, #CC4500);"></div>
+                <div class="bar-label">Electrónica</div>
+              </div>
+              <div class="bar-wrap">
+                <div class="bar-value" style="color: var(--danger);">67d</div>
+                <div class="bar" style="height: 100%; background: linear-gradient(180deg, #FF3B30, #CC1A10);"></div>
+                <div class="bar-label">Libros</div>
+              </div>
+              <div class="bar-wrap">
+                <div class="bar-value" style="color: var(--violet);">24d</div>
+                <div class="bar" style="height: 40%; background: linear-gradient(180deg, #7B61FF, #5A40DD);"></div>
+                <div class="bar-label">Hogar</div>
+              </div>
+              <div class="bar-wrap">
+                <div class="bar-value" style="color: var(--stale);">42d</div>
+                <div class="bar" style="height: 60%; background: linear-gradient(180deg, #8B8FA8, #5C6080);"></div>
+                <div class="bar-label">Accesorios</div>
+              </div>
+            </div>
+            <div class="chart-legend">
+              <div class="legend-item"><div class="legend-dot" style="background: var(--success);"></div> Relámpago &lt;7d</div>
+              <div class="legend-item"><div class="legend-dot" style="background: var(--warning);"></div> Normal 7-30d</div>
+              <div class="legend-item"><div class="legend-dot" style="background: var(--danger);"></div> Ancla &gt;30d</div>
+            </div>
+          </div>
+
+          <!-- Heatmap -->
+          <div class="heatmap-card">
+            <div class="chart-title">🗓️ Actividad Mensual <span class="chart-subtitle">— Febrero 2025</span></div>
+            <div class="heat-day-labels">
+              <div class="heat-day-label">L</div>
+              <div class="heat-day-label">M</div>
+              <div class="heat-day-label">X</div>
+              <div class="heat-day-label">J</div>
+              <div class="heat-day-label">V</div>
+              <div class="heat-day-label">S</div>
+              <div class="heat-day-label">D</div>
+            </div>
+            <div class="heatmap-grid" id="heatmap"></div>
+          </div>
+
+          <div class="spacer"></div>
+
+          <!-- Recent Products -->
+          <div class="section-header">
+            <div class="section-title">
+              <div class="dot" style="--dot-color: var(--secondary);"></div>
+              Tu Inventario
+            </div>
+            <div class="section-action">Ver todo</div>
+          </div>
+
+          <div class="tab-bar">
+            <div class="tab active">Activos</div>
+            <div class="tab">Estancados</div>
+            <div class="tab">Vendidos</div>
+          </div>
+
+          <div class="product-grid">
+            <div class="product-thumb">
+              <div class="product-thumb-img">
+                👟
+                <div class="status-chip chip-active">ACTIVO</div>
+              </div>
+              <div class="product-thumb-info">
+                <div class="product-thumb-title">Nike Air Jordan 1</div>
+                <div class="product-thumb-price">89€</div>
+                <div class="product-thumb-tts">TTS: 3 días</div>
+              </div>
+            </div>
+            <div class="product-thumb">
+              <div class="product-thumb-img">
+                👜
+                <div class="status-chip chip-stale">ESTANCADO</div>
+              </div>
+              <div class="product-thumb-info">
+                <div class="product-thumb-title">Bolso Michael Kors</div>
+                <div class="product-thumb-price">45€</div>
+                <div class="product-thumb-tts">72 días sin vender</div>
+              </div>
+            </div>
+            <div class="product-thumb">
+              <div class="product-thumb-img">
+                📱
+                <div class="status-chip chip-sold">VENDIDO</div>
+              </div>
+              <div class="product-thumb-info">
+                <div class="product-thumb-title">iPhone 12 Mini</div>
+                <div class="product-thumb-price">320€</div>
+                <div class="product-thumb-tts"><span class="sold-tag">✅ 8d TTS</span></div>
+              </div>
+            </div>
+            <div class="product-thumb">
+              <div class="product-thumb-img">
+                🧥
+                <div class="status-chip chip-active">ACTIVO</div>
+              </div>
+              <div class="product-thumb-info">
+                <div class="product-thumb-title">Cazadora Levi's</div>
+                <div class="product-thumb-price">35€</div>
+                <div class="product-thumb-tts">TTS: 14 días</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="height: 24px;"></div>
+        </div>
+
+        <!-- Bottom Nav -->
+        <div class="bottom-nav">
+          <div class="nav-item active">
+            <span class="nav-icon">📊</span>
+            <span class="nav-label">Dashboard</span>
+          </div>
+          <div class="nav-item">
+            <span class="nav-icon">📦</span>
+            <span class="nav-label">Stock</span>
+            <div class="nav-badge">5</div>
+          </div>
+          <div class="nav-item">
+            <span class="nav-icon">➕</span>
+            <span class="nav-label">Procesar</span>
+          </div>
+          <div class="nav-item">
+            <span class="nav-icon">📈</span>
+            <span class="nav-label">Stats</span>
+          </div>
+          <div class="nav-item">
+            <span class="nav-icon">⚙️</span>
+            <span class="nav-label">Config</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PHONE 2: DETALLE DE PRODUCTO PARA RESUBIR -->
+    <div>
+      <div class="phone-label">⚡ Pantalla de Resubida</div>
+      <div class="phone">
+        <div class="status-bar">
+          <span class="time">19:42</span>
+          <div class="status-icons"><span>📶</span><span>🔋</span></div>
+        </div>
+        <div class="scroll-area">
+
+          <!-- Header back -->
+          <div style="padding: 16px 16px 0; display: flex; align-items: center; gap: 12px;">
+            <div style="width: 36px; height: 36px; background: var(--bg-surface); border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 16px;">←</div>
+            <div style="font-size: 17px; font-weight: 700;">Reprocesar Producto</div>
+          </div>
+
+          <!-- Product Hero -->
+          <div style="margin: 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;">
+            <div style="height: 160px; background: linear-gradient(135deg, var(--bg-surface), var(--bg-elevated)); display: flex; align-items: center; justify-content: center; font-size: 60px; position: relative;">
+              👟
+              <div style="position: absolute; bottom: 10px; right: 10px; background: rgba(255,59,48,0.9); color: white; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px;">87 días sin vender</div>
+            </div>
+            <div style="padding: 14px;">
+              <div style="font-size: 17px; font-weight: 700; margin-bottom: 4px;">Zapatillas Nike Air Max 90</div>
+              <div style="font-size: 13px; color: var(--text-2);">Nike · Talla 43 · Calzado Hombre</div>
+              <div style="margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap;">
+                <span class="docs-tag">nike</span>
+                <span class="docs-tag">air max</span>
+                <span class="docs-tag">zapatillas</span>
+                <span class="docs-tag">running</span>
+                <span class="docs-tag">sneakers</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Ring stats -->
+          <div style="margin: 0 16px 10px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px;">
+            <div style="font-size: 12px; font-weight: 700; margin-bottom: 12px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.5px;">Análisis de Estancamiento</div>
+            <div style="display: flex; gap: 16px; align-items: center;">
+              <div class="ring-wrap">
+                <svg viewBox="0 0 50 50" width="50" height="50">
+                  <circle class="ring-bg" cx="25" cy="25" r="20"/>
+                  <circle class="ring-fill" cx="25" cy="25" r="20" stroke="#FF3B30" stroke-dasharray="125.66" stroke-dashoffset="15"/>
+                </svg>
+                <div class="ring-label" style="color: var(--danger);">87</div>
+              </div>
+              <div style="flex: 1;">
+                <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px;">Staleness Score: <span style="color: var(--danger);">Crítico</span></div>
+                <div style="font-size: 11px; color: var(--text-2); line-height: 1.6;">
+                  87 días publicado · 234 vistas · 3 favoritos<br>
+                  Decaimiento exponencial: λ = 0.08
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Price optimizer -->
+          <div style="margin: 0 16px 10px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px;">
+            <div style="font-size: 12px; font-weight: 700; margin-bottom: 10px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.5px;">💰 Precio Óptimo</div>
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <div style="text-align: center;">
+                <div style="font-size: 10px; color: var(--text-3); margin-bottom: 2px;">Actual</div>
+                <div style="font-size: 22px; font-weight: 800; font-family: var(--mono); text-decoration: line-through; color: var(--text-3);">45€</div>
+              </div>
+              <div style="font-size: 24px; color: var(--warning);">→</div>
+              <div style="text-align: center;">
+                <div style="font-size: 10px; color: var(--success); margin-bottom: 2px; font-weight: 700;">SUGERIDO</div>
+                <div style="font-size: 28px; font-weight: 800; font-family: var(--mono); color: var(--success);">38€</div>
+              </div>
+              <div style="flex: 1; font-size: 11px; color: var(--text-2); line-height: 1.5;">-15% por TTS &gt;90d · Ancla detectado</div>
+            </div>
+          </div>
+
+          <!-- Formulario listo para copiar -->
+          <div style="margin: 0 16px 10px; background: var(--bg-card); border: 1px solid rgba(0,200,150,0.2); border-radius: var(--radius); padding: 14px;">
+            <div style="font-size: 12px; font-weight: 700; margin-bottom: 10px; color: var(--success); text-transform: uppercase; letter-spacing: 0.5px;">📋 Datos para Vinted</div>
+            <div class="info-row">
+              <span class="info-key">Título</span>
+              <span class="info-val">Nike Air Max 90 T43</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Marca</span>
+              <span class="info-val">Nike</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Categoría</span>
+              <span class="info-val">Calzado › Deportivo</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Precio</span>
+              <span class="info-val" style="color: var(--success);">38,00 €</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Estado</span>
+              <span class="info-val">Buen estado</span>
+            </div>
+          </div>
+
+          <!-- CTA Buttons -->
+          <div style="padding: 0 16px 24px; display: flex; flex-direction: column; gap: 8px;">
+            <button style="width: 100%; padding: 16px; background: var(--primary); color: white; border: none; border-radius: var(--radius-sm); font-size: 15px; font-weight: 700; font-family: var(--font); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+              ⚡ Reprocesar Imagen y Resubir
+            </button>
+            <button style="width: 100%; padding: 14px; background: var(--success-dim); color: var(--success); border: 1px solid rgba(0,200,150,0.3); border-radius: var(--radius-sm); font-size: 14px; font-weight: 700; font-family: var(--font); cursor: pointer;">
+              ✅ Marcar como Vendido
+            </button>
+            <button style="width: 100%; padding: 14px; background: transparent; color: var(--text-2); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; font-family: var(--font); cursor: pointer;">
+              Archivar producto
+            </button>
+          </div>
+
+        </div>
+
+        <div class="bottom-nav">
+          <div class="nav-item">
+            <span class="nav-icon">📊</span>
+            <span class="nav-label">Dashboard</span>
+          </div>
+          <div class="nav-item active">
+            <span class="nav-icon">📦</span>
+            <span class="nav-label">Stock</span>
+          </div>
+          <div class="nav-item">
+            <span class="nav-icon">➕</span>
+            <span class="nav-label">Procesar</span>
+          </div>
+          <div class="nav-item">
+            <span class="nav-icon">📈</span>
+            <span class="nav-label">Stats</span>
+          </div>
+          <div class="nav-item">
+            <span class="nav-icon">⚙️</span>
+            <span class="nav-label">Config</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- DOCS SECTION -->
+  <div class="docs-section">
+    <div class="docs-h2">📐 Especificaciones de Diseño · Poco X7 Pro</div>
+
+    <div class="docs-h3">Sistema de Grid</div>
+    <div class="docs-p">Base 8pt para todos los espaciados. Padding lateral: 16pt. Pantalla efectiva: 390pt × 844pt (safe area incluida). Status bar: 48pt. Bottom nav: 72pt (con 34pt de safe area inferior).</div>
+
+    <div class="docs-h3">Tipografía</div>
+    <div class="docs-p">
+      <strong style="color: var(--text);">Display:</strong> Sora Bold 36pt · KPIs y titulares principales<br>
+      <strong style="color: var(--text);">Heading:</strong> Sora SemiBold 22pt · Título de pantalla<br>
+      <strong style="color: var(--text);">Section:</strong> Sora Bold 15pt · Cabeceras de sección<br>
+      <strong style="color: var(--text);">Body:</strong> Sora Medium 13pt · Contenido de cards<br>
+      <strong style="color: var(--text);">Caption:</strong> Sora Regular 11pt · Metadatos y etiquetas<br>
+      <strong style="color: var(--text);">Mono:</strong> JetBrains Mono 13pt · Precios y datos numéricos
+    </div>
+
+    <div class="docs-h3">Tokens de Color Semántico</div>
+    <div class="docs-p">
+      🟠 <code style="color: var(--primary);">#FF6B35</code> Primary — CTAs, alertas principales<br>
+      🔵 <code style="color: #60B3FF;">#004E89</code> Secondary — Insights estacionales<br>
+      🟢 <code style="color: var(--success);">#00C896</code> Success — Vendidos, precio óptimo<br>
+      🟡 <code style="color: var(--warning);">#FFB800</code> Warning — Relámpago, oportunidades<br>
+      🔴 <code style="color: var(--danger);">#FF3B30</code> Danger — Stock frío, staleness crítico<br>
+      🟣 <code style="color: var(--violet);">#7B61FF</code> Violet — IA, DATA_SCIENTIST insights
+    </div>
+
+    <div class="docs-h3">Jerarquía de Pantalla</div>
+    <div class="docs-p">Al abrir la app el usuario ve en este orden de prioridad visual:</div>
+    <div class="workflow-step"><div class="step-num">1</div><div class="step-text"><strong>KPI Strip</strong> — 3 métricas críticas con código de color (stock / vendidos / alertas)</div></div>
+    <div class="workflow-step"><div class="step-num">2</div><div class="step-text"><strong>Alertas de Resubida</strong> — Cards con barra de staleness y CTA directo de reprocesado</div></div>
+    <div class="workflow-step"><div class="step-num">3</div><div class="step-text"><strong>Smart Insights</strong> — Carrusel horizontal: Relámpago / Estacional / Stock Frío</div></div>
+    <div class="workflow-step"><div class="step-num">4</div><div class="step-text"><strong>TTS Chart</strong> — Barras de Time-to-Sell por categoría con leyenda de colores</div></div>
+    <div class="workflow-step"><div class="step-num">5</div><div class="step-text"><strong>Heatmap</strong> — Actividad mensual (publicaciones + ventas)</div></div>
+    <div class="workflow-step"><div class="step-num">6</div><div class="step-text"><strong>Inventario</strong> — Grid de productos con pestañas: Activos / Estancados / Vendidos</div></div>
+  </div>
+
+  <!-- Skills section -->
+  <div class="docs-section">
+    <div class="docs-h2">🤖 Skills por Agente · v3.0</div>
+    <div class="docs-p">Sistema completo de skills generado en <code style="color: var(--success); font-family: var(--mono);">skills.json</code>. Flujos orquestados para los 4 workflows principales:</div>
+
+    <div class="agent-row">
+      <div class="agent-icon">🏛️</div>
+      <div>
+        <div class="agent-name">ARCHITECT</div>
+        <div class="agent-skill">smart_merge · image_pipeline · directory_watcher · data_schema_v3</div>
+      </div>
+    </div>
+    <div class="agent-row">
+      <div class="agent-icon">🧠</div>
+      <div>
+        <div class="agent-name">DATA_SCIENTIST</div>
+        <div class="agent-skill">tts_calculator · staleness_score · seasonal_calendar · price_optimizer · interest_decay_curve</div>
+      </div>
+    </div>
+    <div class="agent-row">
+      <div class="agent-icon">💰</div>
+      <div>
+        <div class="agent-name">GROWTH_HACKER</div>
+        <div class="agent-skill">republish_strategy · category_intelligence · bundle_detector</div>
+      </div>
+    </div>
+    <div class="agent-row">
+      <div class="agent-icon">🛡️</div>
+      <div>
+        <div class="agent-name">SECURITY_OFFICER</div>
+        <div class="agent-skill">vinted_safety (máx 10 resubidas/día, 48h mínimo entre resubidas)</div>
+      </div>
+    </div>
+    <div class="agent-row">
+      <div class="agent-icon">🚀</div>
+      <div>
+        <div class="agent-name">DEVOPS</div>
+        <div class="agent-skill">android_build_pipeline · directory_watcher_service · notification_scheduler</div>
+      </div>
+    </div>
+
+    <div class="docs-h3">Workflow: Nuevo Producto Detectado</div>
+    <div class="docs-code">DEVOPS.directory_watcher → ARCHITECT.image_pipeline → ARCHITECT.extract_metadata
+→ DATA_SCIENTIST.staleness_score(init=0) → UI_SPECIALIST.show_pending
+→ QA.LogService.info('PRODUCT_INGESTED', {id, title, brand})</div>
+
+    <div class="docs-h3">Workflow: Resubida</div>
+    <div class="docs-code">SECURITY_OFFICER.vinted_safety → ARCHITECT.image_pipeline(crop+1px)
+→ DATA_SCIENTIST.price_optimizer → GROWTH_HACKER.republish_strategy
+→ ARCHITECT.smart_merge(republishCount++) → UI.show_copy_card
+→ QA.LogService.info('PRODUCT_REPUBLISHED', {id, newPrice})</div>
+
+    <div class="docs-h3">Stack de Implementación Recomendado</div>
+    <div class="docs-p">
+      <strong style="color: var(--text);">Framework:</strong> React Native (Expo SDK 52+) con TypeScript<br>
+      <strong style="color: var(--text);">Estilos:</strong> NativeWind (Tailwind para RN) + StyleSheet para animaciones<br>
+      <strong style="color: var(--text);">Navegación:</strong> Expo Router (file-based routing)<br>
+      <strong style="color: var(--text);">Storage:</strong> MMKV (react-native-mmkv) para configuración y caché<br>
+      <strong style="color: var(--text);">DB:</strong> WatermelonDB o SQLite (expo-sqlite) para productos<br>
+      <strong style="color: var(--text);">Imágenes:</strong> expo-image-manipulator para crop + conversión JPEG<br>
+      <strong style="color: var(--text);">IA Vision:</strong> Claude API (claude-opus-4-6) para extracción de metadatos<br>
+      <strong style="color: var(--text);">Notificaciones:</strong> expo-notifications (locales) + expo-background-fetch<br>
+      <strong style="color: var(--text);">Gráficos:</strong> Victory Native XL (animaciones fluidas en AMOLED)<br>
+      <strong style="color: var(--text);">Build:</strong> Android Studio + EAS CLI para APK local/cloud
+    </div>
+  </div>
+
+</div>
+
+<script>
+// Generate heatmap
+const heatmap = document.getElementById('heatmap');
+const intensities = [0,0,1,0,2,1,0,1,3,2,1,0,2,1,3,2,1,0,1,2,3,1,0,1,2,1,0,0];
+const colors = ['#1A1A28','rgba(255,107,53,0.2)','rgba(255,107,53,0.5)','rgba(255,107,53,0.9)'];
+for(let i = 0; i < 28; i++) {
+  const cell = document.createElement('div');
+  cell.className = 'heat-cell';
+  cell.style.background = colors[intensities[i]];
+  cell.title = intensities[i] > 0 ? `${intensities[i]} venta${intensities[i]>1?'s':''}` : 'Sin actividad';
+  heatmap.appendChild(cell);
+}
+
+// Tab interaction
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', function() {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    this.classList.add('active');
+  });
+});
+
+// Nav interaction
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', function() {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    this.classList.add('active');
+  });
+});
+</script>
+</body>
+</html>

@@ -1,12 +1,30 @@
 # ╔══════════════════════════════════════════════════════════════════════════╗
-# ║        RESELLHUB — SISTEMA DE ORQUESTACIÓN DE AGENTES v4.0             ║
+# ║        RESELLHUB — SISTEMA DE ORQUESTACIÓN DE AGENTES v4.1             ║
 # ║        Motor de Resubida Inteligente · Metodología Completa             ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 #
 #  FUENTE DE VERDAD:   @DESIGN_SYSTEM.md
+#  SKILLS REF:         @skills.json (v3.0 — Skills activas por agente)
+#  DISEÑO VISUAL:      @ResellHub_Dashboard.html (referencia UI para Cursor)
 #  STACK:              React Native 0.76 · Expo 52 · MMKV · LogService v2.0
-#  DISPOSITIVO:        Poco X7 Pro (393dp · 120Hz · Android 14)
-#  VERSIÓN:            4.0 — Febrero 2026
+#  DISPOSITIVO:        Poco X7 Pro (393dp · 120Hz · AMOLED · Android 14)
+#  VERSIÓN:            4.1 — Febrero 2026
+#
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  REGLAS MAESTRAS (leer SIEMPRE primero, nunca saltarse)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+#  1. Usa SIEMPRE @DESIGN_SYSTEM.md como fuente de verdad
+#  2. Consulta @skills.json para conocer las Skills activas de cada agente
+#  3. Los 4 campos PROTEGIDOS nunca se sobreescriben:
+#       firstUploadDate · category · title · brand
+#  4. seoTags está ELIMINADO desde v2.1 — usar tags[] en su lugar
+#  5. Cada función nueva DEBE tener LogService v2.0 (mínimo .error en catch)
+#  6. El crop de 1px por cada lado de imagen es OBLIGATORIO en cada resubida
+#  7. Todo trabajo pasa por [ORCHESTRATOR] primero — sin excepciones
+#  8. Fix mínimo siempre: prohibido refactorizar mientras se debuggea
+#  9. Credenciales ausentes en TODOS los logs — sin excepciones
+# 10. Ningún agente puede saltar un estado del ciclo de vida de tarea
 #
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  FILOSOFÍA DEL SISTEMA
@@ -18,28 +36,28 @@
 #
 #  Tres modos de trabajo según complejidad:
 #
-#  MODO SOLO      → 1 agente  · Bugs menores, estilos, textos
+#  MODO SOLO      → 1 agente   · Bugs menores, estilos, textos
 #  MODO PAIR      → 2-3 agentes · Features simples, refactors
 #  MODO FULL-TEAM → Toda la cadena · Features complejas, nuevas pantallas
 #
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  PARTE I — EL ORQUESTADOR (NUEVO EN v4.0)
+#  PARTE I — EL ORQUESTADOR
 # ══════════════════════════════════════════════════════════════════════════
 
 ## [ORCHESTRATOR] — El Director de Flujo
 **Rol**: Agente de entrada OBLIGATORIO. Todo trabajo pasa por él primero.
 **No escribe código.** Analiza, clasifica y delega.
+**Skills**: Consultar @skills.json para ver skills activas de cada agente antes de delegar.
 
 ### Protocolo de entrada
 Cuando recibas una petición, [ORCHESTRATOR] DEBE responder con este formato:
 
 ```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [ORCHESTRATOR] — ANÁLISIS DE TAREA
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TAREA:        [descripción breve]
 TIPO:         [BUG / FEATURE / REFACTOR / DOCS / HOTFIX / RESEARCH]
 COMPLEJIDAD:  [BAJA / MEDIA / ALTA]
@@ -47,9 +65,9 @@ MODO:         [SOLO / PAIR / FULL-TEAM]
 PRIORIDAD:    [CRITICA / ALTA / NORMAL / BAJA]
 
 AGENTES ACTIVADOS (en orden):
-  1. [AGENTE_A] → entrega: [qué produce]
-  2. [AGENTE_B] → recibe de A, entrega: [qué produce]
-  3. [AGENTE_C] → recibe de B, entrega: [qué produce]
+  1. [AGENTE_A] skill [XX-000] → entrega: [qué produce]
+  2. [AGENTE_B] skill [XX-000] → recibe de A, entrega: [qué produce]
+  3. [AGENTE_C]               → recibe de B, entrega: [qué produce]
 
 ARCHIVOS EN RIESGO:
   CRITICO [archivo] — requiere aprobación [PROPIETARIO]
@@ -58,9 +76,10 @@ ARCHIVOS EN RIESGO:
 CAMPOS PROTEGIDOS AFECTADOS: [sí/no + cuáles]
 IMPACTO EN LOGIN/AUTH:        [sí/no]
 IMPACTO EN MMKV SCHEMA:       [sí/no]
+REFERENCIA VISUAL:            [@ResellHub_Dashboard.html sección X / no aplica]
 
 ESTIMACIÓN: [X] intercambios de agente
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
 ### Tabla de clasificación automática
@@ -77,21 +96,25 @@ ESTIMACIÓN: [X] intercambios de agente
 | Hotfix crítico | FULL | [DEBUGGER] + [SECURITY_OFFICER] + [DEVOPS] |
 | Nueva pantalla completa | FULL | [PRODUCT_OWNER] + [ARCHITECT] + [UI_SPECIALIST] + [QA_ENGINEER] + [LIBRARIAN] + [DEVOPS] |
 | Análisis de ventas sin código | PAIR | [GROWTH_HACKER] + [MARKET_ANALYST] + [DATA_SCIENTIST] |
+| Pipeline de imagen nueva | FULL | [ARCHITECT] skill ARCH-002 + [PROMPT_ENGINEER] + [QA_ENGINEER] skill QA-003 |
+| Recalibración de staleness | PAIR | [DATA_SCIENTIST] skill DS-002 + [GROWTH_HACKER] skill GH-002 |
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  PARTE II — DIRECTORIO COMPLETO DE AGENTES (12 agentes)
+#  PARTE II — DIRECTORIO COMPLETO DE AGENTES (13 agentes)
 # ══════════════════════════════════════════════════════════════════════════
 
 ## [PRODUCT_OWNER] — El Estratega de Producto
 **Tipo**: Dirección | **Modo**: FULL-TEAM siempre
+**Skills Activas**: `PO-001 feature_gating` | `PO-002 roadmap_prioritization` | `PO-003 acceptance_criteria`
 **Input**: Idea, petición de usuario, métrica de negocio
 **Output**: Especificación aprobada con criterios de aceptación
 
 - Valida que cada feature maximice la Inteligencia de Resubida y el GMV.
+- Activa skill `PO-001 feature_gating` ANTES de cualquier implementación.
 - Rechaza cualquier propuesta que toque `seoTags` (eliminado en v2.1).
 - Tiene veto sobre cualquier decisión de los demás agentes.
-- Define los criterios de aceptación ANTES de que [ARCHITECT] empiece.
+- KPIs a defender: TTS_medio, tasa_resubida, conversion_rate, dead_stock_count.
 
 **Template de criterios de aceptación**:
 ```
@@ -110,22 +133,25 @@ FUERA DE ALCANCE:
 
 ## [ARCHITECT] — El Estructurador de Datos
 **Tipo**: Ingeniería core | **Modo**: PAIR o FULL-TEAM
+**Skills Activas**: `ARCH-001 smart_merge` | `ARCH-002 image_pipeline` | `ARCH-003 directory_watcher` | `ARCH-004 data_schema_v3`
 **Input**: Especificación de [PRODUCT_OWNER]
 **Output**: Diseño de datos + nuevas MMKV keys + contrato de servicios
 
 - Diseña el modelo de datos ANTES de que [UI_SPECIALIST] empiece.
 - Toda nueva MMKV key se registra en @DESIGN_SYSTEM.md ANTES de usarse.
 - Custodio de `DatabaseService.js` y `App.jsx` (flujo auth+nav).
+- Pipeline de imagen (skill ARCH-002): webp/png/heic → JPEG (quality 92) → crop 1px → hash MD5.
+- Monitorizar `/ResellHub/inbox/*/` con debounce de 2000ms (skill ARCH-003).
 
 **Reglas de Oro inmutables**:
 ```javascript
-// Detección de resubida (NUNCA cambiar este algoritmo sin aprobación)
+// Detección de resubida — skill ARCH-001 smart_merge (NUNCA cambiar sin aprobación)
+const normalize = (s) => (s ?? '').toLowerCase().trim().replace(/\s+/g,' ');
 const esMismoProducto = (a, b) =>
   normalize(a.title) === normalize(b.title) &&
   normalize(a.brand)  === normalize(b.brand);
-const normalize = (s) => (s ?? '').toLowerCase().trim().replace(/\s+/g,' ');
 
-// Campos NUNCA sobreescribibles en importación
+// Campos NUNCA sobreescribibles — skill ARCH-004
 const CAMPOS_SAGRADOS = [
   'firstUploadDate','category','subcategory',
   'app_pin','app_password','session_authed_until'
@@ -134,6 +160,15 @@ const CAMPOS_SAGRADOS = [
 // TTS siempre en días enteros
 const calcTTS = (soldAt, firstUploadDate) =>
   Math.floor((new Date(soldAt) - new Date(firstUploadDate)) / 86400000);
+```
+
+**Schema Canónico v3** (ver ARCH-004 en @skills.json para detalle completo):
+```
+id · title · brand · category · subcategory · description · tags[]
+estimatedPrice · priceHistory[] · images[] · status
+firstUploadDate (PROTEGIDO) · lastPublishedDate · soldDate
+republishCount · staleness_score · tts_days · views · favorites
+createdAt · updatedAt
 ```
 
 **Output de handoff a [UI_SPECIALIST]**:
@@ -149,8 +184,10 @@ const calcTTS = (soldAt, firstUploadDate) =>
 
 ## [UI_SPECIALIST] — El Diseñador de Interacción
 **Tipo**: Frontend | **Modo**: SOLO, PAIR o FULL-TEAM
+**Skills Activas**: `UI-001 atomic_design_rn` | `UI-002 dashboard_hierarchy` | `UI-003 interaction_states` | `UI-004 notification_cards`
 **Input**: Contrato de datos de [ARCHITECT] + criterios de [PRODUCT_OWNER]
 **Output**: Componente o pantalla funcional siguiendo el Design System
+**Referencia visual**: `@ResellHub_Dashboard.html` — usar SIEMPRE al construir UI
 
 **Paleta canónica** (copiar en CADA componente nuevo):
 ```javascript
@@ -159,18 +196,58 @@ const C = {
   primary:'#FF6B35', secondary:'#004E89', success:'#00D9A3',
   warning:'#FFB800', error:'#E63946',     info:'#5E81AC',
   white:'#FFFFFF',   gray:'#888888',      gray2:'#AAAACC',
+  violet:'#7B61FF',
 };
 const SP = { xs:4, sm:8, md:12, base:16, lg:20, xl:24, xxl:32, xxxl:48 };
+```
+
+**Tipografía canónica**:
+```
+Display:    Sora-Bold 36pt      — KPIs y titulares principales
+Heading:    Sora-SemiBold 22pt  — Título de pantalla
+Section:    Sora-Bold 15pt      — Cabeceras de sección
+Body:       Sora-Medium 13pt    — Contenido de cards
+Caption:    Sora-Regular 11pt   — Metadatos y etiquetas
+Mono:       JetBrains Mono 13pt — Precios y datos numéricos
+```
+
+**Jerarquía del Dashboard** (orden estricto — skill UI-002):
+```
+1. KPI Strip       → 3 métricas: Stock Activo | Vendidos Mes | Alertas
+2. Alertas Resubida → cards con staleness bar + CTAs (CRITICO)
+3. Smart Insights  → carrusel: Relámpago | Estacional | Stock Frío
+4. TTS Chart       → barras por categoría con leyenda de colores
+5. Heatmap         → actividad mensual
+6. Inventario      → grid con tabs: Activos | Estancados | Vendidos
 ```
 
 **Reglas de componentes**:
 - Botón primario: `height:56-60, borderRadius:16-18, bg:C.primary`
 - Inputs: `height:56-60, borderRadius:16-18, borderWidth:1.5`
-- Cards: `borderRadius:20-24, padding:16-18, elevation:2`
+- Cards: `borderRadius:20-24, padding:16-18`
 - `activeOpacity={0.7}` en TODOS los `TouchableOpacity`
 - `useNativeDriver:true` en TODAS las animaciones
 - `FlatList` para listas > 5 items (NUNCA ScrollView+map)
 - `KeyboardAvoidingView` en TODA pantalla con inputs
+
+**Estados táctiles** (skill UI-003):
+```
+default:    opacity:1, scale:1
+pressed:    opacity:0.85, scale:0.97, haptic:light
+long_press: scale:0.95, haptic:medium → context menu
+disabled:   opacity:0.4, sin haptic
+loading:    skeleton shimmer #141428 → #1A1A35
+error:      border-color:C.error, shake 300ms
+success:    border-color:C.success, pulse 500ms
+```
+
+**Tipos de notificación** (skill UI-004):
+```
+STALE_ALERT:        ⚠️ rojo   — producto > 60 días sin vender
+FLASH_OPPORTUNITY:  ⚡ naranja — categoría vende > media
+SEASONAL_TIP:       📅 azul   — oportunidad estacional del mes
+SOLD_CONFIRM:       ✅ verde  — producto marcado vendido
+```
 
 **Output de handoff a [QA_ENGINEER]**:
 ```
@@ -184,14 +261,13 @@ const SP = { xs:4, sm:8, md:12, base:16, lg:20, xl:24, xxl:32, xxxl:48 };
 
 ---
 
-## [DEBUGGER] — El Cazador de Bugs (NUEVO en v4.0)
+## [DEBUGGER] — El Cazador de Bugs
 **Tipo**: Diagnóstico | **Modo**: SOLO o PAIR
 **Input**: Descripción del bug + logs de LogService + stack trace
 **Output**: Root cause + fix mínimo + test de regresión
 
-El [DEBUGGER] es diferente de [QA_ENGINEER]:
-- [DEBUGGER] DIAGNOSTICA y REPARA bugs ya existentes.
-- [QA_ENGINEER] PREVIENE bugs en código nuevo.
+El [DEBUGGER] DIAGNOSTICA y REPARA bugs ya existentes.
+El [QA_ENGINEER] PREVIENE bugs en código nuevo.
 
 **Protocolo de diagnóstico**:
 ```
@@ -208,14 +284,15 @@ El [DEBUGGER] es diferente de [QA_ENGINEER]:
 
 **Reglas del [DEBUGGER]**:
 - Fix MÍNIMO siempre. Prohibido refactorizar mientras se debuggea.
-- Si el fix toca un archivo con propietario, escalar a ese propietario.
-- Si requiere cambio de schema MMKV, escalar a [MIGRATION_MANAGER].
+- Si el fix toca un archivo con propietario → escalar a ese propietario.
+- Si requiere cambio de schema MMKV → escalar a [MIGRATION_MANAGER].
 - Siempre añadir `LogService.error/critical` en el punto de fallo si no existía.
 
 ---
 
 ## [QA_ENGINEER] — El Guardián de Calidad
 **Tipo**: Calidad | **Modo**: PAIR o FULL-TEAM (siempre al final del código)
+**Skills Activas**: `QA-001 log_service_v2` | `QA-002 protected_fields_test` | `QA-003 image_pipeline_validation`
 **Input**: Componente o servicio terminado
 **Output**: Código revisado con checklist firmado + bugs bloqueantes resueltos
 
@@ -226,20 +303,25 @@ El [DEBUGGER] es diferente de [QA_ENGINEER]:
 CÓDIGO:
   [ ] try/catch en TODAS las funciones async
   [ ] LogService: nivel correcto + contexto correcto
-  [ ] Sin console.log() sueltos
+  [ ] Sin console.log() sueltos (QA-001)
   [ ] memo/useCallback en renders pesados
   [ ] FlatList para listas (no ScrollView+map)
   [ ] useNativeDriver:true en animaciones
 
-DATOS:
-  [ ] Campos sagrados intactos: firstUploadDate, category, app_pin, app_password
+DATOS (QA-002):
+  [ ] firstUploadDate, category, title, brand intactos tras cualquier merge
   [ ] Nuevas MMKV keys en DESIGN_SYSTEM.md
-  [ ] TTS calculado correctamente (días enteros)
+  [ ] TTS calculado en días enteros
+
+IMAGEN (QA-003):
+  [ ] Output JPEG verificado por magic bytes (FF D8 FF)
+  [ ] Dimensiones = originales − 2px en width y height
+  [ ] Hash MD5 diferente al original (metadatos invalidados)
 
 AUTH:
   [ ] Login funciona (PIN: 1234, pass: resellhub)
   [ ] session_authed_until se actualiza en login exitoso
-  [ ] Credenciales ausentes en todos los logs
+  [ ] Credenciales ausentes en TODOS los logs
 
 UX:
   [ ] KeyboardAvoidingView en pantallas con inputs
@@ -255,14 +337,10 @@ RESULTADO: APROBADO / BLOQUEADO (razones)
 
 ---
 
-## [CODE_REVIEWER] — El Revisor de Arquitectura (NUEVO en v4.0)
+## [CODE_REVIEWER] — El Revisor de Arquitectura
 **Tipo**: Calidad avanzada | **Modo**: FULL-TEAM en features complejas
 **Input**: Código aprobado por [QA_ENGINEER]
 **Output**: Revisión de patrones, performance y deuda técnica
-
-Diferencia clave con [QA_ENGINEER]:
-- [QA_ENGINEER] busca bugs y errores concretos.
-- [CODE_REVIEWER] busca problemas de arquitectura, performance y mantenibilidad.
 
 **Protocolo de revisión**:
 ```
@@ -290,18 +368,17 @@ BLOQUEA EL MERGE:   [sí/no + razones]
 
 ---
 
-## [PROMPT_ENGINEER] — El Especialista en IA (NUEVO en v4.0)
+## [PROMPT_ENGINEER] — El Especialista en IA
 **Tipo**: IA/ML | **Modo**: PAIR con [ARCHITECT] cuando hay llamadas a IA
 **Input**: Necesidad de extracción de datos de imagen o texto
 **Output**: Prompt optimizado + estructura de respuesta esperada + fallbacks
-
-Activo en: `AIService.js`, cualquier llamada a GPT-4 Vision o LLM.
+**Activo en**: `AIService.js`, cualquier llamada a Claude API o Vision
 
 **Protocolo de diseño de prompt**:
 ```
 [PROMPT_ENGINEER] DISEÑO:
   OBJETIVO:      [qué debe extraer o generar la IA]
-  MODELO:        [gpt-4o-mini / gpt-4-vision-preview / etc.]
+  MODELO:        claude-opus-4-6 (Vision) / claude-sonnet-4-6 (texto)
   SISTEMA:       "Eres un experto en moda de segunda mano española..."
   OUTPUT JSON:
     {
@@ -323,13 +400,13 @@ Activo en: `AIService.js`, cualquier llamada a GPT-4 Vision o LLM.
 
 **Reglas del [PROMPT_ENGINEER]**:
 - Siempre incluir `confianza` en el output.
-- Si `confianza < 0.6`, los campos se marcan como "sugerido" y NO se guardan automáticamente.
+- Si `confianza < 0.6` → campos marcados como "sugerido", NO se guardan automáticamente.
 - El prompt NUNCA pide precio exacto, siempre rango.
-- Incluir 2-3 ejemplos de output en el prompt (few-shot) para aumentar precisión.
+- Incluir 2-3 ejemplos few-shot para aumentar precisión.
 
 ---
 
-## [MIGRATION_MANAGER] — El Gestor de Schema (NUEVO en v4.0)
+## [MIGRATION_MANAGER] — El Gestor de Schema
 **Tipo**: Datos | **Modo**: FULL-TEAM cuando hay cambios de schema MMKV
 **Input**: Propuesta de [ARCHITECT] con nuevos campos o estructura modificada
 **Output**: Script de migración + estrategia de rollback
@@ -342,27 +419,25 @@ Activo OBLIGATORIAMENTE cuando:
 
 **Template de migración**:
 ```javascript
-const SCHEMA_VERSION = '4.0'; // incrementar en cada migración
+const SCHEMA_VERSION = '4.1'; // incrementar en cada migración
 
 const migrateIfNeeded = () => {
   const current = storage.getString('schema_version') || '1.0';
-  if (current === '3.0') {
-    LogService.info('Iniciando migración 3.0 → 4.0', 'DB');
-    // 1. Backup de emergencia ANTES de migrar
+  if (current === '4.0') {
+    LogService.info('Iniciando migración 4.0 → 4.1', 'DB');
     const backup = getAllProducts();
     backupStorage.set('pre_migration_backup', JSON.stringify(backup));
-    // 2. Migrar datos
     const migrated = backup.map(p => ({
       ...p,
-      nuevoCampo: p.nuevoCampo ?? DEFAULT_VALUE, // añadir con default
+      nuevoCampo: p.nuevoCampo ?? DEFAULT_VALUE,
       // NUNCA eliminar campos aquí, deprecarlos primero
     }));
     saveProducts(migrated);
-    storage.set('schema_version', '4.0');
-    LogService.success(`Migración 3.0→4.0: ${migrated.length} productos`, 'DB');
+    storage.set('schema_version', '4.1');
+    LogService.success(`Migración 4.0→4.1: ${migrated.length} productos`, 'DB');
   }
 };
-// Regla: la migración es idempotente (puede ejecutarse N veces sin corrupción)
+// Regla: migración idempotente (puede ejecutarse N veces sin corrupción)
 // Regla: nunca eliminar un campo hasta 2 versiones después de deprecarlo
 ```
 
@@ -370,6 +445,7 @@ const migrateIfNeeded = () => {
 
 ## [GROWTH_HACKER] — El Estratega de Ventas
 **Tipo**: Negocio | **Modo**: FULL-TEAM para features de pricing y resubida
+**Skills Activas**: `GH-001 republish_strategy` | `GH-002 category_intelligence` | `GH-003 bundle_detector`
 **Input**: Datos de TTS, categorías, historial de ventas
 **Output**: Algoritmos de decisión + recomendaciones de precio + calendario
 
@@ -389,21 +465,37 @@ const URGENCIA_NIVELES = [
 ];
 
 const ESTACIONALIDAD = {
-  1:['Juguetes','Decoración'],  2:['Tecnología','Libros'],
-  3:['Ropa Primavera','Deporte'],4:['Disfraces','Libros Texto'],
-  5:['Ropa Verano','Viajes'],   6:['Fin de Curso','Videojuegos'],
-  7:['Liquidaciones','Playa'],  8:['Vuelta al Cole','Material Escolar'],
-  9:['Ropa Otoño','Libros'],   10:['Halloween','Decoración'],
+  1:['Juguetes','Decoración'],    2:['Tecnología','Libros'],
+  3:['Ropa Primavera','Deporte'], 4:['Disfraces','Libros Texto'],
+  5:['Ropa Verano','Viajes'],     6:['Fin de Curso','Videojuegos'],
+  7:['Liquidaciones','Playa'],    8:['Vuelta al Cole','Material Escolar'],
+  9:['Ropa Otoño','Libros'],     10:['Halloween','Decoración'],
  11:['Tecnología','Black Friday'],12:['Juguetes Navidad','Moda'],
 };
 ```
+
+**Timing óptimo de resubida** (skill GH-001):
+```
+Días:  Martes, Miércoles, Jueves
+Hora:  19:00–21:00 hora local
+Evitar: Lunes mañana, Viernes noche
+Randomizar: ±30 min del óptimo (prevención de ban)
+```
+
+**Bundle detector** (skill GH-003):
+Si 2+ productos en misma categoría con TTS > 45d → sugerir lote.
 
 ---
 
 ## [MARKET_ANALYST] — El Radar Externo
 **Tipo**: Inteligencia | **Modo**: PAIR con [GROWTH_HACKER] periódicamente
+**Skills Activas**: `MA-001 trend_monitoring` | `MA-002 algorithm_watch`
 **Input**: Tendencias de Vinted, cambios de plataforma, comportamiento competidor
 **Output**: Informe de señales externas + recomendaciones para [GROWTH_HACKER]
+
+- Alerta al [GROWTH_HACKER] si una categoría pierde > 20% de ventas en mercado externo.
+- Vigilar: boost "nuevo hoy", valoraciones, política de resubidas.
+- Briefing semanal para [GROWTH_HACKER] y [SECURITY_OFFICER].
 
 **Output de handoff**:
 ```
@@ -420,31 +512,42 @@ const ESTACIONALIDAD = {
 
 ## [DATA_SCIENTIST] — El Modelador de IA
 **Tipo**: ML | **Modo**: FULL-TEAM para mejoras del motor de predicción
+**Skills Activas**: `DS-001 tts_calculator` | `DS-002 staleness_score` | `DS-003 seasonal_calendar` | `DS-004 price_optimizer` | `DS-005 interest_decay_curve`
 **Input**: Logs de LogService + priceHistory + patrones de TTS
 **Output**: Modelos de probabilidad + curvas de decaimiento + predicciones
 
-**Modelo de decaimiento de interés**:
+**Staleness Score 0–100** (skill DS-002):
+```
+score = days_factor(0.40) + view_decay(0.25) + fav_decay(0.20) + cat_deviation(0.15)
+Actualizar: cada 24h o al abrir la app
+```
+
+**Curva de decaimiento** (skill DS-005):
 ```javascript
 // Interés(t) = 100 * e^(-λ * t)
-// λ calibrado por categoría con datos históricos
 const LAMBDA = {
-  'Ropa':0.045, 'Calzado':0.055, 'Tecnología':0.080,
-  'Libros':0.025,'Hogar':0.035,  'Juguetes':0.060, default:0.050,
+  'Ropa':0.045,'Calzado':0.055,'Tecnología':0.080,
+  'Libros':0.025,'Hogar':0.035,'Juguetes':0.060, default:0.050,
 };
-const calcularDecaimiento = (diasActivo, categoria) => {
-  const λ = LAMBDA[categoria] ?? LAMBDA.default;
-  return Math.round(Math.exp(-λ * diasActivo) * 100); // 0-100
-};
+const calcularDecaimiento = (diasActivo, categoria) =>
+  Math.round(Math.exp(-(LAMBDA[categoria]??LAMBDA.default) * diasActivo) * 100);
+
+// Días hasta momento óptimo de resubida (umbral 30% de interés inicial)
 const diasHastaOptimo = (categoria, umbral = 30) => {
   const λ = LAMBDA[categoria] ?? LAMBDA.default;
   return Math.ceil(-Math.log(umbral / 100) / λ);
 };
 ```
 
+**Calendario estacional** (skill DS-003):
+Para cada mes M, calcular qué categorías tienen TTS < media_global.
+Min 5 data points. Fallback: datos genéricos de Vinted España.
+
 ---
 
 ## [SECURITY_OFFICER] — El Guardián de Privacidad
 **Tipo**: Seguridad | **Modo**: Siempre en cambios de Auth o MMKV crítica
+**Skills Activas**: `SEC-001 vinted_safety` | `SEC-002 data_privacy`
 **Input**: Cualquier cambio en LoginScreen, DatabaseService, logs
 **Output**: Auditoría de seguridad + aprobación o rechazo
 
@@ -452,34 +555,45 @@ const diasHastaOptimo = (categoria, umbral = 30) => {
 - `screens/LoginScreen.jsx`
 - MMKV keys: `app_pin`, `app_password`, `session_authed_until`, `emergency_backup`
 
-**Reglas de seguridad**:
+**Límites de seguridad Vinted** (skill SEC-001):
+```
+Máx resubidas/día:   10
+Mínimo entre resubidas del mismo producto: 48h
+Zona DANGER: > 10/día o intervalo < 48h → BLOQUEAR y alertar
+El crop 1px es capa de seguridad adicional (invalida caché Vinted)
+```
+
+**Reglas de log** (skill SEC-002):
 ```javascript
-// NUNCA credenciales en logs
-LogService.debug('PIN introducido (longitud correcta)', 'AUTH'); // CORRECTO
-// LogService.debug(`PIN: ${pin}`, 'AUTH');                      // PROHIBIDO
+// CORRECTO
+LogService.debug('PIN introducido (longitud correcta)', 'AUTH');
+// PROHIBIDO — nunca credenciales en logs
+// LogService.debug(`PIN: ${pin}`, 'AUTH');
 
-// Sesión con expiración fija
 const SESSION_MS = 8 * 60 * 60 * 1000; // 8 horas
-
-// Backups en instancia MMKV separada (NUNCA en la principal)
-const backupStorage = new MMKV({ id: 'backup-storage' });
+const backupStorage = new MMKV({ id: 'backup-storage' }); // NUNCA en la principal
 ```
 
 ---
 
 ## [LIBRARIAN] — El Guardián de la Documentación
-**Tipo**: Documentación | **Modo**: FULL-TEAM siempre (último antes de DEVOPS)
+**Tipo**: Documentación | **Modo**: FULL-TEAM siempre (penúltimo, antes de DEVOPS)
+**Skills Activas**: `LIB-001 auto_documentation` | `LIB-002 skills_sync`
 **Input**: Todos los cambios de la iteración
 **Output**: @DESIGN_SYSTEM.md actualizado + diff + nueva versión
 
-**Output obligatorio** (siempre en este formato exacto):
+- Cada cambio de schema → actualizar "Modelo de Datos" + versión SemVer.
+- Cada cambio de UI → actualizar "Design Tokens".
+- Mantener @skills.json sincronizado con capacidades reales de cada agente.
+
+**Output obligatorio** (siempre en este formato):
 ```
 [LIBRARIAN] DIFF:
   + [NUEVO]   Sección X: descripción
   ~ [MOD]     Tabla MMKV: añadida key 'nueva_key' (tipo, descripción)
   ~ [MOD]     Estructura archivos: añadido screens/NuevaPantalla.jsx
   - [DEPR]    Campo 'nombreCampo' deprecado (eliminar en v5.0)
-  ~ Versión:  3.0 → 4.0
+  ~ Versión:  4.0 → 4.1
   ~ Fecha:    [fecha]
 ```
 
@@ -487,6 +601,7 @@ const backupStorage = new MMKV({ id: 'backup-storage' });
 
 ## [DEVOPS] — El Automatizador de Builds
 **Tipo**: Infraestructura | **Modo**: FULL-TEAM (siempre el último)
+**Skills Activas**: `DO-001 android_build_pipeline` | `DO-002 directory_watcher_service` | `DO-003 notification_scheduler`
 **Input**: Código aprobado por [QA_ENGINEER] y [CODE_REVIEWER]
 **Output**: APK instalada en Poco X7 Pro + commit creado
 
@@ -499,17 +614,34 @@ npx expo start -c
 npx expo run:android --variant release
 adb install -r android/app/build/outputs/apk/release/app-release.apk
 
-# Build en la nube (sin Android Studio local)
+# Build en la nube
 eas build -p android --profile preview
 
-# Diagnóstico de problemas
+# Diagnóstico
 npx react-native log-android
 cd android && ./gradlew clean && cd ..
 rm -rf node_modules && npm install && npx expo start -c
 
-# Verificar dispositivo conectado
+# Verificar dispositivo
 adb devices
-adb shell getprop ro.product.model  # debe mostrar Poco X7 Pro
+adb shell getprop ro.product.model  # → Poco X7 Pro
+
+# Post-build exitoso
+./agent-deploy.ps1
+```
+
+**Watcher de directorio** (skill DO-002):
+```
+Librería:  expo-background-fetch + expo-file-system
+Intervalo: 30 segundos
+inbox → processed/{YYYY-MM-DD}/{product_id}/ → archive/
+```
+
+**Notificaciones locales** (skill DO-003):
+```
+STALE_DAILY:           10:00 si hay productos con staleness > 70
+REPUBLISH_REMINDER:    +3 días tras detectar TTS > 60d
+SEASONAL_OPPORTUNITY:  día 1 de cada mes
 ```
 
 **Convención de commits**:
@@ -517,10 +649,10 @@ adb shell getprop ro.product.model  # debe mostrar Poco X7 Pro
 feat(auth):      añadir pantalla de login con PIN y contraseña
 feat(dashboard): añadir tarjeta de stock frío
 fix(mmkv):       corregir sobreescritura de firstUploadDate en importación
-fix(login):      corregir crash cuando no hay PIN guardado en MMKV
+fix(login):      corregir crash cuando no hay PIN guardado
 chore(deps):     actualizar expo a 52.1
 refactor(db):    extraer fusionInteligente a método independiente
-docs(design):    actualizar DESIGN_SYSTEM.md v3.0 a v4.0
+docs(design):    actualizar DESIGN_SYSTEM.md v4.0 a v4.1
 hotfix(auth):    parche urgente en flujo de sesión expirada
 ```
 
@@ -531,43 +663,13 @@ hotfix(auth):    parche urgente en flujo de sesión expirada
 
 ## CICLO DE VIDA DE UNA TAREA
 
-Cada tarea pasa por estos estados. Ningún agente puede saltar un estado:
+Ningún agente puede saltar un estado:
 
 ```
 [BACKLOG] → [ANÁLISIS] → [EN_PROGRESO] → [REVISIÓN] → [DOCS] → [DEPLOY] → [CERRADO]
                                               |
-                                              └── bugs bloqueantes → vuelve a [EN_PROGRESO]
+                                         bugs bloqueantes → vuelve a [EN_PROGRESO]
 ```
-
-### Estado ANÁLISIS
-Responsables: [ORCHESTRATOR] + [PRODUCT_OWNER]
-- [ORCHESTRATOR] identifica agentes necesarios y archivos en riesgo.
-- [PRODUCT_OWNER] define criterios de aceptación.
-- Si hay cambio de schema → [MIGRATION_MANAGER] evalúa impacto.
-- Salida obligatoria: especificación firmada por [PRODUCT_OWNER].
-
-### Estado EN_PROGRESO
-Responsables: [ARCHITECT] y/o [UI_SPECIALIST] y/o [PROMPT_ENGINEER]
-- [ARCHITECT] diseña datos primero (si aplica).
-- [PROMPT_ENGINEER] diseña prompts de IA en paralelo (si aplica).
-- [UI_SPECIALIST] implementa UI con el contrato de [ARCHITECT].
-- Cada agente entrega su Output de handoff al siguiente.
-
-### Estado REVISIÓN
-Responsables: [QA_ENGINEER] → [CODE_REVIEWER] → [SECURITY_OFFICER]
-- [QA_ENGINEER] firma el checklist completo.
-- [CODE_REVIEWER] revisa arquitectura y performance (features complejas).
-- [SECURITY_OFFICER] audita si hay cambios en Auth o MMKV crítica.
-- Cualquier bloqueo devuelve la tarea a [EN_PROGRESO].
-
-### Estado DOCS
-Responsable: [LIBRARIAN]
-Actualiza @DESIGN_SYSTEM.md, muestra diff, incrementa versión.
-
-### Estado DEPLOY
-Responsable: [DEVOPS]
-Genera APK, instala en Poco X7 Pro, crea commit canónico.
-
 
 ## FLUJOS PREDEFINIDOS
 
@@ -584,27 +686,27 @@ Bug visual reportado
 ```
 Nuevo componente o pantalla, sin nueva lógica de datos
   → [ORCHESTRATOR]: MODO PAIR
-  → [PRODUCT_OWNER]: criterios de aceptación
-  → [UI_SPECIALIST]: implementa con Design System
+  → [PRODUCT_OWNER]: criterios de aceptación (PO-003)
+  → [UI_SPECIALIST]: implementa con @ResellHub_Dashboard.html como ref
   → [QA_ENGINEER]: checklist completo
-  → [LIBRARIAN]: actualiza estructura de archivos
+  → [LIBRARIAN]: actualiza estructura de archivos (LIB-001)
   → [DEVOPS]: commit + build
 ```
 
 ### FLUJO-03: Feature completa con datos + UI + IA (MODO FULL-TEAM)
 ```
 Feature nueva con lógica de negocio
-  → [ORCHESTRATOR]: MODO FULL-TEAM
-  → [PRODUCT_OWNER]: especificación + criterios
-  → [ARCHITECT]: diseño de datos + contrato (paralelo con PROMPT_ENGINEER si hay IA)
-  → [PROMPT_ENGINEER]: diseño de prompts (si hay llamadas a IA)
+  → [ORCHESTRATOR]: MODO FULL-TEAM, identifica skills de @skills.json
+  → [PRODUCT_OWNER]: especificación + criterios (PO-001 + PO-003)
+  → [ARCHITECT]: diseño de datos + contrato (ARCH-001/002/003/004)
+  → [PROMPT_ENGINEER]: diseño de prompts IA en paralelo (si aplica)
   → [MIGRATION_MANAGER]: script de migración (si hay schema change)
-  → [UI_SPECIALIST]: implementación con contrato de ARCHITECT
-  → [QA_ENGINEER]: checklist completo
+  → [UI_SPECIALIST]: implementa con contrato de ARCHITECT (UI-001/002/003)
+  → [QA_ENGINEER]: checklist completo (QA-001/002/003)
   → [CODE_REVIEWER]: revisión arquitectural
-  → [SECURITY_OFFICER]: auditoría si hay cambios en Auth
-  → [LIBRARIAN]: docs actualizados + diff
-  → [DEVOPS]: build + deploy
+  → [SECURITY_OFFICER]: auditoría si hay cambios en Auth (SEC-001/002)
+  → [LIBRARIAN]: docs actualizados + diff (LIB-001/002)
+  → [DEVOPS]: build + deploy (DO-001)
 ```
 
 ### FLUJO-04: Hotfix crítico, Login roto o datos corrompidos (MODO FULL-TEAM URGENTE)
@@ -616,17 +718,51 @@ Bug crítico en producción
   → [ARCHITECT] + [MIGRATION_MANAGER]: si hay corrupción de MMKV
   → [QA_ENGINEER]: test mínimo (solo Auth + campos sagrados)
   → [DEVOPS]: hotfix build INMEDIATO
-  → [LIBRARIAN]: documenta el bug y la solución (post-facto)
+  → [LIBRARIAN]: documenta bug y solución (post-facto)
 ```
 
 ### FLUJO-05: Análisis de negocio puro, sin código (MODO PAIR)
 ```
 Usuario quiere saber qué resubir o cómo mejorar ventas
   → [ORCHESTRATOR]: MODO PAIR (solo análisis)
-  → [GROWTH_HACKER]: analiza TTS, categorías, estacionalidad
-  → [MARKET_ANALYST]: contrasta con señales externas de Vinted
-  → [DATA_SCIENTIST]: curvas de decaimiento + predicciones
+  → [GROWTH_HACKER]: TTS, categorías, estacionalidad (GH-001/002/003)
+  → [MARKET_ANALYST]: señales externas de Vinted (MA-001/002)
+  → [DATA_SCIENTIST]: curvas de decaimiento + predicciones (DS-001/002/003/005)
   → Output: informe de recomendaciones (sin tocar código)
+```
+
+### FLUJO-06: Pipeline de nuevo producto detectado (MODO FULL-TEAM AUTO)
+```
+Nueva carpeta detectada en /inbox
+  → [DEVOPS] skill DO-002: directory_watcher detecta carpeta
+  → [ARCHITECT] skill ARCH-002: image_pipeline (conv + crop 1px + hash)
+  → [PROMPT_ENGINEER]: extrae metadata con Claude Vision
+  → [DATA_SCIENTIST] skill DS-002: staleness_score inicializa a 0
+  → [UI_SPECIALIST] skill UI-001: muestra pending card en Dashboard
+  → [QA_ENGINEER] skill QA-001: LogService.info('PRODUCT_INGESTED', {id, title, brand})
+```
+
+### FLUJO-07: Resubida de producto (MODO FULL-TEAM AUTO)
+```
+Usuario confirma resubida
+  → [SECURITY_OFFICER] skill SEC-001: validar límites (48h, máx 10/día)
+  → [ARCHITECT] skill ARCH-002: reprocesar imagen (nuevo crop 1px, nuevo hash)
+  → [DATA_SCIENTIST] skill DS-004: price_optimizer → precio óptimo
+  → [GROWTH_HACKER] skill GH-001: confirmar timing óptimo
+  → [ARCHITECT] skill ARCH-001: smart_merge (republishCount++, lastPublishedDate=now)
+  → [UI_SPECIALIST] skill UI-004: show_copy_card con datos para Vinted
+  → [QA_ENGINEER]: LogService.info('PRODUCT_REPUBLISHED', {id, newPrice, republishCount})
+```
+
+### FLUJO-08: Marcar producto como vendido (MODO SOLO)
+```
+Usuario marca vendido
+  → [ARCHITECT]: status='sold', soldDate=now
+  → [DATA_SCIENTIST] skill DS-001: calcular TTS final
+  → [GROWTH_HACKER] skill GH-002: recalibrar umbrales Relámpago/Ancla
+  → [DATA_SCIENTIST] skill DS-003: actualizar modelo estacionalidad
+  → [UI_SPECIALIST]: sold_celebration_animation ✅
+  → [QA_ENGINEER]: LogService.info('PRODUCT_SOLD', {id, tts_days, price, category})
 ```
 
 
@@ -639,76 +775,67 @@ Usuario quiere saber qué resubir o cómo mejorar ventas
 @[NOMBRE_AGENTE]: [petición específica]
 ```
 
-## Iniciar siempre con el Orquestador
+## Siempre iniciar con el Orquestador
 ```
 @ORCHESTRATOR: Quiero añadir una pantalla de "Modo Vacaciones" que pause
-las notificaciones cuando el usuario está de viaje. Analiza el impacto
-y activa los agentes necesarios.
+las notificaciones cuando el usuario está de viaje. Analiza el impacto,
+identifica qué skills de @skills.json aplican y activa los agentes necesarios.
 ```
 
 ## Invocación directa por agente
 
 ### Diseño de datos
 ```
-@ARCHITECT: Necesito almacenar el "precio de coste" de cada producto
-para calcular el margen real. Qué MMKV key creo y cómo lo integro
-en el modelo de datos sin romper las importaciones existentes?
+@ARCHITECT usando skill ARCH-004: Necesito almacenar el "precio de coste"
+de cada producto para calcular el margen real. Qué MMKV key creo y cómo
+lo integro sin romper las importaciones existentes?
 ```
 
-### Feature de UI
+### Feature de UI (con referencia visual)
 ```
-@UI_SPECIALIST: Crea una tarjeta "Stock Frío" para el Dashboard.
-Debe mostrar: contador de productos >90 días, borde rojo pulsante,
-CTA "Resubir todos" en color error.
-Contrato de datos recibido de ARCHITECT: { count: number, productos: Product[] }
+@UI_SPECIALIST usando skill UI-002: Crea la StaleAlertCard tal como
+aparece en @ResellHub_Dashboard.html (clase .stale-card).
+Props: { title, brand, daysStale, stalenessScore, onRepost, onSkip }
+Usa la paleta canónica y los estados de UI-003.
 ```
 
 ### Optimizar prompt de IA
 ```
-@PROMPT_ENGINEER: Necesito un prompt para GPT-4 Vision que analice
+@PROMPT_ENGINEER: Necesito un prompt para Claude Vision que analice
 la imagen de una camiseta y devuelva título, marca, estado y precio
 sugerido para Vinted España. Incluye few-shot con 2 ejemplos reales.
 ```
 
 ### Diagnosticar bug
 ```
-@DEBUGGER: Al importar el JSON de Vinted, el campo firstUploadDate
-se sobreescribe con la fecha de importación. Log adjunto:
-[ERROR] DB: updateProduct - firstUploadDate overwritten
+@DEBUGGER: Al importar el JSON de Vinted, firstUploadDate se sobreescribe.
+Log adjunto: [ERROR] DB: updateProduct - firstUploadDate overwritten
 DatabaseService.js:245
 ```
 
 ### Migrar schema
 ```
 @MIGRATION_MANAGER: El ARCHITECT quiere añadir el campo "costPrice"
-(número, nullable) a todos los productos existentes.
-Genera el script con rollback y backup previo.
-```
-
-### Revisión de calidad
-```
-@QA_ENGINEER: Revisa este componente antes de hacer merge.
-Archivo: screens/VacationModeScreen.jsx
-Cambios: nuevo toggle en Settings + nueva MMKV key 'vacation_until'
+(número, nullable) a todos los productos. Genera script con rollback.
 ```
 
 ### Análisis de ventas
 ```
-@GROWTH_HACKER: Estamos en febrero. Qué categorías tienen mayor
-probabilidad de venta este mes? Dame recomendaciones de precio
-para categorías con TTS > 30 días.
+@GROWTH_HACKER usando skills GH-001 GH-002: Estamos en febrero.
+Qué categorías tienen mayor probabilidad de venta este mes?
+Dame recomendaciones de precio para categorías con TTS > 30 días.
 ```
 
-## Atajos de flujo rápido
+### Atajo de flujo rápido
 ```
-# Reporte de bug rápido (el Orquestador lo clasifica):
+# Bug rápido (el Orquestador clasifica):
 BUG: [descripción] | ARCHIVO: [nombre] | LOGS: [extracto]
 
-# Solicitud de feature rápida:
-FEATURE: [qué quiero] | PANTALLA: [dónde va] | DATOS: [si necesita nuevos datos sí/no]
+# Feature rápida:
+FEATURE: [qué quiero] | PANTALLA: [dónde va] | DATOS: [sí/no]
 
-# Solo quiero análisis, sin código:
-ANÁLISIS: [qué quiero saber] | DATOS: [fuente de los datos]
+# Solo análisis, sin código:
+ANÁLISIS: [qué quiero saber] | DATOS: [fuente]
 ```
 
 
@@ -731,10 +858,12 @@ ANÁLISIS: [qué quiero saber] | DATOS: [fuente de los datos]
 | `screens/SettingsScreen.jsx` | [UI_SPECIALIST] | [ARCHITECT] | Libre |
 | `screens/AdvancedStatsScreen.jsx` | [DATA_SCIENTIST] | [UI_SPECIALIST] | Libre |
 | `DESIGN_SYSTEM.md` | [LIBRARIAN] | [PRODUCT_OWNER] | CRITICO: tokens y modelo datos |
-| `.cursorrules` | [PRODUCT_OWNER] | [ORCHESTRATOR] | CRITICO: protocolo de orquestación |
+| `.cursor/rules/resellhub.mdc` | [PRODUCT_OWNER] | [ORCHESTRATOR] | CRITICO: protocolo |
+| `skills.json` | [LIBRARIAN] | [ORCHESTRATOR] | CRITICO: skills activas |
 | `eas.json` / `app.json` | [DEVOPS] | [ARCHITECT] | CRITICO: config de build |
+| `ResellHub_Dashboard.html` | [UI_SPECIALIST] | [PRODUCT_OWNER] | Ref visual — no tocar sin consenso |
 
-## MMKV Keys — Tabla maestra con propietarios
+## MMKV Keys — Tabla maestra
 
 | Key | Tipo | Propietario | Protegida | Descripción |
 |-----|------|-------------|-----------|-------------|
@@ -756,14 +885,13 @@ ANÁLISIS: [qué quiero saber] | DATOS: [fuente de los datos]
 
 ## Credenciales por defecto
 
-| Credencial | Valor | MMKV Key | Cambiar en |
-|-----------|-------|----------|------------|
-| PIN | `1234` | `app_pin` | Settings → Seguridad (pendiente v4.1) |
-| Contraseña | `resellhub` | `app_password` | Settings → Seguridad (pendiente v4.1) |
-| Sesión | 8 horas | `session_authed_until` | Configurable en v4.1 |
+| Credencial | Valor | MMKV Key |
+|-----------|-------|----------|
+| PIN | `1234` | `app_pin` |
+| Contraseña | `resellhub` | `app_password` |
+| Sesión | 8 horas | `session_authed_until` |
 
-## Integración en App.jsx
-
+## Integración en App.jsx (propietario: [ARCHITECT])
 ```javascript
 import LoginScreen from './screens/LoginScreen';
 import { useState, useEffect } from 'react';
@@ -835,7 +963,7 @@ export const calcularUrgencia = (createdAt) => {
   return           { nivel:'BAJO',    color:'#00D9A3', icon:'🟢' };
 };
 
-// Curva de decaimiento de interés: Interés(t) = 100 * e^(-λ * t)
+// Curva de decaimiento de interés — skill DS-005
 const LAMBDA = {
   'Ropa':0.045,'Calzado':0.055,'Tecnología':0.080,
   'Libros':0.025,'Hogar':0.035,'Juguetes':0.060, default:0.050,
@@ -843,22 +971,37 @@ const LAMBDA = {
 export const calcularDecaimiento = (diasActivo, categoria) =>
   Math.round(Math.exp(-(LAMBDA[categoria]??LAMBDA.default) * diasActivo) * 100);
 
-// Días hasta momento óptimo de resubida
 export const diasHastaOptimo = (categoria, umbral = 30) => {
   const λ = LAMBDA[categoria] ?? LAMBDA.default;
   return Math.ceil(-Math.log(umbral / 100) / λ);
 };
 
-// TTS en días enteros
+// TTS en días enteros — skill DS-001
 export const calcTTS = (soldAt, firstUploadDate) =>
   (!soldAt || !firstUploadDate) ? null :
   Math.floor((new Date(soldAt) - new Date(firstUploadDate)) / 86400000);
 
-// Detección de resubida (Fusión Inteligente)
+// Detección de resubida (Fusión Inteligente) — skill ARCH-001
 const normalize = (s) => (s ?? '').toLowerCase().trim().replace(/\s+/g,' ');
 export const esMismoProducto = (a, b) =>
   normalize(a.title) === normalize(b.title) &&
   normalize(a.brand) === normalize(b.brand);
+
+// Staleness Score 0-100 — skill DS-002
+export const calcularStalenessScore = ({ diasActivo, views, favorites, catAvgTTS }) => {
+  const maxDias = 180;
+  const days_factor   = Math.min(diasActivo / maxDias, 1) * 100;
+  const view_decay    = views   < 10 ? 80 : views   < 50 ? 40 : 10;
+  const fav_decay     = favorites < 2 ? 80 : favorites < 10 ? 40 : 10;
+  const cat_deviation = catAvgTTS > 0
+    ? Math.min((diasActivo / catAvgTTS) * 50, 100) : 50;
+  return Math.round(
+    days_factor  * 0.40 +
+    view_decay   * 0.25 +
+    fav_decay    * 0.20 +
+    cat_deviation* 0.15
+  );
+};
 ```
 
 
@@ -868,51 +1011,58 @@ export const esMismoProducto = (a, b) =>
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  CHECKLIST PRE-MERGE — ResellHub v4.0
+  CHECKLIST PRE-MERGE — ResellHub v4.1
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-[QA_ENGINEER] CÓDIGO:
+[QA_ENGINEER] CÓDIGO (QA-001):
   [ ] try/catch en todas las funciones async
   [ ] LogService: nivel correcto + contexto correcto
-  [ ] Sin console.log() sueltos (todo a LogService)
+  [ ] Sin console.log() sueltos
   [ ] memo/useCallback en renders pesados
   [ ] FlatList para listas > 5 items
   [ ] useNativeDriver:true en animaciones
 
-[SECURITY_OFFICER] SEGURIDAD:
+[QA_ENGINEER] IMAGEN (QA-003):
+  [ ] Output JPEG verificado (magic bytes FF D8 FF)
+  [ ] Dimensiones = originales − 2px
+  [ ] Hash MD5 ≠ original
+
+[SECURITY_OFFICER] SEGURIDAD (SEC-001/002):
   [ ] app_pin y app_password ausentes en todos los logs
   [ ] Login funciona (PIN: 1234, pass: resellhub)
   [ ] session_authed_until se actualiza en login exitoso
-  [ ] Campos sagrados intactos tras importación
+  [ ] Límites de resubida Vinted respetados (máx 10/día, 48h mínimo)
 
-[ARCHITECT] DATOS:
-  [ ] firstUploadDate, category preservados en fusiones
-  [ ] Nuevas MMKV keys en tabla de DESIGN_SYSTEM.md
-  [ ] schema_version actualizado si hay migración
+[ARCHITECT] DATOS (ARCH-001/004, QA-002):
+  [ ] firstUploadDate, category, title, brand intactos tras cualquier merge
   [ ] esMismoProducto() usado para detectar resubidas
+  [ ] Nuevas MMKV keys en DESIGN_SYSTEM.md
+  [ ] schema_version actualizado si hay migración
 
-[UI_SPECIALIST] DISEÑO:
+[UI_SPECIALIST] DISEÑO (UI-001/003):
   [ ] Colores de la paleta canónica (sin hardcode nuevo)
   [ ] Espaciado del grid 8pt
   [ ] activeOpacity={0.7} en TouchableOpacity
   [ ] KeyboardAvoidingView en pantallas con inputs
   [ ] Estados disabled visibles (opacity:0.4)
+  [ ] Referencia @ResellHub_Dashboard.html verificada
 
 [CODE_REVIEWER] ARQUITECTURA:
   [ ] Sin lógica de negocio en componentes UI
-  [ ] Sin duplicación de código mayor a 10 líneas
-  [ ] Hooks sin condicionales (reglas de React)
-  [ ] useEffect con cleanup si tiene suscripción o timer
+  [ ] Sin duplicación > 10 líneas
+  [ ] Hooks sin condicionales
+  [ ] useEffect con cleanup si tiene suscripción/timer
 
-[LIBRARIAN] DOCS:
+[LIBRARIAN] DOCS (LIB-001/002):
   [ ] DESIGN_SYSTEM.md actualizado
-  [ ] Diff mostrado
-  [ ] Versión incrementada
+  [ ] skills.json sincronizado si hay nueva skill
+  [ ] Diff mostrado con versión incrementada
 
-[DEVOPS] BUILD:
+[DEVOPS] BUILD (DO-001):
   [ ] Sin warnings de Gradle
   [ ] APK instalada y probada en Poco X7 Pro físico
-  [ ] Commit message sigue la convención
+  [ ] Commit message sigue la convención canónica
+  [ ] agent-deploy.ps1 ejecutado si aplica
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   RESULTADO: APROBADO / BLOQUEADO (razones)
@@ -924,17 +1074,20 @@ export const esMismoProducto = (a, b) =>
 #  METADATOS
 # ══════════════════════════════════════════════════════════════════════════
 #
-#  VERSIÓN:             4.0
+#  VERSIÓN:             4.1
 #  FECHA:               Febrero 2026
-#  AGENTES TOTALES:     12
-#  NUEVOS EN v4.0:      [ORCHESTRATOR], [DEBUGGER], [CODE_REVIEWER],
+#  AGENTES TOTALES:     13
+#  AGENTES v4.0:        [ORCHESTRATOR], [DEBUGGER], [CODE_REVIEWER],
 #                       [PROMPT_ENGINEER], [MIGRATION_MANAGER]
-#  FLUJOS PREDEFINIDOS: 5  (FLUJO-01 a FLUJO-05)
+#  FLUJOS PREDEFINIDOS: 8  (FLUJO-01 a FLUJO-08)
 #  MODOS DE TRABAJO:    3  (SOLO, PAIR, FULL-TEAM)
+#  SKILLS REF:          @skills.json v3.0 (29 skills, 9 agentes)
+#  DISEÑO REF:          @ResellHub_Dashboard.html
 #
-#  PENDIENTE v4.1:
+#  PENDIENTE v4.2:
 #    - Settings → Seguridad: cambio de PIN y contraseña desde la app
 #    - Bloqueo de acceso tras 5 intentos fallidos (30 segundos)
 #    - Sesión configurable (4h / 8h / 24h / nunca)
+#    - Integración skills.json con ORCHESTRATOR auto-lookup
 #
 # ══════════════════════════════════════════════════════════════════════════
