@@ -21,14 +21,15 @@ const KEYS = {
  * no puede sobreescribir, aunque el producto cambie de precio, ID, etc.
  *
  * Activos:
- *   - category / subcategory: asignada manualmente
+ *   - category / subcategory: asignada manualmente (tags del diccionario)
  *   - firstUploadDate:        fecha real de subida (el JSON trae la de extracción)
- *   - seoTags:                tags generados o editados manualmente
  *
  * Vendidos (campos extra):
  *   - soldPrice:    precio final real de venta
  *   - soldDate:     fecha real de cierre
  *   - isBundle:     si fue vendido en lote
+ *
+ * NOTA v2.2: seoTags eliminado — los tags provienen del diccionario category+subcategory
  */
 const MANUAL_FIELDS_ACTIVE = ['category', 'subcategory', 'firstUploadDate'];
 const MANUAL_FIELDS_SOLD   = ['soldPrice', 'soldDate', 'isBundle', 'category', 'subcategory', 'firstUploadDate'];
@@ -57,7 +58,7 @@ const DEFAULT_CONFIG = {
   preserveSoldDate:       true,
   preserveIsBundle:       true,
   autoDetectCategory:     true,
-  autoGenerateSeoTags:    true,
+  // v2.2: autoGenerateSeoTags eliminado — tags provienen del diccionario
   // Notificaciones
   notifEnabled:           true,
   notifDays:              '3',
@@ -124,14 +125,41 @@ export function calcTTS(product) {
 
 /**
  * Clasifica un TTS en velocidad de venta.
- * Usa los umbrales configurables si se pasan.
+ * v2.2: Usa umbrales DINÁMICOS desde app_user_config (MMKV)
+ * @param {number} avgTTS - Promedio de días hasta venta
+ * @param {object} config - Configuración de usuario (de getConfig())
  */
 export function ttsLabel(avgTTS, config) {
-  const lightning = parseInt(config?.ttsLightning || 7);
-  const anchor    = parseInt(config?.ttsAnchor    || 30);
-  if (avgTTS <= lightning)  return { emoji: '⚡', label: 'RELÁMPAGO', color: '#00D9A3', advice: `Sube el precio un ${config?.priceBoostPct || 10}%` };
-  if (avgTTS <= anchor)     return { emoji: '🟡', label: 'NORMAL',    color: '#FFB800', advice: 'Mantén precio, mejora fotos/título' };
-  return                           { emoji: '⚓', label: 'ANCLA',     color: '#E63946', advice: `Baja precio un ${config?.priceCutPct || 10}% o republica` };
+  const lightning = parseInt(config?.ttsLightning  || 7);
+  const anchor    = parseInt(config?.ttsAnchor     || 30);
+  const boostPct  = parseInt(config?.priceBoostPct || 10);
+  const cutPct    = parseInt(config?.priceCutPct   || 10);
+  
+  if (avgTTS <= lightning) {
+    return { 
+      emoji: '⚡', 
+      label: 'RELÁMPAGO', 
+      color: '#00D9A3', 
+      advice: `Sube el precio un ${boostPct}%`,
+      threshold: lightning,
+    };
+  }
+  if (avgTTS <= anchor) {
+    return { 
+      emoji: '🟡', 
+      label: 'NORMAL', 
+      color: '#FFB800', 
+      advice: 'Mantén precio, mejora fotos/título',
+      threshold: anchor,
+    };
+  }
+  return { 
+    emoji: '⚓', 
+    label: 'ANCLA', 
+    color: '#E63946', 
+    advice: `Baja precio un ${cutPct}% o republica`,
+    threshold: anchor,
+  };
 }
 
 /**
@@ -375,14 +403,13 @@ export class DatabaseService {
       const all = this.getAllProducts();
       const idx = all.findIndex(p => String(p.id) === String(updated.id));
       if (idx === -1) return false;
-      // Preservar campos manuales en update manual
+      // Preservar campos manuales en update manual (v2.2: sin seoTags)
       all[idx] = {
         ...all[idx],
         ...updated,
         category:        updated.category        || all[idx].category,
         subcategory:     updated.subcategory      ?? all[idx].subcategory,
         firstUploadDate: updated.firstUploadDate  || all[idx].firstUploadDate,
-        seoTags:         updated.seoTags          || all[idx].seoTags,
       };
       this.saveAllProducts(all);
       LogService.add(`✏️ Actualizado: ${all[idx].title}`, 'success');
@@ -473,8 +500,9 @@ export class DatabaseService {
    * 3. Productos que estaban en la BD pero no vienen en el JSON actualizado:
    *    — Se marcan como 'stale' para revisión manual (no se eliminan)
    *
-   * Campos NUNCA sobreescritos en activos:   category, subcategory, firstUploadDate, seoTags
+   * Campos NUNCA sobreescritos en activos:   category, subcategory, firstUploadDate
    * Campos NUNCA sobreescritos en vendidos:  + soldPrice, soldDate, isBundle
+   * NOTA v2.2: seoTags eliminado — tags provienen del diccionario (category + subcategory)
    */
   static importFromVinted(newProducts) {
     try {
@@ -646,7 +674,8 @@ export class DatabaseService {
 
   /**
    * Estadísticas por categoría basadas en productos VENDIDOS.
-   * Incluye TTS medio, beneficio medio, conteo.
+   * v2.2: Usa jerarquía category + subcategory del custom_dictionary_full
+   * Incluye TTS medio, beneficio medio, conteo con umbrales dinámicos.
    */
   static getCategoryStats() {
     const config = this.getConfig();
@@ -666,11 +695,19 @@ export class DatabaseService {
         map[cat].ttsList.push(tts);
       }
 
-      // Acumular subcategoría si existe
+      // v2.2: Acumular subcategoría usando jerarquía del diccionario
       if (p.subcategory) {
         const sub = p.subcategory;
-        if (!map[cat].subcategories[sub]) map[cat].subcategories[sub] = { count: 0, totalTTS: 0, ttsList: [] };
+        if (!map[cat].subcategories[sub]) {
+          map[cat].subcategories[sub] = { 
+            count: 0, 
+            totalTTS: 0, 
+            ttsList: [],
+            totalProfit: 0,
+          };
+        }
         map[cat].subcategories[sub].count++;
+        map[cat].subcategories[sub].totalProfit += profit;
         if (tts !== null) {
           map[cat].subcategories[sub].totalTTS += tts;
           map[cat].subcategories[sub].ttsList.push(tts);
@@ -678,14 +715,26 @@ export class DatabaseService {
       }
     });
 
+    // v2.2: Enriquecer con tags del diccionario
+    const fullDict = this.getFullDictionary() || {};
+
     return Object.entries(map).map(([name, d]) => {
       const avgTTS = d.ttsList.length ? Math.round(d.totalTTS / d.ttsList.length) : 999;
       const speed  = ttsLabel(avgTTS, config);
+      const dictEntry = fullDict[name] || {};
 
-      // Subcategorías enriquecidas
+      // Subcategorías enriquecidas con tags y profit
       const subcategoryStats = Object.entries(d.subcategories).map(([sName, sd]) => {
         const sAvgTTS = sd.ttsList.length ? Math.round(sd.totalTTS / sd.ttsList.length) : 999;
-        return { name: sName, count: sd.count, avgTTS: sAvgTTS, ...ttsLabel(sAvgTTS, config) };
+        const subTags = dictEntry.subcategories?.[sName]?.tags || [];
+        return { 
+          name: sName, 
+          count: sd.count, 
+          avgTTS: sAvgTTS, 
+          avgProfit: sd.count ? +(sd.totalProfit / sd.count).toFixed(2) : 0,
+          tags: subTags,
+          ...ttsLabel(sAvgTTS, config),
+        };
       }).sort((a, b) => a.avgTTS - b.avgTTS);
 
       return {
@@ -694,6 +743,7 @@ export class DatabaseService {
         avgTTS,
         totalProfit:     d.totalProfit,
         avgProfit:       d.count ? +(d.totalProfit / d.count).toFixed(2) : 0,
+        tags:            dictEntry.tags || [],
         subcategoryStats,
         ...speed,
       };
@@ -887,6 +937,7 @@ export class DatabaseService {
 
   /**
    * Smart Insights: recomendaciones accionables de negocio.
+   * v2.2: Usa umbrales dinámicos desde app_user_config (ttsLightning, ttsAnchor, staleMultiplier)
    */
   static getSmartInsights() {
     const catStats     = this.getCategoryStats();
@@ -897,25 +948,39 @@ export class DatabaseService {
     const seasonalMap  = config.seasonalMap || DEFAULT_CONFIG.seasonalMap;
     const monthNames   = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
     const insights     = [];
+    
+    // v2.2: Umbrales dinámicos
+    const ttsLightning = parseInt(config.ttsLightning || 7);
+    const ttsAnchor    = parseInt(config.ttsAnchor    || 30);
+    const priceBoostPct= parseInt(config.priceBoostPct|| 10);
 
     if (catStats[0]) {
+      const starCat = catStats[0];
+      // v2.2: Incluir subcategoría estrella si existe
+      const starSub = starCat.subcategoryStats?.[0];
+      const subMsg  = starSub ? ` (mejor sub: ${starSub.name} en ${starSub.avgTTS}d)` : '';
+      
       insights.push({
         type:    'star',
         icon:    '⚡',
-        title:   `${catStats[0].name} vende en ${catStats[0].avgTTS}d de media`,
-        message: `Busca más stock de ${catStats[0].name}. ${catStats[0].advice}.`,
-        color:   catStats[0].color,
+        title:   `${starCat.name} vende en ${starCat.avgTTS}d de media${subMsg}`,
+        message: `Busca más stock de ${starCat.name}. ${starCat.advice}.`,
+        color:   starCat.color,
+        category: starCat.name,
+        subcategory: starSub?.name,
       });
     }
 
-    const anchor = catStats.find(c => c.avgTTS > parseInt(config.ttsAnchor || 30));
+    // v2.2: Usar umbral dinámico ttsAnchor
+    const anchor = catStats.find(c => c.avgTTS > ttsAnchor);
     if (anchor) {
       insights.push({
         type:    'anchor',
         icon:    '⚓',
-        title:   `${anchor.name} tarda ${anchor.avgTTS}d en venderse`,
+        title:   `${anchor.name} tarda ${anchor.avgTTS}d en venderse (umbral: ${ttsAnchor}d)`,
         message: `${anchor.advice}. Evalúa reducir stock de esta categoría.`,
         color:   '#E63946',
+        category: anchor.name,
       });
     }
 
@@ -931,10 +996,12 @@ export class DatabaseService {
         title:   `${monthNames[currentMonth]}: temporada de ${seasonalCats.join(' y ')}`,
         message: `Publica o republica tus ${seasonalCats.join(', ')} ahora para aprovechar la demanda estacional.`,
         color:   '#FFB800',
+        categories: seasonalCats,
       });
     }
 
-    const target = parseInt(config.ttsAnchor || 30) - 9; // 21 días por defecto
+    // v2.2: Target dinámico basado en ttsAnchor - margen para relámpago
+    const target = ttsAnchor - ttsLightning - 2;
     if (kpis.avgTTS > 0) {
       if (kpis.avgTTS > target) {
         insights.push({
@@ -949,7 +1016,7 @@ export class DatabaseService {
           type:    'benchmark',
           icon:    '🏆',
           title:   `¡TTS ${kpis.avgTTS}d! Por debajo del objetivo de ${target}d`,
-          message: `Estás vendiendo muy bien. Prueba a subir los precios un ${config.priceBoostPct || 10}%.`,
+          message: `Estás vendiendo muy bien. Prueba a subir los precios un ${priceBoostPct}%.`,
           color:   '#00D9A3',
         });
       }

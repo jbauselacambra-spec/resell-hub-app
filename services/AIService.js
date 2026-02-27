@@ -1,4 +1,5 @@
 // services/AIService.js
+// v2.2: seoTags eliminado del output — tags provienen del diccionario de categorías
 const OPENAI_API_KEY = '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'; // <--- PEGA AQUÍ TU KEY REAL
 
 export const AIService = {
@@ -11,11 +12,11 @@ export const AIService = {
           'Authorization': `Bearer ${OPENAI_API_KEY}`
         },
         body: JSON.stringify({
-          model: "gpt-4o-mini", // Modelo rápido y económico
+          model: "gpt-4o-mini",
           messages: [
             {
               role: "system",
-              content: "Eres un experto en ventas de Vinted. Basado en el título, devuelve un JSON con: brand, suggestedTitle, description (vendedora y con emojis), price (solo número), y seoTags (5 etiquetas separadas por comas)."
+              content: "Eres un experto en ventas de Vinted. Basado en el título, devuelve un JSON con: brand, suggestedTitle, description (vendedora y con emojis), price (solo número), category (categoría principal), subcategory (opcional, subcategoría si aplica)."
             },
             {
               role: "user",

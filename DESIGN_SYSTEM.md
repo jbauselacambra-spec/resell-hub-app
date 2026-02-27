@@ -1,5 +1,28 @@
 # 📐 Documentación del Sistema de Diseño — ResellHub
-> **v2.1** — Actualizado Febrero 2026
+> **v2.2** — Actualizado Febrero 2026
+
+---
+
+## 📋 Changelog v2.2
+
+### Cambios del Modelo de Datos
+- **ELIMINADO**: Campo `seoTags` completamente removido del sistema
+- Tags ahora provienen exclusivamente del diccionario `custom_dictionary_full` (jerarquía category + subcategory)
+- Actualizado `MANUAL_FIELDS_ACTIVE` para excluir seoTags
+
+### Cambios en DatabaseService.js
+- `updateProduct()`: Ya no preserva seoTags
+- `importFromVinted()`: Ya no hereda ni genera seoTags
+- `getCategoryStats()`: Enriquecido con tags del diccionario y profit por subcategoría
+- `getSmartInsights()`: Usa umbrales dinámicos (ttsLightning, ttsAnchor, staleMultiplier) desde MMKV
+- `ttsLabel()`: Devuelve threshold usado para debugging
+
+### Cambios en AIService.js
+- Prompt actualizado para devolver category/subcategory en lugar de seoTags
+
+### Configuración (app_user_config)
+- Eliminado: `autoGenerateSeoTags` — ya no aplica
+- Los umbrales (`ttsLightning`, `ttsAnchor`, `priceBoostPct`, `priceCutPct`, `staleMultiplier`) son completamente dinámicos
 
 ---
 
@@ -560,10 +583,9 @@ DatabaseService.importFromVinted(newProducts)
 │  │   └─ Si vuelve de sold→active → marca reactivación   │
 │  └── NO → ¿Es una resubida? (mismo título+marca)        │
 │      ├── SÍ → Vincula con original (repostOf/repostTo)  │
-│      │   └─ Hereda: category, seoTags, firstUploadDate  │
+│      │   └─ Hereda: category, subcategory, firstUploadDate │
 │      └── NO → Producto NUEVO                            │
-│          ├─ Detecta categoría/subcategoría              │
-│          └─ Genera SEO tags                             │
+│          └─ Detecta categoría/subcategoría desde dict   │
 │                                                         │
 │  Productos ausentes del JSON → marcados como `stale`    │
 │  (no se eliminan, se marcan para revisión manual)       │
@@ -574,14 +596,16 @@ Log de importación guardado (últimos 50 imports)
 
 ### Campos manuales NUNCA sobreescritos
 
-**Productos activos:** `category`, `subcategory`, `firstUploadDate`, `seoTags`
+**Productos activos:** `category`, `subcategory`, `firstUploadDate`
 
 **Productos vendidos:** + `soldPrice`, `soldDate`, `isBundle`
+
+**NOTA v2.2:** `seoTags` eliminado — tags provienen del diccionario (category + subcategory)
 
 ### Detección de resubidas
 
 Dos productos con **mismo título + misma marca pero diferente ID** se tratan como resubida:
-- El nuevo hereda: `category`, `subcategory`, `seoTags`, `firstUploadDate`, `priceHistory`
+- El nuevo hereda: `category`, `subcategory`, `firstUploadDate`, `priceHistory`
 - El original recibe: `repostTo`, `repostCount`, `repostedAt`
 - El nuevo recibe: `repostOf` (referencia al original)
 
@@ -642,10 +666,10 @@ Tarjetas de decisión ejecutiva en el Dashboard:
   createdAt:    ISO String,      // Fecha de EXTRACCIÓN (no subida real)
 
   // ─── Manuales protegidos — NUNCA sobreescritos en import ──────────
-  category:        String,       // Categoría principal
+  category:        String,       // Categoría del diccionario
   subcategory:     String?,      // Subcategoría (opcional)
   firstUploadDate: ISO String,   // Fecha real de subida original a Vinted
-  seoTags:         String,       // Tags SEO separados por coma
+  // v2.2: seoTags eliminado — tags provienen del diccionario
   soldPrice:       Number?,      // Precio final real de venta
   soldDate:        ISO String?,  // Fecha real de cierre
   isBundle:        Boolean,      // ¿Fue vendido en lote/pack?
@@ -817,5 +841,41 @@ services/
 
 ---
 
-**Sistema de Diseño v2.0 — ResellHub**  
+**Sistema de Diseño v2.2 — ResellHub**  
 *Última actualización: Febrero 2026*
+
+---
+
+## 📚 Referencias Técnicas v2.2
+
+### Funciones Clave de DatabaseService.js
+
+| Función | Descripción | Umbrales dinámicos |
+|---------|-------------|-------------------|
+| `getCategoryStats()` | Estadísticas TTS por category+subcategory | `ttsLightning`, `ttsAnchor` |
+| `getSmartAlerts()` | Alertas de estancamiento y oportunidades | `staleMultiplier`, `criticalMonthThreshold` |
+| `getSmartInsights()` | Recomendaciones de negocio | Todos los umbrales |
+| `ttsLabel()` | Clasificación de velocidad de venta | `ttsLightning`, `ttsAnchor`, `priceBoostPct`, `priceCutPct` |
+| `getCategoryTags()` | Tags de category+subcategory del diccionario | N/A |
+
+### Claves de Configuración (app_user_config)
+
+| Clave | Tipo | Default | Uso |
+|-------|------|---------|-----|
+| `ttsLightning` | string | "7" | Umbral días para TTS relámpago |
+| `ttsAnchor` | string | "30" | Umbral días para TTS ancla |
+| `priceBoostPct` | string | "10" | % subir precio si relámpago |
+| `priceCutPct` | string | "10" | % bajar precio si ancla |
+| `staleMultiplier` | string | "1.5" | Multiplicador sobre media categoría |
+| `criticalMonthThreshold` | string | "6" | Meses para alerta crítica |
+
+### Tags de Categoría (reemplazo de seoTags)
+
+Los tags ahora se obtienen exclusivamente de:
+```javascript
+DatabaseService.getCategoryTags(category, subcategory)
+```
+
+Devuelve un array de strings combinando:
+1. Tags de la categoría raíz (`custom_dictionary_full[category].tags`)
+2. Tags de la subcategoría (`custom_dictionary_full[category].subcategories[sub].tags`)
