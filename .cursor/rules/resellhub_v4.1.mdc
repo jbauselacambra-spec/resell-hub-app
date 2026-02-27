@@ -16,8 +16,8 @@
 #
 #  1. Usa SIEMPRE @DESIGN_SYSTEM.md como fuente de verdad
 #  2. Consulta @skills.json para conocer las Skills activas de cada agente
-#  3. Los 4 campos PROTEGIDOS nunca se sobreescriben:
-#       firstUploadDate · category · title · brand
+#  3. Los 7 campos PROTEGIDOS nunca se sobreescriben:
+#       firstUploadDate · category, title, brand, soldDateReal, soldPriceReal, isBundle
 #  4. seoTags está ELIMINADO desde v2.1 — usar tags[] en su lugar
 #  5. Cada función nueva DEBE tener LogService v2.0 (mínimo .error en catch)
 #  6. El crop de 1px por cada lado de imagen es OBLIGATORIO en cada resubida

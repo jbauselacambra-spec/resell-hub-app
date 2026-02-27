@@ -596,7 +596,9 @@
         "name": "MARK_AS_SOLD",
         "trigger": "Usuario marca producto como vendido",
         "sequence": [
-          "ARCHITECT → actualizar: status='sold', soldDate=now",
+          "ARCHITECT → actualizar: status='sold', soldDate=now,soldPriceReal=inputUser,isBundle=inputUser",
+          "ARCHITECT.smart_merge → blindar campos v4.2",
+          "DATA_SCIENTIST.tts_calculator → calcular TTS usando firstUploadDate vs soldDateReal",
           "DATA_SCIENTIST.tts_calculator → calcular TTS final y actualizar categoría stats",
           "GROWTH_HACKER.category_intelligence → recalibrar umbrales Relámpago/Ancla",
           "UI_SPECIALIST → mover a sección 'Vendidos' con animación de celebración ✅",
