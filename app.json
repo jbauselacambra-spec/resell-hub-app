@@ -1,4 +1,7 @@
 {
+  "cli": {
+    "appVersionSource": "remote"
+  },
   "expo": {
     "name": "ResellHub",
     "slug": "resell-hub",
@@ -53,8 +56,15 @@
       ],
       "expo-asset",
       "expo-font",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-updates"
     ],
+    "updates": {
+      "url": "https://u.expo.dev/7885857d-7423-415c-8683-cac090ec5f79"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "extra": {
       "eas": {
         "projectId": "7885857d-7423-415c-8683-cac090ec5f79"

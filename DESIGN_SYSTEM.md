@@ -879,3 +879,234 @@ DatabaseService.getCategoryTags(category, subcategory)
 Devuelve un array de strings combinando:
 1. Tags de la categoría raíz (`custom_dictionary_full[category].tags`)
 2. Tags de la subcategoría (`custom_dictionary_full[category].subcategories[sub].tags`)
+
+---
+
+## 🚀 Despliegue y CI/CD (v2.2)
+
+### Opciones de Build
+
+ResellHub soporta dos modos de compilación:
+
+| Modo | Comando | Cuándo usar |
+|------|---------|-------------|
+| **EAS Cloud** | `.\agent-deploy.ps1 -Cloud` | Cuota EAS disponible, build sin SDK local |
+| **Local** | `.\agent-deploy.ps1 -Local` | Cuota EAS agotada, testing en Poco X7 Pro |
+
+### Build Local (Sin EAS)
+
+Cuando la cuota mensual de EAS se agota, usa el modo local:
+
+```powershell
+.\agent-deploy.ps1 -Local
+```
+
+**Requisitos:**
+- Android SDK instalado
+- Variable de entorno `ANDROID_HOME` configurada
+- Dispositivo conectado por USB con **Depuración USB** habilitada
+- Drivers ADB instalados para Poco X7 Pro
+
+**Comando interno:**
+```bash
+npx expo run:android
+```
+
+### Build en la Nube (EAS)
+
+Para builds de producción o cuando hay cuota disponible:
+
+```powershell
+.\agent-deploy.ps1 -Cloud
+```
+
+**Requisitos:**
+- Cuenta Expo con sesión activa (`eas login`)
+- Cuota de builds disponible en el plan
+
+### Configuración de Updates OTA
+
+El proyecto está configurado para recibir actualizaciones over-the-air:
+
+```json
+// app.json
+{
+  "cli": { "appVersionSource": "remote" },
+  "updates": {
+    "url": "https://u.expo.dev/PROJECT_ID"
+  },
+  "runtimeVersion": { "policy": "appVersion" }
+}
+```
+
+Para publicar una actualización OTA (sin rebuild):
+```bash
+eas update --branch production --message "Descripción del cambio"
+```
+
+### Troubleshooting General
+
+| Problema | Solución |
+|----------|----------|
+| Cuota EAS agotada | Usar `.\agent-deploy.ps1 -Local` |
+| ADB no detecta dispositivo | Verificar drivers y cable USB |
+| Build local falla | Verificar `ANDROID_HOME` y SDK instalado |
+| EAS login requerido | Ejecutar `eas login` en terminal |
+
+---
+
+## 🔧 Troubleshooting de Build Local (v2.3)
+
+### Verificación Rápida del Entorno
+
+Ejecuta este comando para diagnosticar tu entorno:
+
+```powershell
+.\agent-deploy.ps1 -Check
+```
+
+Este comando verifica:
+- ✅ Variable `ANDROID_HOME` configurada
+- ✅ ADB disponible en `platform-tools`
+- ✅ ADB Server funcionando
+- ✅ Dispositivos Android conectados
+
+---
+
+### Error: "ANDROID_HOME no está configurado"
+
+**Causa:** El SDK de Android no está instalado o la variable de entorno no está definida.
+
+**Solución paso a paso:**
+
+#### 1. Instalar Android Studio
+
+1. Descarga desde: https://developer.android.com/studio
+2. Durante la instalación, marca:
+   - ✓ Android SDK
+   - ✓ Android SDK Platform-Tools
+   - ✓ Android SDK Build-Tools
+
+#### 2. Configurar ANDROID_HOME
+
+La ruta por defecto del SDK es:
+```
+C:\Users\TU_USUARIO\AppData\Local\Android\Sdk
+```
+
+**Configurar en PowerShell (permanente):**
+```powershell
+# Definir ANDROID_HOME
+[Environment]::SetEnvironmentVariable("ANDROID_HOME", "$env:LOCALAPPDATA\Android\Sdk", "User")
+
+# Añadir al PATH
+$currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$newPath = "$currentPath;$env:LOCALAPPDATA\Android\Sdk\platform-tools"
+[Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+```
+
+**Después de configurar:** Cierra y abre PowerShell para que tome los cambios.
+
+---
+
+### Error: "ADB no encontrado"
+
+**Causa:** `platform-tools` no está instalado o el PATH no incluye la carpeta.
+
+**Solución:**
+
+1. Abre Android Studio
+2. Ve a **Tools > SDK Manager**
+3. En la pestaña **SDK Tools**, marca:
+   - ✓ Android SDK Platform-Tools
+4. Click en **Apply** para instalar
+
+---
+
+### Error: "No hay dispositivos Android conectados"
+
+**Causa:** El Poco X7 Pro no está en modo depuración o el cable/drivers fallan.
+
+**Solución para Poco X7 Pro (MIUI):**
+
+#### 1. Activar Opciones de Desarrollador
+1. **Ajustes > Sobre el teléfono**
+2. Toca **"Versión de MIUI"** 7 veces seguidas
+3. Verás: "Ya eres desarrollador"
+
+#### 2. Activar Depuración USB
+1. **Ajustes > Ajustes adicionales > Opciones de desarrollador**
+2. Activa: **"Depuración USB"**
+3. Activa: **"Instalar vía USB"** (importante en MIUI)
+4. En "Depuración USB (Ajustes de seguridad)", activa también
+
+#### 3. Conectar y Autorizar
+1. Conecta el cable USB al PC
+2. En el teléfono aparecerá: "¿Permitir depuración USB?"
+3. Marca: **"Permitir siempre desde este equipo"**
+4. Toca **"Permitir"**
+
+#### 4. Verificar conexión
+```powershell
+.\agent-deploy.ps1 -Check
+```
+
+---
+
+### Error: "Dispositivo unauthorized"
+
+**Causa:** No se aceptó el diálogo de autorización en el teléfono.
+
+**Solución:**
+1. Desconecta el cable USB
+2. En el teléfono: **Ajustes > Opciones de desarrollador > Revocar autorizaciones de depuración USB**
+3. Reconecta el cable
+4. Acepta el nuevo diálogo de autorización
+
+---
+
+### Error: "Build failed" durante `expo run:android`
+
+**Causas posibles y soluciones:**
+
+| Error | Solución |
+|-------|----------|
+| `SDK location not found` | Verificar `ANDROID_HOME` con `.\agent-deploy.ps1 -Check` |
+| `Failed to install APK` | Activar "Instalar vía USB" en opciones de desarrollador |
+| `INSTALL_FAILED_USER_RESTRICTED` | En MIUI: Ajustes > Opciones desarrollador > Desactivar "Verificar apps vía USB" |
+| `Gradle build failed` | Ejecutar `npx expo prebuild --clean` y reintentar |
+| `Java not found` | Instalar JDK 17 o usar el que viene con Android Studio |
+
+---
+
+### Comandos Útiles de Diagnóstico
+
+```powershell
+# Verificar entorno completo
+.\agent-deploy.ps1 -Check
+
+# Ver dispositivos conectados (si adb está en PATH)
+adb devices
+
+# Reiniciar servidor ADB
+adb kill-server
+adb start-server
+
+# Limpiar y regenerar proyecto nativo
+npx expo prebuild --clean
+
+# Ver logs del dispositivo en tiempo real
+adb logcat *:E
+```
+
+---
+
+### Configuración Recomendada para Poco X7 Pro
+
+| Ajuste | Valor |
+|--------|-------|
+| Depuración USB | ✅ Activado |
+| Instalar vía USB | ✅ Activado |
+| Verificar apps vía USB | ❌ Desactivado |
+| Optimización MIUI | ❌ Desactivado (para builds más rápidas) |
+| Modo desarrollador USB | Transferencia de archivos (MTP) |
