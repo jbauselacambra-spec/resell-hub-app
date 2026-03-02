@@ -28,7 +28,27 @@ export const AIService = {
       });
 
       const data = await response.json();
-      return JSON.parse(data.choices[0].message.content);
+      const productInfo = JSON.parse(data.choices[0].message.content);
+      const category = productInfo.category;
+      const subcategory = productInfo.subcategory; // default to null if not found
+
+      function getCategoryTags(category, subcategory) {
+        // This function should return the tags based on the categories dictionary
+        // It is not shown here, please replace with the actual logic
+        // For this example, I'll just return a random string
+        return `tags-from-${category}-${subcategory}`;
+      }
+
+      function updateProduct(product) {
+        const productInfo = JSON.parse(data.choices[0].message.content);
+        const category = productInfo.category;
+        const subcategory = productInfo.subcategory;
+        const tags = getCategoryTags(category, subcategory);
+        const updatedProduct = { ...product, tags };
+        return updatedProduct;
+      }
+
+      return updateProduct(productInfo);
     } catch (error) {
       console.error("Error en OpenAI:", error);
       throw error;

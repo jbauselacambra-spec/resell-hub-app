@@ -62,9 +62,7 @@
     "updates": {
       "url": "https://u.expo.dev/7885857d-7423-415c-8683-cac090ec5f79"
     },
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "1.0.0", // No change here
     "extra": {
       "eas": {
         "projectId": "7885857d-7423-415c-8683-cac090ec5f79"
@@ -73,3 +71,4 @@
     "owner": "perdigon85"
   }
 }
+
