@@ -17,6 +17,7 @@ import AdvancedStatsScreen from './screens/AdvancedStatsScreen';
 import SettingsScreen from './screens/SettingsScreen'; // NUEVA
 import LoginScreen from './src/screens/LoginScreen';
 import AuthService from './src/services/authService';
+import 'dotenv/config';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
