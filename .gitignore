@@ -16,3 +16,6 @@ npm-debug.log
 yarn-error.log
 env.local
 .env.*.local   
+key.env
+*.env
+.env
