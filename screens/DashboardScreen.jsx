@@ -26,35 +26,25 @@ const AMOLED = {
 };
 
 
-const MONTH_SEASONAL_TIPS = {
-  0:  { emoji: '🎁', tip: 'Enero – Post-reyes. Mueve Juguetes sobrantes y Abrigos.' },
-  1:  { emoji: '💘', tip: 'Febrero – San Valentín. Accesorios y Ropa formal.' },
-  2:  { emoji: '🌱', tip: 'Marzo – Primavera. Calzado deportivo y ropa ligera.' },
-  3:  { emoji: '☀️', tip: 'Abril – Entretiempo. Vestidos y Accesorios.' },
-  4:  { emoji: '🏖️', tip: 'Mayo – Pre-verano. Bañadores y Sandalias.' },
-  5:  { emoji: '🔥', tip: 'Junio – Pico verano. Electrónica portátil.' },
-  6:  { emoji: '💰', tip: 'Julio – Rebajas. Ajusta precios y publica Lotes.' },
-  7:  { emoji: '🎒', tip: 'Agosto – Vuelta al cole. Libros y Calzado infantil.' },
-  8:  { emoji: '🍂', tip: 'Septiembre – Otoño. Chaquetas y Entretenimiento.' },
-  9:  { emoji: '🎃', tip: 'Octubre – Halloween. ¡Republica Disfraces YA!' },
-  10: { emoji: '🛍️', tip: 'Noviembre – Black Friday. Electrónica y Lotes.' },
-  11: { emoji: '🎄', tip: 'Diciembre – Navidad. Juguetes y Coleccionables.' },
-};
+const MONTH_EMOJIS = ['🎁','💘','🌱','☀️','🏖️','🔥','💰','🎒','🍂','🎃','🛍️','🎄'];
+const MONTH_NAMES  = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 export default function DashboardScreen({ navigation }) {
   const [kpis, setKpis]       = useState(null);
   const [insights, setInsights] = useState([]);
   const [alerts, setAlerts]   = useState([]);
+  const [config, setConfig]   = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const fadeAnim = useState(new Animated.Value(0))[0];
 
   const currentMonth = new Date().getMonth();
-  const seasonal = MONTH_SEASONAL_TIPS[currentMonth];
 
   const loadData = () => {
+    const cfg = DatabaseService.getConfig();
     const k = DatabaseService.getBusinessKPIs();
     const i = DatabaseService.getSmartInsights();
     const a = DatabaseService.getSmartAlerts().slice(0, 4);
+    setConfig(cfg);
     setKpis(k);
     setInsights(i);
     setAlerts(a);
@@ -74,7 +64,16 @@ export default function DashboardScreen({ navigation }) {
     return unsub;
   }, [navigation]);
 
-  if (!kpis) return null;
+  if (!kpis || !config) return null;
+
+  // Seasonal banner — dinámico desde config.seasonalMap
+  const seasonalCats = Array.isArray(config.seasonalMap?.[currentMonth])
+    ? config.seasonalMap[currentMonth]
+    : (config.seasonalMap?.[currentMonth] ? [config.seasonalMap[currentMonth]] : []);
+  const seasonalEmoji = MONTH_EMOJIS[currentMonth];
+  const seasonalTip = seasonalCats.length > 0
+    ? `${MONTH_NAMES[currentMonth]}: temporada de ${seasonalCats.join(' y ')}. Publica o republica ahora.`
+    : `${MONTH_NAMES[currentMonth]}: configura categorías estacionales en Settings.`;
 
   const alertColorMap = { critical: '#E63946', stale: '#FF6B35', seasonal: '#FFB800', opportunity: '#00D9A3' };
 
@@ -99,10 +98,10 @@ export default function DashboardScreen({ navigation }) {
 
       {/* ── SEASONAL BANNER ─────────────────────── */}
       <TouchableOpacity style={styles.seasonBanner} onPress={() => navigation.navigate('Stock')}>
-        <Text style={styles.seasonEmoji}>{seasonal.emoji}</Text>
+        <Text style={styles.seasonEmoji}>{seasonalEmoji}</Text>
         <View style={{ flex: 1 }}>
-          <Text style={styles.seasonLabel}>CONSEJO DE HOY</Text>
-          <Text style={styles.seasonText}>{seasonal.tip}</Text>
+          <Text style={styles.seasonLabel}>CATEGORÍAS DE HOY</Text>
+          <Text style={styles.seasonText}>{seasonalTip}</Text>
         </View>
         <Icon name="chevron-right" size={16} color="#FFB800" />
       </TouchableOpacity>
@@ -142,21 +141,48 @@ export default function DashboardScreen({ navigation }) {
         </View>
         <View style={styles.ttsDivider} />
         <View style={styles.ttsRight}>
-          {kpis.bestCat && (
-            <View style={styles.ttsStatRow}>
-              <Text style={styles.ttsStatEmoji}>⚡</Text>
-              <View>
-                <Text style={styles.ttsStatLabel}>RELÁMPAGO</Text>
-                <Text style={styles.ttsStatValue}>{kpis.bestCat.name} · {kpis.bestCat.avgTTS}d</Text>
+          {kpis.bestCat && (() => {
+            const bestSub = kpis.bestCat.subcategoryStats?.[0];
+            return (
+              <View style={styles.ttsStatRow}>
+                <Text style={styles.ttsStatEmoji}>⚡</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.ttsStatLabel}>RELÁMPAGO</Text>
+                  <Text style={styles.ttsStatValue}>{kpis.bestCat.name} · {kpis.bestCat.avgTTS}d</Text>
+                  {bestSub && (
+                    <Text style={{ fontSize: 10, color: '#00D9A3', marginTop: 2 }}>
+                      › {bestSub.name} · {bestSub.avgTTS}d
+                    </Text>
+                  )}
+                </View>
               </View>
-            </View>
-          )}
-          {kpis.worstCat && kpis.worstCat.name !== kpis.bestCat?.name && (
+            );
+          })()}
+          {kpis.worstCat && kpis.worstCat.name !== kpis.bestCat?.name && (() => {
+            const worstSub = kpis.worstCat.subcategoryStats?.slice().sort((a,b) => b.avgTTS - a.avgTTS)?.[0];
+            return (
+              <View style={[styles.ttsStatRow, { marginTop: 8 }]}>
+                <Text style={styles.ttsStatEmoji}>⚓</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.ttsStatLabel}>ANCLA</Text>
+                  <Text style={[styles.ttsStatValue, { color: '#E63946' }]}>{kpis.worstCat.name} · {kpis.worstCat.avgTTS}d</Text>
+                  {worstSub && (
+                    <Text style={{ fontSize: 10, color: '#E63946', marginTop: 2 }}>
+                      › {worstSub.name} · {worstSub.avgTTS}d
+                    </Text>
+                  )}
+                </View>
+              </View>
+            );
+          })()}
+          {kpis.topSubcategory && (
             <View style={[styles.ttsStatRow, { marginTop: 8 }]}>
-              <Text style={styles.ttsStatEmoji}>⚓</Text>
-              <View>
-                <Text style={styles.ttsStatLabel}>ANCLA</Text>
-                <Text style={[styles.ttsStatValue, { color: '#E63946' }]}>{kpis.worstCat.name} · {kpis.worstCat.avgTTS}d</Text>
+              <Text style={styles.ttsStatEmoji}>🏆</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.ttsStatLabel}>TOP SUBCATEGORÍA</Text>
+                <Text style={[styles.ttsStatValue, { color: '#FFB800' }]}>
+                  {kpis.topSubcategory.parentCategory} › {kpis.topSubcategory.name} · {kpis.topSubcategory.avgTTS}d
+                </Text>
               </View>
             </View>
           )}

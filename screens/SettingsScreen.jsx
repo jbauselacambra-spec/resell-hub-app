@@ -39,6 +39,16 @@ const TABS = [
 ];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+const CfgSection = ({ title, sub, icon, iconColor = '#FF6B35' }) => (
+  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 12, borderTopWidth: 1, borderTopColor: C.border }}>
+    <Icon name={icon || 'settings'} size={14} color={iconColor} style={{ marginTop: 2 }} />
+    <View style={{ flex: 1 }}>
+      <Text style={{ fontSize: 11, fontWeight: '800', color: C.text, marginBottom: 2 }}>{title}</Text>
+      {sub ? <Text style={{ fontSize: 10, color: C.gray500, lineHeight: 14 }}>{sub}</Text> : null}
+    </View>
+  </View>
+);
+
 const SectionTitle = ({ children, style }) => (
   <Text style={[styles.sectionTitle, style]}>{children}</Text>
 );
@@ -77,8 +87,16 @@ export default function SettingsScreen({ navigation }) {
     daysDesinterest:      '45',
     daysCritical:         '90',
     // Estrategia
-    staleMultiplier:      '1.5',
+    staleMultiplier:        '1.5',
     criticalMonthThreshold: '6',
+    // Umbrales HOT y Oportunidad
+    hotViews:               '50',
+    hotFavs:                '10',
+    hotDays:                '30',
+    daysAlmostReady:        '30',
+    favsAlmostReady:        '8',
+    opportunityFavs:        '8',
+    opportunityDays:        '20',
     ttsLightning:         '7',    // días TTS relámpago
     ttsAnchor:            '30',   // días TTS ancla
     priceBoostPct:        '10',   // % subida en relámpago
@@ -319,6 +337,46 @@ export default function SettingsScreen({ navigation }) {
         desc="Meses antes de republicación obligatoria"
       >
         <NumInput value={config.criticalMonthThreshold} onChangeText={v => updateCfg('criticalMonthThreshold', v)} unit="meses" />
+      </SettingCard>
+
+      {/* ── HOT — Producto con alta demanda ────────────────── */}
+      <SettingCard
+        label="Producto HOT"
+        desc={`Artículo con >${config.hotViews} vistas o >${config.hotFavs} favs en menos de ${config.hotDays}d`}
+        icon="zap"
+        iconColor="#E63946"
+      >
+        <View style={styles.row}>
+          <NumInput label="Vistas mínimas" value={config.hotViews}    onChangeText={v => updateCfg('hotViews', v)}    unit="vistas" />
+          <NumInput label="Favs mínimos"   value={config.hotFavs}     onChangeText={v => updateCfg('hotFavs', v)}     unit="favs" />
+          <NumInput label="Días máximos"   value={config.hotDays}     onChangeText={v => updateCfg('hotDays', v)}     unit="días" />
+        </View>
+      </SettingCard>
+
+      {/* ── CASI LISTO — Producto favoriteado pero sin vender ── */}
+      <SettingCard
+        label="Casi Listo"
+        desc={`Productos con >${config.favsAlmostReady} favs publicados más de ${config.daysAlmostReady}d`}
+        icon="heart"
+        iconColor="#00D9A3"
+      >
+        <View style={styles.row}>
+          <NumInput label="Días publicado" value={config.daysAlmostReady}  onChangeText={v => updateCfg('daysAlmostReady', v)}  unit="días" />
+          <NumInput label="Favs mínimos"  value={config.favsAlmostReady}   onChangeText={v => updateCfg('favsAlmostReady', v)}   unit="favs" />
+        </View>
+      </SettingCard>
+
+      {/* ── OPORTUNIDAD — Alerta de oferta ──────────────────── */}
+      <SettingCard
+        label="Alerta Oportunidad"
+        desc={`Lanza alerta cuando favs > ${config.opportunityFavs} y llevan > ${config.opportunityDays}d publicados`}
+        icon="bell"
+        iconColor="#FFB800"
+      >
+        <View style={styles.row}>
+          <NumInput label="Favs para alerta" value={config.opportunityFavs}  onChangeText={v => updateCfg('opportunityFavs', v)}  unit="favs" />
+          <NumInput label="Días mínimos"     value={config.opportunityDays}  onChangeText={v => updateCfg('opportunityDays', v)}  unit="días" />
+        </View>
       </SettingCard>
 
       <SaveBtn onPress={handleSave} />

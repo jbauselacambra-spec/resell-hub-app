@@ -14,10 +14,14 @@ export default function AdvancedStatsScreen({ navigation }) {
   const [monthHistory, setMonthHistory] = useState([]);
   const [alerts,       setAlerts]       = useState([]);
   const [kpis,         setKpis]         = useState(null);
+  const [config,       setConfig]       = useState(null);
   const [activeTab,    setActiveTab]    = useState('tts');     // 'tts' | 'monthly' | 'alerts'
   const [selectedCat,  setSelectedCat]  = useState(null);
+  const [expandedSub,  setExpandedSub]  = useState(null);     // 'CatName|SubName'
 
   const loadData = () => {
+    const cfg = DatabaseService.getConfig();
+    setConfig(cfg);
     setCatStats(DatabaseService.getCategoryStats());
     setMonthHistory(DatabaseService.getMonthlyHistory());
     setAlerts(DatabaseService.getSmartAlerts());
@@ -30,7 +34,14 @@ export default function AdvancedStatsScreen({ navigation }) {
     return unsub;
   }, [navigation]);
 
-  if (!kpis) return null;
+  if (!kpis || !config) return null;
+
+  // Thresholds from config (dynamic)
+  const ttsLightning  = parseInt(config.ttsLightning  || 7);
+  const ttsAnchor     = parseInt(config.ttsAnchor     || 30);
+  const priceBoostPct = parseInt(config.priceBoostPct || 10);
+  const priceCutPct   = parseInt(config.priceCutPct   || 10);
+  const staleMultiplier = parseFloat(config.staleMultiplier || 1.5);
 
   // Max profit for chart scale
   const maxMonthlyProfit = Math.max(...monthHistory.map(m => Math.abs(m.profit)), 1);
@@ -52,7 +63,10 @@ export default function AdvancedStatsScreen({ navigation }) {
           { label: 'VENDIDOS',     value: kpis.soldCount,                              color: '#FFF',     textColor: '#1A1A2E', border: '#EEE' },
           { label: 'EN STOCK',     value: kpis.activeCount,                            color: '#FFF',     textColor: '#1A1A2E', border: '#EEE' },
           { label: 'ESTE MES',     value: `${kpis.soldThisMonth} vendidos`,            color: '#FF6B35',  textColor: '#FFF' },
-        ].map((k, i) => (
+          kpis.topSubcategory
+            ? { label: '⚡ TOP SUB', value: `${kpis.topSubcategory.name} ${kpis.topSubcategory.avgTTS}d`, color: '#004E89', textColor: '#FFF' }
+            : null,
+        ].filter(Boolean).map((k, i) => (
           <View key={i} style={[styles.kpiChip, { backgroundColor: k.color, borderWidth: k.border ? 1 : 0, borderColor: k.border }]}>
             <Text style={[styles.kpiChipLabel, { color: k.textColor === '#FFF' ? 'rgba(255,255,255,0.6)' : '#BBB' }]}>{k.label}</Text>
             <Text style={[styles.kpiChipValue, { color: k.textColor }]}>{k.value}</Text>
@@ -86,7 +100,7 @@ export default function AdvancedStatsScreen({ navigation }) {
         <View style={styles.panel}>
           <Text style={styles.panelTitle}>Ranking Time-to-Sell por Categoría</Text>
           <Text style={styles.panelSub}>
-            ⚡ ≤7d sube precio · 🟡 8-30d mantén · ⚓ &gt;30d baja o republica
+            {`⚡ ≤${ttsLightning}d sube +${priceBoostPct}% · 🟡 ${ttsLightning+1}-${ttsAnchor}d mantén · ⚓ >${ttsAnchor}d baja -${priceCutPct}%`}
           </Text>
 
           {catStats.length === 0 && (
@@ -98,7 +112,7 @@ export default function AdvancedStatsScreen({ navigation }) {
           )}
 
           {catStats.map((cat, i) => {
-            const barW = Math.min(100, Math.round((30 / Math.max(cat.avgTTS, 1)) * 100));
+            const barW = Math.min(100, Math.round((ttsAnchor / Math.max(cat.avgTTS, 1)) * 100));
             const expanded = selectedCat === cat.name;
             return (
               <TouchableOpacity
@@ -150,9 +164,65 @@ export default function AdvancedStatsScreen({ navigation }) {
                   <View style={[styles.recommendation, { borderLeftColor: cat.color }]}>
                     <Text style={[styles.recTitle, { color: cat.color }]}>💡 ESTRATEGIA RECOMENDADA</Text>
                     <Text style={styles.recText}>{cat.advice}.</Text>
-                    {cat.avgTTS <= 7  && <Text style={styles.recDetail}>Esta categoría vuela. Busca más stock de {cat.name} y sube los precios un 10-15%.</Text>}
-                    {cat.avgTTS > 7 && cat.avgTTS <= 30 && <Text style={styles.recDetail}>Rendimiento normal. Mejora el título y las fotos para acelerar.</Text>}
-                    {cat.avgTTS > 30 && <Text style={styles.recDetail}>Producto lento. Baja el precio o republica. Si lleva &gt;45d considera hacer un lote.</Text>}
+                    {cat.avgTTS <= ttsLightning  && <Text style={styles.recDetail}>Esta categoría vuela. Busca más stock de {cat.name} y sube los precios un {priceBoostPct}%.</Text>}
+                    {cat.avgTTS > ttsLightning && cat.avgTTS <= ttsAnchor && <Text style={styles.recDetail}>Rendimiento normal. Mejora el título y las fotos para acelerar.</Text>}
+                    {cat.avgTTS > ttsAnchor && <Text style={styles.recDetail}>Producto lento. Baja el precio un {priceCutPct}% o republica. Si lleva más de {Math.round(ttsAnchor * staleMultiplier)}d considera hacer un lote.</Text>}
+                  </View>
+                )}
+
+                {/* Subcategory breakdown — expandable */}
+                {expanded && cat.subcategoryStats && cat.subcategoryStats.length > 0 && (
+                  <View style={styles.subSection}>
+                    <Text style={styles.subSectionTitle}>SUBCATEGORÍAS</Text>
+                    {cat.subcategoryStats.map(sub => {
+                      const subKey = `${cat.name}|${sub.name}`;
+                      const subExpanded = expandedSub === subKey;
+                      const subBarW = Math.min(100, Math.round((ttsAnchor / Math.max(sub.avgTTS, 1)) * 100));
+                      return (
+                        <TouchableOpacity
+                          key={sub.name}
+                          style={[styles.subCard, { borderLeftColor: sub.color + '88' }]}
+                          onPress={() => setExpandedSub(subExpanded ? null : subKey)}
+                          activeOpacity={0.8}
+                        >
+                          <View style={styles.subHeaderRow}>
+                            <Icon name="corner-down-right" size={12} color={sub.color} />
+                            <Text style={styles.subName}>{sub.name}</Text>
+                            <View style={[styles.speedBadge, { backgroundColor: sub.color + '18', borderColor: sub.color + '44' }]}>
+                              <Text style={[styles.speedBadgeText, { color: sub.color }]}>{sub.emoji} {sub.label}</Text>
+                            </View>
+                          </View>
+                          <View style={styles.barTrack}>
+                            <View style={[styles.barFill, { width: `${subBarW}%`, backgroundColor: sub.color + 'BB' }]} />
+                          </View>
+                          <View style={styles.catStatRow}>
+                            <View style={styles.catStat}>
+                              <Text style={styles.catStatVal}>{sub.avgTTS}d</Text>
+                              <Text style={styles.catStatLab}>TTS</Text>
+                            </View>
+                            <View style={styles.catStat}>
+                              <Text style={styles.catStatVal}>{sub.count}</Text>
+                              <Text style={styles.catStatLab}>Ventas</Text>
+                            </View>
+                            <View style={styles.catStat}>
+                              <Text style={[styles.catStatVal, { color: sub.avgProfit >= 0 ? '#00D9A3' : '#E63946' }]}>
+                                {sub.avgProfit >= 0 ? '+' : ''}{sub.avgProfit}€
+                              </Text>
+                              <Text style={styles.catStatLab}>Benef/venta</Text>
+                            </View>
+                          </View>
+                          {subExpanded && sub.tags && sub.tags.length > 0 && (
+                            <View style={styles.tagsRow}>
+                              {sub.tags.slice(0, 8).map(tag => (
+                                <View key={tag} style={styles.tagChip}>
+                                  <Text style={styles.tagChipTxt}>#{tag}</Text>
+                                </View>
+                              ))}
+                            </View>
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
                 )}
               </TouchableOpacity>
@@ -207,17 +277,39 @@ export default function AdvancedStatsScreen({ navigation }) {
           )}
 
           {/* Table */}
-          {monthHistory.map((m, i) => (
-            <View key={i} style={styles.monthRow}>
-              <View style={styles.monthLeft}>
-                <Text style={styles.monthLabel}>{m.label}</Text>
-                <Text style={styles.monthSales}>{m.sales} ventas · {m.revenue.toFixed(0)}€ ingresos</Text>
+          {monthHistory.map((m, i) => {
+            const topCat = m.topCategory?.[0] || null;
+            return (
+              <View key={i} style={styles.monthRow}>
+                <View style={styles.monthLeft}>
+                  <Text style={styles.monthLabel}>{m.label}</Text>
+                  <Text style={styles.monthSales}>{m.sales} ventas · {m.revenue.toFixed(0)}€ ingresos</Text>
+                  {topCat && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
+                      <View style={{ backgroundColor: '#FF6B3515', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                        <Text style={{ fontSize: 9, fontWeight: '800', color: '#FF6B35' }}>
+                          ⚡ {topCat.name} · +{topCat.profit >= 0 ? '' : ''}{topCat.profit.toFixed(0)}€ · {topCat.sales}u
+                        </Text>
+                      </View>
+                      {topCat.topSub && (
+                        <View style={{ backgroundColor: '#004E8912', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                          <Text style={{ fontSize: 9, fontWeight: '700', color: '#004E89' }}>
+                            › {topCat.topSub.name} · {topCat.topSub.sales}u
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
+                  {m.bundles > 0 && (
+                    <Text style={{ fontSize: 9, color: '#888', marginTop: 2 }}>📦 {m.bundles} lotes</Text>
+                  )}
+                </View>
+                <Text style={[styles.monthProfit, { color: m.profit >= 0 ? '#00D9A3' : '#E63946' }]}>
+                  {m.profit >= 0 ? '+' : ''}{m.profit.toFixed(2)}€
+                </Text>
               </View>
-              <Text style={[styles.monthProfit, { color: m.profit >= 0 ? '#00D9A3' : '#E63946' }]}>
-                {m.profit >= 0 ? '+' : ''}{m.profit.toFixed(2)}€
-              </Text>
-            </View>
-          ))}
+            );
+          })}
         </View>
       )}
 
@@ -252,6 +344,20 @@ export default function AdvancedStatsScreen({ navigation }) {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.alertTitle} numberOfLines={1}>{alert.title}</Text>
                     <Text style={styles.alertMsg}>{alert.message}</Text>
+                    {(alert.category || alert.subcategory) && (
+                      <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                        {alert.category && (
+                          <View style={[styles.alertCatChip, { backgroundColor: c + '15' }]}>
+                            <Text style={[styles.alertCatChipTxt, { color: c }]}>{alert.category}</Text>
+                          </View>
+                        )}
+                        {alert.subcategory && (
+                          <View style={[styles.alertCatChip, { backgroundColor: '#004E8915' }]}>
+                            <Text style={[styles.alertCatChipTxt, { color: '#004E89' }]}>{alert.subcategory}</Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
                   </View>
                   {alert.priority === 'high' && (
                     <View style={[styles.priorityBadge, { backgroundColor: c + '20' }]}>
@@ -364,4 +470,21 @@ const styles = StyleSheet.create({
   priorityText: { fontSize: 8, fontWeight: '900', letterSpacing: 0.5 },
   alertFooter:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   alertAction:  { fontSize: 10, fontWeight: '900' },
+
+  alertCatChip:    { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8 },
+  alertCatChipTxt: { fontSize: 9, fontWeight: '800' },
+
+  subSection:      { marginTop: 12, borderTopWidth: 1, borderTopColor: '#F0F0F0', paddingTop: 10 },
+  subSectionTitle: { fontSize: 8, fontWeight: '900', color: '#BBB', letterSpacing: 1.5, marginBottom: 8 },
+  subCard: {
+    backgroundColor: '#FFF', borderLeftWidth: 3,
+    borderRadius: 12, padding: 12, marginBottom: 8,
+    borderWidth: 1, borderColor: '#F0F0F0',
+  },
+  subHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  subName:      { fontSize: 13, fontWeight: '700', color: '#1A1A2E', flex: 1 },
+
+  tagsRow:     { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 8 },
+  tagChip:     { backgroundColor: '#004E8915', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3 },
+  tagChipTxt:  { fontSize: 9, color: '#004E89', fontWeight: '700' },
 });

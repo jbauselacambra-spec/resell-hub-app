@@ -8,24 +8,15 @@ import { DatabaseService } from '../services/DatabaseService';
 
 const { width } = Dimensions.get('window');
 
-const SEASONAL_ADVICE = {
-  0: 'Enero: Mueve Juguetes y Abrigos post-reyes.',
-  1: 'Febrero: Accesorios y Ropa formal (San Valentín).',
-  2: 'Marzo: Calzado deportivo y ropa de primavera.',
-  3: 'Abril: Vestidos y Accesorios de entretiempo.',
-  4: 'Mayo: Prepara Calzado de verano y Bañadores.',
-  5: 'Junio: Temporada alta — Electrónica portátil.',
-  6: 'Julio: Rebajas — ajusta precios y publica Lotes.',
-  7: 'Agosto: Vuelta al cole — Libros y Calzado infantil.',
-  8: 'Septiembre: Chaquetas y Entretenimiento familiar.',
-  9: 'Octubre: ¡Momento de los Disfraces! Republica ya.',
-  10: 'Noviembre: Black Friday — Electrónica y Lotes.',
-  11: 'Diciembre: Navidad — Juguetes y Coleccionables.',
-};
+const MONTH_NAMES = [
+  'Enero','Febrero','Marzo','Abril','Mayo','Junio',
+  'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'
+];
 
 export default function ProductsScreen({ navigation }) {
   const [products, setProducts]     = useState([]);
   const [filter,   setFilter]       = useState('all');
+  const [filterCat, setFilterCat]   = useState(null);
   const [config,   setConfig]       = useState(null);
 
   const loadData = () => {
@@ -57,7 +48,9 @@ export default function ProductsScreen({ navigation }) {
     if (filter === 'stagnant') return products.filter(p => p.isCold || p.isCritical);
     if (filter === 'critical') return products.filter(p => p.severity?.type === 'CRÍTICO');
     return products;
-  }, [products, filter]);
+    if (filterCat) arr = arr.filter(p => p.category === filterCat);
+    return arr;
+  }, [products, filter, filterCat]);
 
   const handleRepublish = (id) => {
     Alert.alert('Confirmar Resubida', '¿Has resubido este artículo? Se reseteará la antigüedad.', [
@@ -98,6 +91,11 @@ export default function ProductsScreen({ navigation }) {
 
         <View style={styles.cardInfo}>
           <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
+          {(item.category || item.brand) ? (
+            <Text style={styles.cardCat} numberOfLines={1}>
+              {item.category || ''}{item.subcategory ? ` › ${item.subcategory}` : ''}{item.brand ? ` · ${item.brand}` : ''}
+            </Text>
+          ) : null}
 
           {sev ? (
             <View style={[styles.diagBox, { backgroundColor: sev.color + '15' }]}>
@@ -142,6 +140,31 @@ export default function ProductsScreen({ navigation }) {
         <Text style={styles.headerTitle}>Mi Inventario</Text>
       </View>
 
+      {/* Category filter chips */}
+      {(() => {
+        const cats = [...new Set(products.map(p => p.category || 'Otros'))];
+        if (cats.length < 2) return null;
+        return (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4, paddingLeft: 20 }} contentContainerStyle={{ gap: 6, paddingRight: 20 }}>
+            <TouchableOpacity
+              style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: !filterCat ? '#FF6B35' : '#F0F0F0', marginVertical: 4 }}
+              onPress={() => setFilterCat(null)}
+            >
+              <Text style={{ fontSize: 11, fontWeight: '700', color: !filterCat ? '#FFF' : '#666' }}>Todas</Text>
+            </TouchableOpacity>
+            {cats.map(cat => (
+              <TouchableOpacity
+                key={cat}
+                style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: filterCat === cat ? '#FF6B35' : '#F0F0F0', marginVertical: 4 }}
+                onPress={() => setFilterCat(filterCat === cat ? null : cat)}
+              >
+                <Text style={{ fontSize: 11, fontWeight: '700', color: filterCat === cat ? '#FFF' : '#666' }}>{cat}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        );
+      })()}
+
       {/* Diagnosis chips */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}>
         {counts.critical > 0 && (
@@ -178,8 +201,18 @@ export default function ProductsScreen({ navigation }) {
         <View style={{ flex: 1 }}>
           <Text style={styles.adviceTitle}>Estado del mes</Text>
           <Text style={styles.adviceText}>
-            {SEASONAL_ADVICE[currentMonth]}
-            {counts.stagnant > 0 ? ` Tienes ${counts.stagnant} artículos estancados.` : ' ¡Todo bajo control!'}
+            {(() => {
+              const seasonalCats = Array.isArray(config?.seasonalMap?.[currentMonth])
+                ? config.seasonalMap[currentMonth]
+                : (config?.seasonalMap?.[currentMonth] ? [config.seasonalMap[currentMonth]] : []);
+              const catsText = seasonalCats.length > 0
+                ? `${MONTH_NAMES[currentMonth]}: temporada de ${seasonalCats.join(' y ')}.`
+                : `${MONTH_NAMES[currentMonth]}: sin categorías estacionales configuradas.`;
+              const stagnantText = counts.stagnant > 0
+                ? ` Tienes ${counts.stagnant} artículos estancados.`
+                : ' ¡Todo bajo control!';
+              return catsText + stagnantText;
+            })()}
           </Text>
         </View>
       </View>
@@ -278,6 +311,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1A1A2E', paddingVertical: 7,
     borderRadius: 10, marginTop: 6,
   },
+  cardCat:      { fontSize: 9, color: '#FF6B35', fontWeight: '700', marginBottom: 3 },
   republishText: { color: '#FFF', fontSize: 8, fontWeight: '900' },
   empty:     { alignItems: 'center', paddingTop: 60 },
   emptyText: { color: '#CCC', fontSize: 13, marginTop: 12 },

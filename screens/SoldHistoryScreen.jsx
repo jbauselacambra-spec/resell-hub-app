@@ -10,12 +10,15 @@ const { width } = Dimensions.get('window');
 
 export default function SoldHistoryScreen({ navigation }) {
   const [soldProducts, setSoldProducts] = useState([]);
-  const [filterType,   setFilterType]   = useState('date'); // 'date' | 'profit' | 'tts'
+  const [filterType,   setFilterType]   = useState('date'); // 'date' | 'profit' | 'tts' | 'category'
+  const [filterCat,    setFilterCat]    = useState(null);  // null = todas
+  const [config,       setConfig]       = useState(null);
 
   const loadData = () => {
     const all    = DatabaseService.getAllProducts();
     const sold   = all.filter(p => p && p.status === 'sold');
     setSoldProducts(sold);
+    setConfig(DatabaseService.getConfig());
   };
 
   useEffect(() => {
@@ -59,8 +62,9 @@ export default function SoldHistoryScreen({ navigation }) {
         return ttsOf(a) - ttsOf(b);
       });
     }
+    if (filterCat) arr = arr.filter(p => p.category === filterCat);
     return arr;
-  }, [soldProducts, filterType]);
+  }, [soldProducts, filterType, filterCat]);
 
   const renderItem = ({ item }) => {
     const original = Number(item.price || 0);
@@ -85,13 +89,19 @@ export default function SoldHistoryScreen({ navigation }) {
 
           <View style={styles.metaRow}>
             <Text style={styles.category}>{item.category || 'Otros'}</Text>
+            {item.subcategory ? (
+              <>
+                <Text style={styles.dot}>›</Text>
+                <Text style={[styles.category, { color: '#004E89' }]}>{item.subcategory}</Text>
+              </>
+            ) : null}
             <Text style={styles.dot}>·</Text>
             <Text style={styles.date}>{new Date(item.soldDateReal || item.soldDate || item.soldAt || '').toLocaleDateString('es-ES')}</Text>
             {tts !== null && (
               <>
                 <Text style={styles.dot}>·</Text>
-                <Text style={[styles.ttsChip, { color: tts <= 7 ? '#00D9A3' : tts <= 30 ? '#FFB800' : '#E63946' }]}>
-                  {tts <= 7 ? '⚡' : tts <= 30 ? '🟡' : '⚓'} {tts}d
+                <Text style={[styles.ttsChip, { color: tts <= ttsLightning ? '#00D9A3' : tts <= ttsAnchor ? '#FFB800' : '#E63946' }]}>
+                  {tts <= ttsLightning ? '⚡' : tts <= ttsAnchor ? '🟡' : '⚓'} {tts}d
                 </Text>
               </>
             )}
@@ -148,13 +158,38 @@ export default function SoldHistoryScreen({ navigation }) {
           </View>
           <View style={styles.kpiDivider} />
           <View style={styles.kpiItem}>
-            <Text style={[styles.kpiVal, { color: kpis.avgTTS <= 7 ? '#00D9A3' : kpis.avgTTS <= 30 ? '#FFB800' : '#E63946' }]}>
+            <Text style={[styles.kpiVal, { color: kpis.avgTTS <= ttsLightning ? '#00D9A3' : kpis.avgTTS <= ttsAnchor ? '#FFB800' : '#E63946' }]}>
               {kpis.avgTTS > 0 ? `${kpis.avgTTS}d` : '—'}
             </Text>
             <Text style={styles.kpiLab}>TTS Medio</Text>
           </View>
         </View>
       </View>
+
+      {/* Category quick-filter */}
+      {(() => {
+        const cats = [...new Set(soldProducts.map(p => p.category || 'Otros'))];
+        if (cats.length < 2) return null;
+        return (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, marginBottom: 8 }} contentContainerStyle={{ gap: 6 }}>
+            <TouchableOpacity
+              style={[styles.catChip, !filterCat && { backgroundColor: '#FF6B35' }]}
+              onPress={() => setFilterCat(null)}
+            >
+              <Text style={[styles.catChipTxt, !filterCat && { color: '#FFF' }]}>Todas</Text>
+            </TouchableOpacity>
+            {cats.map(cat => (
+              <TouchableOpacity
+                key={cat}
+                style={[styles.catChip, filterCat === cat && { backgroundColor: '#FF6B35' }]}
+                onPress={() => setFilterCat(filterCat === cat ? null : cat)}
+              >
+                <Text style={[styles.catChipTxt, filterCat === cat && { color: '#FFF' }]}>{cat}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        );
+      })()}
 
       {/* Filter bar */}
       <View style={styles.filterBar}>
@@ -229,6 +264,8 @@ const styles = StyleSheet.create({
   dot:         { color: '#DDD', marginHorizontal: 3 },
   date:        { fontSize: 10, color: '#999' },
   ttsChip:     { fontSize: 10, fontWeight: '800' },
+  catChip:     { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: '#F0F0F0', borderWidth: 1, borderColor: '#E0E0E0' },
+  catChipTxt:  { fontSize: 11, fontWeight: '700', color: '#666' },
   priceRow:    { flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 6 },
   priceLabel:  { fontSize: 7,  fontWeight: '900', color: '#CCC' },
   priceOriginal: { fontSize: 12, fontWeight: '700', color: '#CCC', textDecorationLine: 'line-through' },

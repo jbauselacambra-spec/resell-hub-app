@@ -232,20 +232,22 @@ export default function ProductDetailScreen({ route, navigation }) {
     priceHistory:    initialProduct?.priceHistory    || [],
   }));
 
-  // Diagnóstico
+  // Diagnóstico — todos los umbrales desde config
   const statusInfo = useMemo(() => {
     const now        = new Date();
     const uploadDate = new Date(product.firstUploadDate || product.createdAt);
     const daysOld    = Math.max(0, Math.floor((now - uploadDate) / 86_400_000));
-    const config     = DatabaseService.getConfig();
-    const severity   = DatabaseService.getActiveProductsWithDiagnostic
-      ? null  // calculado externamente
-      : null;
+    const cfg        = DatabaseService.getConfig();
+    const hotViews   = parseInt(cfg.hotViews   || 50);
+    const hotFavs    = parseInt(cfg.hotFavs    || 10);
+    const hotDays    = parseInt(cfg.hotDays    || 30);
     return {
       daysOld,
-      isHot:  (product.views > 50 || product.favorites > 10) && daysOld < 30,
-      isCold: daysOld >= parseInt(config.daysDesinterest || 45),
-      isCrit: daysOld >= parseInt(config.daysCritical    || 90),
+      isHot:  (product.views > hotViews || product.favorites > hotFavs) && daysOld < hotDays,
+      isCold: daysOld >= parseInt(cfg.daysDesinterest || 45),
+      isCrit: daysOld >= parseInt(cfg.daysCritical    || 90),
+      // Añadir umbrales al retorno para usarlos en la UI si hace falta
+      cfg,
     };
   }, [product]);
 

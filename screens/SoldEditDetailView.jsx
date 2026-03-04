@@ -196,6 +196,11 @@ function CalendarModal({ visible, onClose, value, onChange, label }) {
 export default function SoldEditDetailView({ route, navigation }) {
   const { product: initialProduct } = route.params;
 
+  // Umbrales dinámicos desde Settings (MMKV — lectura síncrona)
+  const _cfg        = DatabaseService.getConfig();
+  const ttsLightning = parseInt(_cfg?.ttsLightning || 7);
+  const ttsAnchor    = parseInt(_cfg?.ttsAnchor    || 30);
+
   const [editForm, setEditForm] = useState({
     ...initialProduct,
     soldPriceReal:   initialProduct.soldPriceReal ?? initialProduct.soldPrice ?? (initialProduct.price || 0),
@@ -266,7 +271,7 @@ export default function SoldEditDetailView({ route, navigation }) {
     return Math.max(1, Math.round(
       (new Date(editForm.soldDateReal) - new Date(editForm.firstUploadDate)) / 86_400_000
     ));
-  }, [editForm.firstUploadDate, editForm.soldDate]);
+  }, [editForm.firstUploadDate, editForm.soldDateReal]);
 
   return (
     <View style={styles.container}>
@@ -325,8 +330,8 @@ export default function SoldEditDetailView({ route, navigation }) {
               </View>
               <View style={styles.ttsStat}>
                 <Text style={styles.ttsLbl}>DÍAS HASTA VENTA</Text>
-                <Text style={[styles.ttsVal, { color: tts <= 7 ? C.success : tts <= 30 ? C.warning : C.danger }]}>
-                  {tts}d
+                <Text style={[styles.ttsVal, { color: tts <= ttsLightning ? C.success : tts <= ttsAnchor ? C.warning : C.danger }]}>
+                  {tts <= ttsLightning ? '⚡' : tts <= ttsAnchor ? '🟡' : '⚓'} {tts}d
                 </Text>
               </View>
               <View style={styles.ttsStat}>

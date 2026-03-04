@@ -66,6 +66,16 @@ const DEFAULT_CONFIG = {
   preserveIsBundle:       true,
   autoDetectCategory:     true,
   // v2.2: autoGenerateSeoTags eliminado — tags provienen del diccionario
+  // Umbrales de diagnóstico "Casi Listo" (producto con alta demanda)
+  daysAlmostReady:        '30',  // días mínimos para considerar "casi listo"
+  favsAlmostReady:        '8',   // favoritos mínimos para "casi listo"
+  // Umbrales "HOT" (producto activo con mucho interés)
+  hotViews:               '50',  // vistas mínimas para marcar como HOT
+  hotFavs:                '10',  // favoritos mínimos para marcar como HOT
+  hotDays:                '30',  // días máximos para marcar como HOT
+  // Umbrales alerta "Oportunidad"
+  opportunityFavs:        '8',   // favoritos para disparar alerta oportunidad
+  opportunityDays:        '20',  // días publicado para alerta oportunidad
   // Notificaciones
   notifEnabled:           true,
   notifDays:              '3',
@@ -193,7 +203,9 @@ export function getProductSeverity(daysOld, views, favorites, config) {
     return { type: 'INVISIBLE',  color: '#888888', icon: 'eye-off',       msg: `Bajas vistas (<${viewsLimit})`, priority: 3 };
   if (daysOld >= limitDesinterest && favorites === 0 && views > viewsLimit)
     return { type: 'DESINTERÉS', color: '#FF6B35', icon: 'trending-down', msg: 'Revisar precio/desc',      priority: 2 };
-  if (daysOld >= 30 && favorites > 8)
+  const limitAlmostReady = parseInt(cfg.daysAlmostReady || 30);
+  const favsAlmostReady  = parseInt(cfg.favsAlmostReady  || 8);
+  if (daysOld >= limitAlmostReady && favorites > favsAlmostReady)
     return { type: 'CASI LISTO', color: '#00D9A3', icon: 'zap',           msg: 'Haz una oferta ahora',    priority: 1 };
   return null;
 }
@@ -772,19 +784,60 @@ export class DatabaseService {
     const map  = {};
 
     sold.forEach(p => {
-      const date  = new Date(p.soldDateReal || p.soldDate || p.soldAt || p.createdAt);
-      const key   = `${date.getFullYear()}-${String(date.getMonth()).padStart(2,'0')}`;
-      const label = date.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
-      const profit = Number(p.soldPriceReal || p.soldPrice || p.price) - Number(p.price);
+      const date    = new Date(p.soldDateReal || p.soldDate || p.soldAt || p.createdAt);
+      const key     = `${date.getFullYear()}-${String(date.getMonth()).padStart(2,'0')}`;
+      const label   = date.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
+      const soldAmt = Number(p.soldPriceReal || p.soldPrice || p.price);
+      const profit  = soldAmt - Number(p.price);
+      const cat     = p.category    || 'Otros';
+      const sub     = p.subcategory || null;
 
-      if (!map[key]) map[key] = { key, label, month: date.getMonth(), year: date.getFullYear(), profit: 0, sales: 0, revenue: 0, bundles: 0 };
+      if (!map[key]) map[key] = {
+        key, label,
+        month: date.getMonth(), year: date.getFullYear(),
+        profit: 0, sales: 0, revenue: 0, bundles: 0,
+        categoryBreakdown: {},   // { catName: { profit, sales, revenue, subcategories: {} } }
+      };
+
       map[key].profit  += profit;
       map[key].sales   += 1;
-      map[key].revenue += Number(p.soldPriceReal || p.soldPrice || p.price);
+      map[key].revenue += soldAmt;
       if (p.isBundle) map[key].bundles += 1;
+
+      // Acumular por categoría
+      const cb = map[key].categoryBreakdown;
+      if (!cb[cat]) cb[cat] = { profit: 0, sales: 0, revenue: 0, subcategories: {} };
+      cb[cat].profit  += profit;
+      cb[cat].sales   += 1;
+      cb[cat].revenue += soldAmt;
+
+      // Acumular por subcategoría
+      if (sub) {
+        if (!cb[cat].subcategories[sub]) cb[cat].subcategories[sub] = { profit: 0, sales: 0, revenue: 0 };
+        cb[cat].subcategories[sub].profit  += profit;
+        cb[cat].subcategories[sub].sales   += 1;
+        cb[cat].subcategories[sub].revenue += soldAmt;
+      }
     });
 
-    return Object.values(map).sort((a, b) => b.key.localeCompare(a.key));
+    return Object.values(map)
+      .map(m => ({
+        ...m,
+        // Top categoría del mes (mayor beneficio)
+        topCategory: Object.entries(m.categoryBreakdown)
+          .sort((a, b) => b[1].profit - a[1].profit)
+          .map(([name, d]) => ({
+            name,
+            profit:  +(d.profit.toFixed(2)),
+            sales:   d.sales,
+            revenue: +(d.revenue.toFixed(2)),
+            // Top subcategoría dentro de la categoría
+            topSub: Object.entries(d.subcategories)
+              .sort((a, b) => b[1].profit - a[1].profit)
+              .map(([sName, sd]) => ({ name: sName, profit: +(sd.profit.toFixed(2)), sales: sd.sales }))[0] || null,
+          })),
+      }))
+      .sort((a, b) => b.key.localeCompare(a.key));
   }
 
   /**
@@ -818,6 +871,12 @@ export class DatabaseService {
     // Stale products count
     const staleCount = active.filter(p => p.stale).length;
 
+    // Best subcategory across all categories (lowest avgTTS with data)
+    const topSubcategory = catStats
+      .flatMap(c => (c.subcategoryStats || []).map(s => ({ ...s, parentCategory: c.name })))
+      .filter(s => s.avgTTS < 999 && s.count > 0)
+      .sort((a, b) => a.avgTTS - b.avgTTS)[0] || null;
+
     return {
       totalRevenue,
       totalProfit,
@@ -831,6 +890,7 @@ export class DatabaseService {
       avgTTS,
       bestCat,
       worstCat,
+      topSubcategory,  // { name, parentCategory, avgTTS, count, ... }
     };
   }
 
@@ -852,13 +912,16 @@ export class DatabaseService {
       const limitCritical    = parseInt(config.daysCritical    || 90);
       const limitDesinterest = parseInt(config.daysDesinterest || 45);
 
+      const hotViews = parseInt(config.hotViews || 50);
+      const hotFavs  = parseInt(config.hotFavs  || 10);
+      const hotDays  = parseInt(config.hotDays   || 30);
       return {
         ...p,
         daysOld,
         severity,
         isCritical: daysOld >= limitCritical,
         isCold:     daysOld >= limitDesinterest && daysOld < limitCritical,
-        isHot:      (views > 50 || favorites > 10) && daysOld < 30,
+        isHot:      (views > hotViews || favorites > hotFavs) && daysOld < hotDays,
       };
     });
   }
@@ -887,57 +950,78 @@ export class DatabaseService {
 
     products.forEach(p => {
       const cat       = p.category || 'Otros';
-      const catAvgTTS = catTTSMap[cat] || 30;
+      const ttsAnchorVal = parseInt(config.ttsAnchor || 30);
+      const catAvgTTS = catTTSMap[cat] || ttsAnchorVal;  // fallback = umbral ancla de config
 
-      // 1. ESTANCAMIENTO
-      if (p.daysOld > catAvgTTS * multiplier) {
+      // 1. ESTANCAMIENTO — usa TTS de subcategoría si existe, sino de categoría
+      const sub = p.subcategory;
+      const subStats = sub ? catStats.find(c => c.name === cat)?.subcategoryStats?.find(s => s.name === sub) : null;
+      const effectiveTTS = subStats?.avgTTS || catAvgTTS;
+      const effectiveLabel = sub ? `${cat} › ${sub}` : cat;
+      if (p.daysOld > effectiveTTS * multiplier) {
+        const priceCutPct = parseInt(config.priceCutPct || 10);
         alerts.push({
           type:      'stale',
-          priority:  p.daysOld > catAvgTTS * multiplier * 2 ? 'high' : 'medium',
+          priority:  p.daysOld > effectiveTTS * multiplier * 2 ? 'high' : 'medium',
           productId: p.id,
           title:     p.title,
-          message:   `Lleva ${p.daysOld}d. La media de ${cat} es ${catAvgTTS}d.`,
+          message:   `Lleva ${p.daysOld}d. Media de ${effectiveLabel}: ${effectiveTTS}d. Considera bajar ${priceCutPct}%.`,
           action:    'REVISAR PRECIO',
           icon:      'clock',
+          category:  cat,
+          subcategory: sub || null,
+          effectiveTTS,
         });
       }
 
-      // 2. ESTACIONALIDAD (multi-categoría)
+      // 2. ESTACIONALIDAD (multi-categoría) — enriquecida con subcategoría
       if (seasonalCats.includes(cat)) {
+        const priceBoostPct = parseInt(config.priceBoostPct || 10);
+        const subInfo = p.subcategory ? ` (${p.subcategory})` : '';
         alerts.push({
           type:      'seasonal',
           priority:  'high',
           productId: p.id,
           title:     `🔥 Temporada de ${cat}`,
-          message:   `${p.title} encaja con el mes actual. ¡Es el momento!`,
+          message:   `${p.title}${subInfo} encaja con este mes. Considera subir precio un ${priceBoostPct}%.`,
           action:    'REPUBLICAR / SUBIR',
           icon:      'zap',
+          category:  cat,
+          subcategory: p.subcategory || null,
         });
       }
 
-      // 3. CRÍTICO
+      // 3. CRÍTICO — usa criticalMonthThreshold de config
       if (p.daysOld > criticalMos * 30) {
+        const subInfo = p.subcategory ? ` · ${p.subcategory}` : '';
         alerts.push({
           type:      'critical',
           priority:  'high',
           productId: p.id,
           title:     `CRÍTICO: ${p.title}`,
-          message:   `Supera ${criticalMos} meses sin venderse.`,
+          message:   `${cat}${subInfo} · Supera ${criticalMos} meses (${p.daysOld}d) sin venderse. Republica urgente.`,
           action:    'REPUBLICAR URGENTE',
           icon:      'alert-circle',
+          category:  cat,
+          subcategory: p.subcategory || null,
         });
       }
 
-      // 4. OPORTUNIDAD
-      if (p.favorites > 8 && p.daysOld > 20) {
+      // 4. OPORTUNIDAD — umbrales desde config
+      const oppFavs = parseInt(config.opportunityFavs || 8);
+      const oppDays = parseInt(config.opportunityDays || 20);
+      if (p.favorites > oppFavs && p.daysOld > oppDays) {
+        const subLabel = p.subcategory ? ` · ${p.subcategory}` : '';
         alerts.push({
           type:      'opportunity',
           priority:  'medium',
           productId: p.id,
           title:     `💡 Oportunidad: ${p.title}`,
-          message:   `${p.favorites} personas lo han favoriteado. Haz una oferta.`,
+          message:   `${p.favorites} personas lo han favoriteado (${cat}${subLabel}). Haz una oferta.`,
           action:    'HACER OFERTA',
           icon:      'heart',
+          category:  cat,
+          subcategory: p.subcategory || null,
         });
       }
     });
@@ -970,31 +1054,48 @@ export class DatabaseService {
 
     if (catStats[0]) {
       const starCat = catStats[0];
-      // v2.2: Incluir subcategoría estrella si existe
-      const starSub = starCat.subcategoryStats?.[0];
-      const subMsg  = starSub ? ` (mejor sub: ${starSub.name} en ${starSub.avgTTS}d)` : '';
-      
+      // Subcategoría relámpago: la sub con menor TTS de la categoría estrella
+      const starSub = starCat.subcategoryStats?.find(s => s.avgTTS <= ttsLightning)
+                   || starCat.subcategoryStats?.[0];
+      const subMsg  = starSub
+        ? ` · ${starSub.name} vende en ${starSub.avgTTS}d`
+        : '';
+      const subAdvice = starSub && starSub.avgTTS <= ttsLightning
+        ? `Especialmente "${starSub.name}" vende en ${starSub.avgTTS}d — sube precio un ${priceBoostPct}%.`
+        : `${starCat.advice}.`;
+
       insights.push({
-        type:    'star',
-        icon:    '⚡',
-        title:   `${starCat.name} vende en ${starCat.avgTTS}d de media${subMsg}`,
-        message: `Busca más stock de ${starCat.name}. ${starCat.advice}.`,
-        color:   starCat.color,
-        category: starCat.name,
-        subcategory: starSub?.name,
+        type:        'star',
+        icon:        '⚡',
+        title:       `${starCat.name} vende en ${starCat.avgTTS}d de media${subMsg}`,
+        message:     `Busca más stock de ${starCat.name}. ${subAdvice}`,
+        color:       starCat.color,
+        category:    starCat.name,
+        subcategory: starSub?.name || null,
+        avgTTS:      starCat.avgTTS,
+        threshold:   ttsLightning,
       });
     }
 
-    // v2.2: Usar umbral dinámico ttsAnchor
+    // Usar umbral dinámico ttsAnchor + enriquecer con subcategoría más lenta
+    const priceCutPct = parseInt(config.priceCutPct || 10);
     const anchor = catStats.find(c => c.avgTTS > ttsAnchor);
     if (anchor) {
+      // Subcategoría más lenta dentro de la categoría ancla
+      const slowestSub = anchor.subcategoryStats?.slice().sort((a, b) => b.avgTTS - a.avgTTS)?.[0];
+      const subMsg = slowestSub
+        ? ` · "${slowestSub.name}" tarda ${slowestSub.avgTTS}d`
+        : '';
       insights.push({
-        type:    'anchor',
-        icon:    '⚓',
-        title:   `${anchor.name} tarda ${anchor.avgTTS}d en venderse (umbral: ${ttsAnchor}d)`,
-        message: `${anchor.advice}. Evalúa reducir stock de esta categoría.`,
-        color:   '#E63946',
-        category: anchor.name,
+        type:        'anchor',
+        icon:        '⚓',
+        title:       `${anchor.name} tarda ${anchor.avgTTS}d en venderse (umbral: ${ttsAnchor}d)${subMsg}`,
+        message:     `Baja precio un ${priceCutPct}% o republica. Evalúa reducir stock de esta categoría.`,
+        color:       '#E63946',
+        category:    anchor.name,
+        subcategory: slowestSub?.name || null,
+        avgTTS:      anchor.avgTTS,
+        threshold:   ttsAnchor,
       });
     }
 
