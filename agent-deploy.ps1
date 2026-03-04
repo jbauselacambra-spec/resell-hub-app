@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════
-# ResellHub - Script de Deploy v4.0 (Blindado + Ultra Limpieza Local)
+# ResellHub - Script de Deploy v4.1 (Automatización de Perfiles Cloud)
 # ═══════════════════════════════════════════════════════════════════════════
 
 param(
@@ -122,7 +122,7 @@ if ($Local) {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# BUILD CLOUD (EAS) - SIN CAMBIOS
+# BUILD CLOUD (EAS) - CON DETECCIÓN DE RAMA PARA PREVIEW
 # ═══════════════════════════════════════════════════════════════════════════
 
 if ($Cloud -or (-not $Local -and -not $Cloud -and -not $Check)) {
@@ -153,6 +153,15 @@ if ($Cloud -or (-not $Local -and -not $Cloud -and -not $Check)) {
     }
 
     Write-Host ""
-    Write-Host "[>] Enviando build a EAS..." -ForegroundColor $Colors.Primary
-    eas build --platform android --profile preview
+    
+    # Lógica de creación de APK automática:
+    # Si la rama es develop, lanza preview (APK). Si es main, podrías cambiarlo a production, 
+    # pero según tu petición, forzamos preview cuando subes desarrollo.
+    if ($branch -eq "develop") {
+        Write-Host "[>] Rama desarrollo detectada. Creando APK de Preview..." -ForegroundColor $Colors.Success
+        eas build --platform android --profile preview
+    } else {
+        Write-Host "[>] Enviando build a EAS..." -ForegroundColor $Colors.Primary
+        eas build --platform android --profile preview
+    }
 }
