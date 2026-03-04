@@ -26,11 +26,11 @@ export default function SoldHistoryScreen({ navigation }) {
 
   // KPIs del historial
   const kpis = useMemo(() => {
-    const revenue = soldProducts.reduce((s, p) => s + Number(p.soldPrice || p.price || 0), 0);
-    const profit  = soldProducts.reduce((s, p) => s + (Number(p.soldPrice || p.price || 0) - Number(p.price || 0)), 0);
+    const revenue = soldProducts.reduce((s, p) => s + Number(p.soldPriceReal || p.soldPrice || p.price || 0), 0);
+    const profit  = soldProducts.reduce((s, p) => s + (Number(p.soldPriceReal || p.soldPrice || p.price || 0) - Number(p.price || 0)), 0);
     const ttsList = soldProducts.map(p => {
       const start = p.firstUploadDate || p.createdAt;
-      const end   = p.soldDate || p.soldAt;
+      const end   = p.soldDateReal || p.soldDate || p.soldAt;
       if (!start || !end) return null;
       return Math.max(1, Math.round((new Date(end) - new Date(start)) / 86_400_000));
     }).filter(Boolean);
@@ -42,18 +42,18 @@ export default function SoldHistoryScreen({ navigation }) {
   const sorted = useMemo(() => {
     const arr = [...soldProducts];
     if (filterType === 'date') {
-      arr.sort((a, b) => new Date(b.soldDate || b.soldAt || 0) - new Date(a.soldDate || a.soldAt || 0));
+      arr.sort((a, b) => new Date(b.soldDateReal || b.soldDate || b.soldAt || 0) - new Date(a.soldDateReal || a.soldDate || a.soldAt || 0));
     } else if (filterType === 'profit') {
       arr.sort((a, b) => {
-        const pA = Number(a.soldPrice || a.price) - Number(a.price);
-        const pB = Number(b.soldPrice || b.price) - Number(b.price);
+        const pA = Number(a.soldPriceReal || a.soldPrice || a.price) - Number(a.price);
+        const pB = Number(b.soldPriceReal || b.soldPrice || b.price) - Number(b.price);
         return pB - pA;
       });
     } else if (filterType === 'tts') {
       arr.sort((a, b) => {
         const ttsOf = p => {
           const s = p.firstUploadDate || p.createdAt;
-          const e = p.soldDate || p.soldAt;
+          const e = p.soldDateReal || p.soldDate || p.soldAt;
           return s && e ? Math.round((new Date(e) - new Date(s)) / 86_400_000) : 999;
         };
         return ttsOf(a) - ttsOf(b);
@@ -64,10 +64,10 @@ export default function SoldHistoryScreen({ navigation }) {
 
   const renderItem = ({ item }) => {
     const original = Number(item.price || 0);
-    const sold     = Number(item.soldPrice || item.price || 0);
+    const sold     = Number(item.soldPriceReal || item.soldPrice || item.price || 0);
     const diff     = sold - original;
     const start    = item.firstUploadDate || item.createdAt;
-    const end      = item.soldDate || item.soldAt;
+    const end      = item.soldDateReal || item.soldDate || item.soldAt;
     const tts      = start && end ? Math.max(1, Math.round((new Date(end) - new Date(start)) / 86_400_000)) : null;
 
     return (
@@ -86,7 +86,7 @@ export default function SoldHistoryScreen({ navigation }) {
           <View style={styles.metaRow}>
             <Text style={styles.category}>{item.category || 'Otros'}</Text>
             <Text style={styles.dot}>·</Text>
-            <Text style={styles.date}>{new Date(item.soldDate || item.soldAt || '').toLocaleDateString('es-ES')}</Text>
+            <Text style={styles.date}>{new Date(item.soldDateReal || item.soldDate || item.soldAt || '').toLocaleDateString('es-ES')}</Text>
             {tts !== null && (
               <>
                 <Text style={styles.dot}>·</Text>

@@ -17,22 +17,29 @@ const KEYS = {
 // CAMPOS MANUALES — NUNCA sobreescribir en import
 // ─────────────────────────────────────────────
 /**
+ * ─── LOS 7 CAMPOS SAGRADOS (Sprint 1 v4.2) ──────────────────────────────────
+ * Estos campos son INMUTABLES: ningún proceso de sync/import puede sobreescribirlos.
+ *
  * Lista de campos que el usuario edita a mano y que el JSON de Vinted
  * no puede sobreescribir, aunque el producto cambie de precio, ID, etc.
  *
- * Activos:
- *   - category / subcategory: asignada manualmente (tags del diccionario)
- *   - firstUploadDate:        fecha real de subida (el JSON trae la de extracción)
+ * Activos (4):
+ *   1. firstUploadDate  — fecha real de subida (el JSON trae la de extracción)
+ *   2. category         — asignada manualmente (tags del diccionario)
+ *   3. title            — título curado por el usuario
+ *   4. brand            — marca curada por el usuario
  *
- * Vendidos (campos extra):
- *   - soldPrice:    precio final real de venta
- *   - soldDate:     fecha real de cierre
- *   - isBundle:     si fue vendido en lote
+ * Vendidos (3 adicionales):
+ *   5. soldPriceReal    — precio final real de venta (introducido en modal de venta)
+ *   6. soldDateReal     — fecha real de cierre de venta (introducida en modal de venta)
+ *   7. isBundle         — si fue vendido en lote/pack (inicializa en false)
  *
- * NOTA v2.2: seoTags eliminado — los tags provienen del diccionario category+subcategory
+ * NOTA v2.2:  seoTags eliminado — los tags provienen del diccionario category+subcategory
+ * NOTA v4.2:  soldPrice→soldPriceReal, soldDate→soldDateReal (alineado con modal UI)
+ *             isBundle inicializado en false en todos los productos nuevos
  */
-const MANUAL_FIELDS_ACTIVE = ['category', 'subcategory', 'firstUploadDate'];
-const MANUAL_FIELDS_SOLD   = ['soldPrice', 'soldDate', 'isBundle', 'category', 'subcategory', 'firstUploadDate'];
+const MANUAL_FIELDS_ACTIVE = ['category', 'subcategory', 'firstUploadDate', 'title', 'brand'];
+const MANUAL_FIELDS_SOLD   = ['soldPriceReal', 'soldDateReal', 'isBundle', 'category', 'subcategory', 'firstUploadDate', 'title', 'brand'];
 
 // ─────────────────────────────────────────────
 // DEFAULTS
@@ -113,14 +120,22 @@ export function daysFromNow(isoDate) {
 
 /**
  * Calcula el TTS (Time-to-Sell) de un producto.
- * Usa firstUploadDate > createdAt como fecha de origen.
- * Usa soldDate > soldAt como fecha de venta.
+ *
+ * Sprint 1 v4.2 — Motor recalibrado:
+ *   ORIGEN:   firstUploadDate (fecha real de subida) > createdAt (fallback)
+ *   TÉRMINO:  soldDateReal (fecha real de venta introducida manualmente)
+ *             → Si soldDateReal es null, devuelve null (producto no vendido o sin fecha real)
+ *             → NO usar soldDate/soldAt como fallback: evita TTS basados en fechas automáticas inexactas
+ *
+ * @param {object} product
+ * @returns {number|null} días entre subida y venta real, o null si no aplica
  */
 export function calcTTS(product) {
+  // Solo calcular TTS si hay fecha real de venta introducida manualmente
+  if (!product.soldDateReal) return null;
   const start = product.firstUploadDate || product.createdAt;
-  const end   = product.soldDate       || product.soldAt;
-  if (!start || !end) return null;
-  return daysBetween(start, end);
+  if (!start) return null;
+  return daysBetween(start, product.soldDateReal);
 }
 
 /**
@@ -454,12 +469,12 @@ export class DatabaseService {
       const idx = all.findIndex(p => String(p.id) === String(productId));
       if (idx === -1) return false;
       all[idx].status    = 'sold';
-      all[idx].soldPrice = soldPrice != null ? soldPrice : (all[idx].soldPrice || all[idx].price);
-      all[idx].soldDate  = soldDate  || all[idx].soldDate  || new Date().toISOString();
-      all[idx].soldAt    = all[idx].soldDate;
+      all[idx].soldPriceReal = soldPrice != null ? soldPrice : (all[idx].soldPrice || all[idx].price);
+      all[idx].soldDateReal  = soldDate  || all[idx].soldDate  || new Date().toISOString();
+      all[idx].soldAt    = all[idx].soldDateReal;
       if (isBundle !== undefined) all[idx].isBundle = isBundle;
       this.saveAllProducts(all);
-      LogService.add(`✅ Vendido: ${all[idx].title} por ${all[idx].soldPrice}€`, 'success');
+      LogService.add(`✅ Vendido: ${all[idx].title} por ${all[idx].soldPriceReal}€`, 'success');
       return true;
     } catch {
       return false;
@@ -487,7 +502,7 @@ export class DatabaseService {
    *
    * 1. Si el producto existe (mismo ID):
    *    — Actualiza campos de Vinted (precio, vistas, favoritos, status, descripción, imágenes)
-   *    — PRESERVA campos manuales según config (category, firstUploadDate, soldPrice, soldDate, isBundle)
+   *    — PRESERVA campos manuales según config (category, title, brand, firstUploadDate, soldPriceReal, soldDateReal, isBundle)
    *    — Si el precio ha cambiado → guarda en priceHistory
    *
    * 2. Si el producto NO existe por ID:
@@ -495,13 +510,12 @@ export class DatabaseService {
    *       — Si la encuentra, vincula con repostOf + conserva historial del original
    *    b) Si no hay coincidencia → producto nuevo
    *       — Detecta categoría automáticamente (si config.autoDetectCategory)
-   *       — Genera SEO tags (si config.autoGenerateSeoTags)
    *
    * 3. Productos que estaban en la BD pero no vienen en el JSON actualizado:
    *    — Se marcan como 'stale' para revisión manual (no se eliminan)
    *
    * Campos NUNCA sobreescritos en activos:   category, subcategory, firstUploadDate
-   * Campos NUNCA sobreescritos en vendidos:  + soldPrice, soldDate, isBundle
+   * Campos NUNCA sobreescritos en vendidos:  + soldPriceReal, soldDateReal, isBundle
    * NOTA v2.2: seoTags eliminado — tags provienen del diccionario (category + subcategory)
    */
   static importFromVinted(newProducts) {
@@ -581,8 +595,8 @@ export class DatabaseService {
             subcategory:     detected.subcategory,
             firstUploadDate: p.createdAt || now,
             isBundle:        false,
-            soldPrice:       p.soldPrice || null,
-            soldDate:        p.soldAt    || null,
+            soldPriceReal:   p.soldPriceReal || p.soldPrice || null,
+            soldDateReal:    p.soldAt    || null,
             priceHistory:    [],
             status:          p.status || 'active',
             lastSync:        now,
@@ -685,7 +699,7 @@ export class DatabaseService {
     sold.forEach(p => {
       const cat    = p.category || 'Otros';
       const tts    = calcTTS(p);
-      const profit = Number(p.soldPrice || p.price) - Number(p.price);
+      const profit = Number(p.soldPriceReal || p.soldPrice || p.price) - Number(p.price);
 
       if (!map[cat]) map[cat] = { count: 0, totalTTS: 0, totalProfit: 0, ttsList: [], subcategories: {} };
       map[cat].count++;
@@ -758,15 +772,15 @@ export class DatabaseService {
     const map  = {};
 
     sold.forEach(p => {
-      const date  = new Date(p.soldDate || p.soldAt || p.createdAt);
+      const date  = new Date(p.soldDateReal || p.soldDate || p.soldAt || p.createdAt);
       const key   = `${date.getFullYear()}-${String(date.getMonth()).padStart(2,'0')}`;
       const label = date.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
-      const profit = Number(p.soldPrice || p.price) - Number(p.price);
+      const profit = Number(p.soldPriceReal || p.soldPrice || p.price) - Number(p.price);
 
       if (!map[key]) map[key] = { key, label, month: date.getMonth(), year: date.getFullYear(), profit: 0, sales: 0, revenue: 0, bundles: 0 };
       map[key].profit  += profit;
       map[key].sales   += 1;
-      map[key].revenue += Number(p.soldPrice || p.price);
+      map[key].revenue += Number(p.soldPriceReal || p.soldPrice || p.price);
       if (p.isBundle) map[key].bundles += 1;
     });
 
@@ -784,15 +798,15 @@ export class DatabaseService {
     const now     = new Date();
     const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const totalRevenue   = sold.reduce((s, p) => s + Number(p.soldPrice || p.price), 0);
-    const totalProfit    = sold.reduce((s, p) => s + (Number(p.soldPrice || p.price) - Number(p.price)), 0);
+    const totalRevenue   = sold.reduce((s, p) => s + Number(p.soldPriceReal || p.soldPrice || p.price), 0);
+    const totalProfit    = sold.reduce((s, p) => s + (Number(p.soldPriceReal || p.soldPrice || p.price) - Number(p.price)), 0);
     const totalViews     = all.reduce((s, p)  => s + Number(p.views     || 0), 0);
     const totalFavorites = all.reduce((s, p)  => s + Number(p.favorites || 0), 0);
 
-    const soldThisMonth    = sold.filter(p => p.soldAt && new Date(p.soldAt) >= firstOfMonth).length;
+    const soldThisMonth    = sold.filter(p => p.soldDateReal && new Date(p.soldDateReal) >= firstOfMonth).length;
     const revenueThisMonth = sold
-      .filter(p => p.soldAt && new Date(p.soldAt) >= firstOfMonth)
-      .reduce((s, p) => s + Number(p.soldPrice || p.price), 0);
+      .filter(p => p.soldDateReal && new Date(p.soldDateReal) >= firstOfMonth)
+      .reduce((s, p) => s + Number(p.soldPriceReal || p.soldPrice || p.price), 0);
 
     const ttsList = sold.map(p => calcTTS(p)).filter(Boolean);
     const avgTTS  = ttsList.length ? Math.round(ttsList.reduce((a, b) => a + b, 0) / ttsList.length) : 0;

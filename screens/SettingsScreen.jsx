@@ -90,7 +90,6 @@ export default function SettingsScreen({ navigation }) {
     preserveSoldDate:     true,
     preserveIsBundle:     true,
     autoDetectCategory:   true,
-    autoGenerateSeoTags:  true,
     // Notificaciones
     notifEnabled:         true,
     notifDays:            '3',    // cada cuántos días revisar
@@ -612,7 +611,6 @@ export default function SettingsScreen({ navigation }) {
 
       {[
         { key: 'autoDetectCategory',  label: 'Detección automática de categoría', desc: 'Usa el diccionario para inferir categoría si no existe' },
-        { key: 'autoGenerateSeoTags', label: 'Generación automática de SEO tags',  desc: 'Crea tags de búsqueda basados en título, marca y categoría' },
       ].map(item => (
         <View key={item.key} style={styles.toggleCard}>
           <View style={{ flex: 1 }}>

@@ -9,20 +9,38 @@ import LogService, { LOG_CTX } from '../services/LogService';
 
 const { width } = Dimensions.get('window');
 
+// ─── AMOLED Palette (Sprint 1 v4.2) ──────────────────────────────────────────
+const AMOLED = {
+  bg:        '#0A0A12',
+  surface:   '#111120',
+  surface2:  '#16162A',
+  border:    '#1E1E2E',
+  primary:   '#FF6B35',
+  success:   '#00D9A3',
+  warning:   '#FFB800',
+  danger:    '#E63946',
+  blue:      '#004E89',
+  textHi:    '#E8E8F0',
+  textMed:   '#888899',
+  textLow:   '#444456',
+  mono:      'monospace',
+};
+
+
 // ─── Paleta ──────────────────────────────────────────────────────────────────
 const C = {
-  bg:      '#F8F9FA',
-  white:   '#FFFFFF',
+  bg:      AMOLED.bg,
+  white:   AMOLED.surface,
   primary: '#FF6B35',
   blue:    '#004E89',
   success: '#00D9A3',
   warning: '#FFB800',
   danger:  '#E63946',
   purple:  '#6C63FF',
-  g900:    '#1A1A2E',
-  g700:    '#666666',
-  g500:    '#999999',
-  g100:    '#F0F0F0',
+  g900:    AMOLED.textHi,
+  g700:    AMOLED.textMed,
+  g500:    AMOLED.textMed,
+  g100:    AMOLED.surface,
 };
 
 const fmt = (iso) => {
@@ -180,8 +198,8 @@ export default function SoldEditDetailView({ route, navigation }) {
 
   const [editForm, setEditForm] = useState({
     ...initialProduct,
-    soldPrice:       initialProduct.soldPrice != null  ? initialProduct.soldPrice : (initialProduct.price || 0),
-    soldDate:        initialProduct.soldDate           || initialProduct.soldAt   || new Date().toISOString(),
+    soldPriceReal:   initialProduct.soldPriceReal ?? initialProduct.soldPrice ?? (initialProduct.price || 0),
+    soldDateReal:    initialProduct.soldDateReal        || initialProduct.soldDate || initialProduct.soldAt || new Date().toISOString(),
     isBundle:        initialProduct.isBundle           || false,
     category:        initialProduct.category           || 'Otros',
     subcategory:     initialProduct.subcategory        || null,
@@ -205,7 +223,7 @@ export default function SoldEditDetailView({ route, navigation }) {
 
   // Beneficio calculado
   const profit = useMemo(() => {
-    const sold   = Number(editForm.soldPrice) || 0;
+    const sold   = Number(editForm.soldPriceReal) || 0;
     const listed = Number(editForm.price)     || 0;
     return (sold - listed).toFixed(2);
   }, [editForm.soldPrice, editForm.price]);
@@ -214,7 +232,7 @@ export default function SoldEditDetailView({ route, navigation }) {
     const span = LogService.span(`Guardar vendido ${editForm.id}`, LOG_CTX.UI);
 
     // Validaciones
-    if (!editForm.soldDate) {
+    if (!editForm.soldDateReal) {
       Alert.alert('Campo requerido', 'Indica la fecha real de venta.');
       return;
     }
@@ -222,7 +240,7 @@ export default function SoldEditDetailView({ route, navigation }) {
     const ok = DatabaseService.updateProduct({
       ...editForm,
       // Asegurar tipos correctos
-      soldPrice:       Number(editForm.soldPrice),
+      soldPriceReal:   Number(editForm.soldPriceReal),
       price:           Number(editForm.price),
       isBundle:        Boolean(editForm.isBundle),
       // Nunca vaciar firstUploadDate
@@ -230,9 +248,9 @@ export default function SoldEditDetailView({ route, navigation }) {
     });
 
     if (ok) {
-      span.end({ soldPrice: editForm.soldPrice, category: editForm.category });
+      span.end({ soldPriceReal: editForm.soldPriceReal, category: editForm.category });
       LogService.success(
-        `Venta guardada: "${editForm.title}" — ${editForm.soldPrice}€ (beneficio: ${profit}€)`,
+        `Venta guardada: "${editForm.title}" — ${editForm.soldPriceReal}€ (beneficio: ${profit}€)`,
         LOG_CTX.UI,
         { id: editForm.id, category: editForm.category, subcategory: editForm.subcategory, isBundle: editForm.isBundle }
       );
@@ -244,9 +262,9 @@ export default function SoldEditDetailView({ route, navigation }) {
   };
 
   const tts = useMemo(() => {
-    if (!editForm.firstUploadDate || !editForm.soldDate) return null;
+    if (!editForm.firstUploadDate || !editForm.soldDateReal) return null;
     return Math.max(1, Math.round(
-      (new Date(editForm.soldDate) - new Date(editForm.firstUploadDate)) / 86_400_000
+      (new Date(editForm.soldDateReal) - new Date(editForm.firstUploadDate)) / 86_400_000
     ));
   }, [editForm.firstUploadDate, editForm.soldDate]);
 
@@ -262,8 +280,8 @@ export default function SoldEditDetailView({ route, navigation }) {
       <CalendarModal
         visible={showCalSold}
         onClose={() => setShowCalSold(false)}
-        value={editForm.soldDate}
-        onChange={iso => setEditForm(f => ({ ...f, soldDate: iso }))}
+        value={editForm.soldDateReal}
+        onChange={iso => setEditForm(f => ({ ...f, soldDateReal: iso }))}
         label="FECHA REAL DE VENTA"
       />
       <CalendarModal
@@ -333,8 +351,8 @@ export default function SoldEditDetailView({ route, navigation }) {
               <TextInput
                 style={styles.priceInput}
                 keyboardType="numeric"
-                value={String(editForm.soldPrice)}
-                onChangeText={v => setEditForm(f => ({ ...f, soldPrice: v }))}
+                value={String(editForm.soldPriceReal)}
+                onChangeText={v => setEditForm(f => ({ ...f, soldPriceReal: v }))}
               />
               <Icon name="edit-2" size={16} color={C.success} />
             </View>
@@ -343,7 +361,7 @@ export default function SoldEditDetailView({ route, navigation }) {
             <Text style={styles.fieldLabel}>FECHA REAL DE VENTA</Text>
             <TouchableOpacity style={styles.dateBtn} onPress={() => setShowCalSold(true)}>
               <Icon name="calendar" size={16} color={C.success} />
-              <Text style={styles.dateBtnTxt}>{fmt(editForm.soldDate)}</Text>
+              <Text style={styles.dateBtnTxt}>{fmt(editForm.soldDateReal)}</Text>
             </TouchableOpacity>
 
             {/* Categoría + Subcategoría */}

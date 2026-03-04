@@ -9,19 +9,37 @@ import LogService, { LOG_CTX } from '../services/LogService';
 
 const { width } = Dimensions.get('window');
 
+// ─── AMOLED Palette (Sprint 1 v4.2) ──────────────────────────────────────────
+const AMOLED = {
+  bg:        '#0A0A12',
+  surface:   '#111120',
+  surface2:  '#16162A',
+  border:    '#1E1E2E',
+  primary:   '#FF6B35',
+  success:   '#00D9A3',
+  warning:   '#FFB800',
+  danger:    '#E63946',
+  blue:      '#004E89',
+  textHi:    '#E8E8F0',
+  textMed:   '#888899',
+  textLow:   '#444456',
+  mono:      'monospace',
+};
+
+
 // ─── Paleta ──────────────────────────────────────────────────────────────────
 const C = {
-  bg:      '#F8F9FA',
-  white:   '#FFFFFF',
+  bg:      AMOLED.bg,
+  white:   AMOLED.surface,
   primary: '#FF6B35',
   blue:    '#004E89',
   success: '#00D9A3',
   warning: '#FFB800',
   danger:  '#E63946',
-  g900:    '#1A1A2E',
-  g700:    '#666666',
-  g500:    '#999999',
-  g100:    '#F0F0F0',
+  g900:    AMOLED.textHi,
+  g700:    AMOLED.textMed,
+  g500:    AMOLED.textMed,
+  g100:    AMOLED.surface,
 };
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -200,6 +218,9 @@ export default function ProductDetailScreen({ route, navigation }) {
   const [isEditing, setIsEditing] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showCatModal, setShowCatModal] = useState(false);
+  // Sprint 1 v4.2: Modal de venta con soldPriceReal
+  const [showSoldModal, setShowSoldModal] = useState(false);
+  const [soldPriceInput, setSoldPriceInput] = useState('');
 
   const [editForm, setEditForm] = useState(() => ({
     ...initialProduct,
@@ -286,6 +307,25 @@ export default function ProductDetailScreen({ route, navigation }) {
         }
       }},
     ]);
+  };
+
+
+  // ── Marcar como Vendido (Sprint 1 v4.2) ─────────────────────────────────
+  const handleMarkAsSold = () => {
+    const price = parseFloat(soldPriceInput);
+    if (!soldPriceInput || isNaN(price) || price <= 0) {
+      Alert.alert('Precio requerido', 'Introduce el precio real de venta para continuar.');
+      return;
+    }
+    const soldDateReal = new Date().toISOString();
+    const ok = DatabaseService.markAsSold(product.id, price, soldDateReal, false);
+    if (ok) {
+      const updated = { ...product, status: 'sold', soldPriceReal: price, soldDateReal };
+      setProduct(updated);
+      setShowSoldModal(false);
+      setSoldPriceInput('');
+      LogService.success(`Vendido: "${product.title}" por ${price}€`, LOG_CTX.UI, { id: product.id, soldPriceReal: price });
+    }
   };
 
   const handleDelete = () => {
@@ -414,6 +454,12 @@ export default function ProductDetailScreen({ route, navigation }) {
           <Icon name="refresh-cw" size={17} color={C.blue} />
           <Text style={[styles.actionBtnTxt, { color: C.blue }]}>Resubido</Text>
         </TouchableOpacity>
+        {product.status !== 'sold' && (
+          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: AMOLED.success + '20', borderWidth: 1, borderColor: AMOLED.success + '44' }]} onPress={() => { setSoldPriceInput(''); setShowSoldModal(true); }}>
+            <Icon name="check-circle" size={17} color={AMOLED.success} />
+            <Text style={[styles.actionBtnTxt, { color: AMOLED.success }]}>Vendido</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity style={[styles.actionBtn, { backgroundColor: C.danger + '15' }]} onPress={handleDelete}>
           <Icon name="trash-2" size={17} color={C.danger} />
           <Text style={[styles.actionBtnTxt, { color: C.danger }]}>Borrar</Text>
@@ -510,6 +556,73 @@ export default function ProductDetailScreen({ route, navigation }) {
   return (
     <View style={styles.container}>
       {/* Modales */}
+
+      {/* ── Modal Marcar Vendido (Sprint 1 v4.2) ─── */}
+      <Modal visible={showSoldModal} transparent animationType="slide" onRequestClose={() => setShowSoldModal(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowSoldModal(false)}>
+          <View style={[styles.modalSheet, { backgroundColor: AMOLED.surface2, borderTopColor: AMOLED.success + '44', borderTopWidth: 2 }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: AMOLED.textHi }]}>💚 Marcar como Vendido</Text>
+              <TouchableOpacity onPress={() => setShowSoldModal(false)}>
+                <Icon name="x" size={20} color={AMOLED.textMed} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Product mini info */}
+            <View style={{ backgroundColor: AMOLED.surface, borderRadius: 14, padding: 12, marginBottom: 16 }}>
+              <Text style={{ color: AMOLED.textMed, fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 4 }}>PRODUCTO</Text>
+              <Text style={{ color: AMOLED.textHi, fontSize: 13, fontWeight: '700' }} numberOfLines={1}>{product.title}</Text>
+              <Text style={{ color: AMOLED.primary, fontSize: 12, fontFamily: AMOLED.mono, marginTop: 2 }}>
+                Precio publicado: {product.price}€
+              </Text>
+            </View>
+
+            {/* soldPriceReal input */}
+            <Text style={{ color: AMOLED.textMed, fontSize: 11, fontWeight: '700', letterSpacing: 0.5, marginBottom: 6 }}>
+              PRECIO REAL DE VENTA (€) *
+            </Text>
+            <TextInput
+              value={soldPriceInput}
+              onChangeText={setSoldPriceInput}
+              placeholder={String(product.price)}
+              placeholderTextColor={AMOLED.textLow}
+              keyboardType="decimal-pad"
+              style={{
+                backgroundColor: AMOLED.bg,
+                borderWidth: 2,
+                borderColor: soldPriceInput ? AMOLED.success : AMOLED.border,
+                borderRadius: 14,
+                padding: 14,
+                fontSize: 24,
+                fontWeight: '900',
+                fontFamily: AMOLED.mono,
+                color: AMOLED.textHi,
+                marginBottom: 6,
+                textAlign: 'center',
+              }}
+            />
+            <Text style={{ color: AMOLED.textLow, fontSize: 10, marginBottom: 20, textAlign: 'center' }}>
+              Este valor se guardará como soldPriceReal y no será sobreescrito en futuras importaciones.
+            </Text>
+
+            {/* Confirm button */}
+            <TouchableOpacity
+              onPress={handleMarkAsSold}
+              style={{
+                backgroundColor: AMOLED.success,
+                borderRadius: 16,
+                padding: 16,
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ color: '#000', fontSize: 15, fontWeight: '900', letterSpacing: 0.5 }}>
+                ✓ Confirmar Venta
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       <CategoryModal
         visible={showCatModal}
         onClose={() => setShowCatModal(false)}
