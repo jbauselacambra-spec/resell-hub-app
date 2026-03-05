@@ -14,7 +14,7 @@ export default function AdvancedStatsScreen({ navigation }) {
   const [monthHistory, setMonthHistory] = useState([]);
   const [alerts,       setAlerts]       = useState([]);
   const [kpis,         setKpis]         = useState(null);
-  const [config,       setConfig]       = useState(null);
+  const [config,       setConfig]       = useState(() => DatabaseService.getConfig()); // init síncrono
   const [activeTab,    setActiveTab]    = useState('tts');     // 'tts' | 'monthly' | 'alerts'
   const [selectedCat,  setSelectedCat]  = useState(null);
   const [expandedSub,  setExpandedSub]  = useState(null);     // 'CatName|SubName'
@@ -34,7 +34,7 @@ export default function AdvancedStatsScreen({ navigation }) {
     return unsub;
   }, [navigation]);
 
-  if (!kpis || !config) return null;
+  if (!kpis) return null; // config nunca es null (init síncrono)
 
   // Thresholds from config (dynamic)
   const ttsLightning  = parseInt(config.ttsLightning  || 7);

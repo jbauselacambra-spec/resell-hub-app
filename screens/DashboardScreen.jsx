@@ -33,7 +33,7 @@ export default function DashboardScreen({ navigation }) {
   const [kpis, setKpis]       = useState(null);
   const [insights, setInsights] = useState([]);
   const [alerts, setAlerts]   = useState([]);
-  const [config, setConfig]   = useState(null);
+  const [config, setConfig]   = useState(() => DatabaseService.getConfig()); // init síncrono
   const [refreshing, setRefreshing] = useState(false);
   const fadeAnim = useState(new Animated.Value(0))[0];
 
@@ -64,7 +64,7 @@ export default function DashboardScreen({ navigation }) {
     return unsub;
   }, [navigation]);
 
-  if (!kpis || !config) return null;
+  if (!kpis) return null; // config nunca es null (init síncrono)
 
   // Seasonal banner — dinámico desde config.seasonalMap
   const seasonalCats = Array.isArray(config.seasonalMap?.[currentMonth])

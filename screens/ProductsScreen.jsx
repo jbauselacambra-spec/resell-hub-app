@@ -17,13 +17,13 @@ export default function ProductsScreen({ navigation }) {
   const [products, setProducts]     = useState([]);
   const [filter,   setFilter]       = useState('all');
   const [filterCat, setFilterCat]   = useState(null);
-  const [config,   setConfig]       = useState(null);
+  const [config,   setConfig]       = useState(() => DatabaseService.getConfig());  // init síncrono
 
   const loadData = () => {
     // Fuente única: getActiveProductsWithDiagnostic ya aplica la config
     const enriched = DatabaseService.getActiveProductsWithDiagnostic();
     setProducts(enriched);
-    setConfig(DatabaseService.getConfig());
+    setConfig(DatabaseService.getConfig());  // refresh en foco
   };
 
   useEffect(() => {

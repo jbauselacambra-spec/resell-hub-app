@@ -449,3 +449,335 @@ Ver `DESIGN_SYSTEM.md` para la documentación visual completa.
 
 **SYSTEM_DESIGN.md — ResellHub Sprint 1 v4.2**
 *Generado por [LIBRARIAN] · Marzo 2026*
+
+---
+
+## 📋 Sprint 2 — Categorías y Subcategorías en Toda la App
+
+> **Sprint 2 · Categorías Globales**
+> Rama: `feature/sprint2-categorias-globales`
+> Fecha: Marzo 2026
+
+### Objetivo
+
+Extender el uso de `category` + `subcategory` y de todas las variables configuradas en Settings a **cada pantalla, cálculo y lógica de negocio** de la app.
+
+---
+
+### [ARCHITECT] — DatabaseService.js
+
+#### ✅ `getMonthlyHistory()` — Desglose por Categoría y Subcategoría
+
+Añadido `categoryBreakdown` por mes: acumula profit, ventas e ingresos por categoría y por subcategoría. Cada mes expone también `topCategory[]` con la categoría más rentable del mes y su `topSub`.
+
+```js
+// Antes: solo { profit, sales, revenue, bundles }
+// Ahora: también incluye
+categoryBreakdown: {
+  'Zapatillas': {
+    profit: 45.50, sales: 3, revenue: 90.00,
+    subcategories: { 'Running': { profit: 30, sales: 2 } }
+  }
+},
+topCategory: [
+  { name: 'Zapatillas', profit: 45.50, sales: 3, topSub: { name: 'Running', profit: 30 } }
+]
+```
+
+#### ✅ `getBusinessKPIs()` — Campo `topSubcategory`
+
+Nuevo campo en el retorno: la subcategoría más rápida (menor `avgTTS`) de todo el catálogo de ventas.
+
+```js
+topSubcategory: {
+  name: 'Running',
+  parentCategory: 'Zapatillas',
+  avgTTS: 4,
+  count: 2,
+}
+```
+
+#### ✅ `getSmartAlerts()` — Umbrales de Settings + Subcategoría
+
+- Alerta **estancamiento**: ahora usa el TTS de la **subcategoría** del producto (si existe), si no el de la categoría. Mensaje incluye `Categoría › Subcategoría`.
+- Alerta **estacional**: incluye precio de subida sugerido (`config.priceBoostPct`) en el mensaje.
+- Alerta **oportunidad**: umbrales `opportunityFavs` y `opportunityDays` desde Settings.
+- Alerta **crítico**: mensaje enriquecido con categoría y subcategoría.
+- Todos los alerts exponen `{ category, subcategory }` para la UI.
+
+#### ✅ `getSmartInsights()` — Subcategorías en Estrella y Ancla
+
+- **Estrella**: busca la subcategoría relámpago dentro de la categoría estrella. Mensaje incluye `priceBoostPct` de Settings.
+- **Ancla**: expone la subcategoría más lenta. Mensaje incluye `priceCutPct` de Settings.
+
+#### ✅ `DEFAULT_CONFIG` — 7 Nuevos Parámetros
+
+| Clave | Default | Descripción |
+|-------|---------|-------------|
+| `hotViews` | `50` | Vistas mínimas para marcar producto como HOT |
+| `hotFavs` | `10` | Favoritos mínimos para HOT |
+| `hotDays` | `30` | Días máximos para HOT |
+| `daysAlmostReady` | `30` | Días publicado para "Casi Listo" |
+| `favsAlmostReady` | `8` | Favoritos mínimos para "Casi Listo" |
+| `opportunityFavs` | `8` | Favoritos para alerta oportunidad |
+| `opportunityDays` | `20` | Días mínimos para alerta oportunidad |
+
+#### ✅ `getProductSeverity()` — "Casi Listo" desde Config
+
+```js
+// Antes (hardcoded)
+if (daysOld >= 30 && favorites > 8)
+
+// Ahora (dinámico)
+const limitAlmostReady = parseInt(cfg.daysAlmostReady || 30);
+const favsAlmostReady  = parseInt(cfg.favsAlmostReady  || 8);
+if (daysOld >= limitAlmostReady && favorites > favsAlmostReady)
+```
+
+#### ✅ `getActiveProductsWithDiagnostic()` — isHot desde Config
+
+```js
+// Antes
+isHot: (views > 50 || favorites > 10) && daysOld < 30
+
+// Ahora
+const hotViews = parseInt(config.hotViews || 50);
+const hotFavs  = parseInt(config.hotFavs  || 10);
+const hotDays  = parseInt(config.hotDays   || 30);
+isHot: (views > hotViews || favorites > hotFavs) && daysOld < hotDays
+```
+
+#### ✅ `catAvgTTS` fallback — usa `config.ttsAnchor`
+
+```js
+// Antes
+const catAvgTTS = catTTSMap[cat] || 30; // hardcoded
+
+// Ahora
+const ttsAnchorVal = parseInt(config.ttsAnchor || 30);
+const catAvgTTS    = catTTSMap[cat] || ttsAnchorVal;
+```
+
+---
+
+### [UI_SPECIALIST] — Pantallas actualizadas
+
+#### ✅ DashboardScreen
+- Banner estacional lee `config.seasonalMap` en tiempo real (sin objeto estático).
+- Panel RELÁMPAGO/ANCLA muestra la mejor/peor subcategoría de cada categoría.
+- Nueva fila **TOP SUBCATEGORÍA** con `kpis.topSubcategory`.
+- Init síncrono: `useState(() => DatabaseService.getConfig())`.
+
+#### ✅ ProductsScreen
+- Tarjeta muestra `Categoría › Subcategoría · Marca` bajo el título.
+- Chips de filtro rápido por categoría sobre el inventario.
+- Banner estacional lee `config.seasonalMap` dinámico.
+- `SEASONAL_ADVICE` estático **eliminado**.
+- Init síncrono: `useState(() => DatabaseService.getConfig())`.
+
+#### ✅ SoldHistoryScreen *(fix crítico Sprint 3)*
+- Tarjeta muestra `Categoría › Subcategoría` en metaRow.
+- Chips de filtro por categoría sobre la lista.
+- Colores TTS del chip y del KPI usan `ttsLightning`/`ttsAnchor` de config.
+- Init síncrono: `useState(() => DatabaseService.getConfig())`.
+- Guard: `if (!config) return null` como salvaguarda adicional.
+- Leyenda TTS dinámica: `⚡≤Xd · 🟡X-Xd · ⚓>Xd (según Settings)`.
+
+#### ✅ AdvancedStatsScreen
+- Tab "Velocidad": subtítulo usa `ttsLightning`, `ttsAnchor`, `priceBoostPct`, `priceCutPct` de config.
+- Recomendaciones de estrategia usan umbrales dinámicos de config.
+- Barra de progreso TTS usa `ttsAnchor` como referencia.
+- Subcategorías expandibles en cada categoría con su propio TTS, beneficio y tags.
+- Tab "Por Mes": muestra top categoría + top subcategoría del mes.
+- KPI chip "⚡ TOP SUB" con la subcategoría más rápida del catálogo.
+- Init síncrono: `useState(() => DatabaseService.getConfig())`.
+
+#### ✅ SoldEditDetailView
+- Colores e iconos del panel TTS usan `ttsLightning`/`ttsAnchor` de config.
+- `getConfig()` síncrono al inicio del componente.
+- Fix: dep de `useMemo` era `editForm.soldDate` → corregido a `editForm.soldDateReal`.
+
+#### ✅ ProductDetailScreen
+- `statusInfo.isHot` usa `hotViews`, `hotFavs`, `hotDays` de config.
+- `getConfig()` síncrono dentro del `useMemo` de `statusInfo`.
+
+---
+
+### [QA_ENGINEER] — Purgas y Verificaciones
+
+#### ✅ Objetos estáticos eliminados
+
+| Objeto | Pantalla | Reemplazado por |
+|--------|----------|----------------|
+| `SEASONAL_ADVICE` | ProductsScreen | `config.seasonalMap` dinámico |
+| `MONTH_SEASONAL_TIPS` | DashboardScreen | `config.seasonalMap` dinámico |
+
+#### ✅ Valores hardcoded eliminados
+
+Todos los umbrales numéricos que existían hardcodeados en lógica de negocio han sido reemplazados por sus equivalentes en `config`:
+
+| Antes | Después |
+|-------|---------|
+| `favorites > 8` | `config.favsAlmostReady` |
+| `views > 50` | `config.hotViews` |
+| `favorites > 10` | `config.hotFavs` |
+| `daysOld < 30` (HOT) | `config.hotDays` |
+| `favorites > 8 && daysOld > 20` (alert) | `config.opportunityFavs` + `config.opportunityDays` |
+| `catAvgTTS \|\| 30` (fallback) | `config.ttsAnchor` |
+| `tts <= 7` (color) | `config.ttsLightning` |
+| `tts <= 30` (color) | `config.ttsAnchor` |
+| `avgTTS <= 7 / <= 30` (KPI color) | `config.ttsLightning` / `config.ttsAnchor` |
+| `catAvg * 30 → estrategia en UI` | `config.ttsAnchor` |
+
+---
+
+### [DATA_SCIENTIST] — SettingsScreen
+
+#### ✅ Nuevos controles en pestaña "Umbrales"
+
+Tres nuevos `SettingCard` con sus `NumInput`:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ ⚡ Producto HOT                                         │
+│   Vistas mínimas [50] · Favs mínimos [10] · Días [30] │
+├─────────────────────────────────────────────────────────┤
+│ 💚 Casi Listo                                           │
+│   Días publicado [30] · Favs mínimos [8]               │
+├─────────────────────────────────────────────────────────┤
+│ 🔔 Alerta Oportunidad                                   │
+│   Favs para alerta [8] · Días mínimos [20]             │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### ✅ Componente `CfgSection` definido
+
+Componente auxiliar para cabeceras de subsección dentro de un `SettingCard`:
+
+```jsx
+const CfgSection = ({ title, sub, icon, iconColor }) => (
+  <View style={{ flexDirection: 'row', ... }}>
+    <Icon name={icon} color={iconColor} />
+    <View>
+      <Text>{title}</Text>
+      <Text>{sub}</Text>
+    </View>
+  </View>
+);
+```
+
+---
+
+### [LIBRARIAN] — Patrón Canónico de Config
+
+> **REGLA DE ORO**: Toda pantalla que use variables de Settings **debe** seguir
+> uno de estos dos patrones. Nunca usar `useState(null)` para config sin init síncrono.
+
+#### Patrón A — Estado con init síncrono (pantallas con reload en foco)
+
+```js
+// ✅ CORRECTO
+const [config, setConfig] = useState(() => DatabaseService.getConfig());
+
+const loadData = () => {
+  setConfig(DatabaseService.getConfig()); // refresh en foco
+  // ... otros datos
+};
+```
+
+*Úsalo en: DashboardScreen, ProductsScreen, SoldHistoryScreen, AdvancedStatsScreen*
+
+#### Patrón B — Lectura síncrona directa (componentes de edición)
+
+```js
+// ✅ CORRECTO
+export default function MyScreen() {
+  const cfg = DatabaseService.getConfig();
+  const ttsLightning = parseInt(cfg?.ttsLightning || 7);
+  const ttsAnchor    = parseInt(cfg?.ttsAnchor    || 30);
+  // ... usar directamente
+}
+```
+
+*Úsalo en: SoldEditDetailView, y dentro de `useMemo`/callbacks en ProductDetailScreen*
+
+#### ❌ Antipatrón (NUNCA hacer)
+
+```js
+// ❌ INCORRECTO — config es null hasta que carga el useEffect
+const [config, setConfig] = useState(null);
+// ...
+// ttsLightning accedido ANTES del guard → ReferenceError
+<Text>{tts <= ttsLightning ? '⚡' : '🟡'}</Text>
+```
+
+---
+
+### Archivos Modificados en Sprint 2 + Sprint 3
+
+| Archivo | Sprint | Tipo de cambio |
+|---------|--------|----------------|
+| `services/DatabaseService.js` | S2 | getMonthlyHistory, getSmartAlerts, getSmartInsights, getBusinessKPIs, DEFAULT_CONFIG, getProductSeverity, getActiveProductsWithDiagnostic, calcTTS |
+| `screens/DashboardScreen.jsx` | S2+S3 | seasonalMap dinámico, topSubcategory, subcategorías en bestCat/worstCat, init síncrono |
+| `screens/ProductsScreen.jsx` | S2+S3 | category+sub en tarjeta, filtro por cat, seasonalMap dinámico, init síncrono |
+| `screens/SoldHistoryScreen.jsx` | S2+S3 | subcategoría en tarjeta, filtro por cat, ttsLightning/ttsAnchor dinámicos, init síncrono, **fix ReferenceError** |
+| `screens/AdvancedStatsScreen.jsx` | S2+S3 | umbrales dinámicos, subcategorías expandibles, monthly topCat, topSubcategory KPI, init síncrono |
+| `screens/SoldEditDetailView.jsx` | S2+S3 | ttsLightning/ttsAnchor dinámicos, fix dep useMemo |
+| `screens/ProductDetailScreen.jsx` | S2+S3 | isHot dinámico (hotViews/hotFavs/hotDays) |
+| `screens/SettingsScreen.jsx` | S2 | CfgSection, 3 nuevos SettingCard, 7 nuevos config keys |
+
+---
+
+### Git Workflow — Sprint 2 + Sprint 3
+
+```bash
+git checkout main
+git checkout -b feature/sprint2-categorias-globales
+
+git add services/DatabaseService.js
+git add screens/DashboardScreen.jsx
+git add screens/ProductsScreen.jsx
+git add screens/SoldHistoryScreen.jsx
+git add screens/AdvancedStatsScreen.jsx
+git add screens/SoldEditDetailView.jsx
+git add screens/ProductDetailScreen.jsx
+git add screens/SettingsScreen.jsx
+git add SYSTEM_DESIGN.md
+
+git commit -m "feat(sprint2+3): categorías/subcategorías globales + config canónico
+
+[ARCHITECT]
+- getMonthlyHistory: categoryBreakdown + topCategory por mes
+- getBusinessKPIs: nuevo topSubcategory
+- getSmartAlerts: usa subcategoría en TTS efectivo, enriquece mensajes
+- getSmartInsights: subcategoría estrella y ancla con umbrales dinámicos
+- getProductSeverity: daysAlmostReady + favsAlmostReady desde config
+- getActiveProductsWithDiagnostic: hotViews/hotFavs/hotDays desde config
+- DEFAULT_CONFIG: 7 nuevos parámetros
+- catAvgTTS fallback usa config.ttsAnchor
+
+[UI_SPECIALIST]
+- DashboardScreen: seasonalMap dinámico, topSubcategory, subcats en bestCat
+- ProductsScreen: cat+sub en tarjeta, filtro cat, seasonalMap dinámico
+- SoldHistoryScreen: subcategoría en tarjeta, filtro cat, TTS dinámico
+- AdvancedStatsScreen: umbrales dinámicos, subcats expandibles, monthly topCat
+- SoldEditDetailView: TTS color dinámico, fix dep useMemo soldDateReal
+- ProductDetailScreen: isHot con hotViews/hotFavs/hotDays desde config
+
+[QA_ENGINEER]
+- Purga SEASONAL_ADVICE + MONTH_SEASONAL_TIPS estáticos
+- Todos los hardcoded thresholds reemplazados por config.*
+- FIX: ReferenceError ttsLightning en SoldHistoryScreen
+- Patrón canónico: useState(() => DatabaseService.getConfig())
+
+[DATA_SCIENTIST]
+- SettingsScreen: 3 nuevos SettingCard (HOT, Casi Listo, Oportunidad)
+- CfgSection: componente definido y usado correctamente
+
+[LIBRARIAN]
+- SYSTEM_DESIGN.md: Sprint 2 + Sprint 3 documentados
+- Patrón canónico de config con ejemplos y antipatrón"
+
+git checkout main
+git merge --no-ff feature/sprint2-categorias-globales -m "merge: Sprint 2+3 categorías globales"
+```

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, Image,
-  StyleSheet, Dimensions,
+  StyleSheet, Dimensions, ScrollView,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { DatabaseService } from '../services/DatabaseService';
@@ -10,13 +10,13 @@ const { width } = Dimensions.get('window');
 
 export default function SoldHistoryScreen({ navigation }) {
   const [soldProducts, setSoldProducts] = useState([]);
-  const [filterType,   setFilterType]   = useState('date'); // 'date' | 'profit' | 'tts' | 'category'
-  const [filterCat,    setFilterCat]    = useState(null);  // null = todas
-  const [config,       setConfig]       = useState(null);
+  const [filterType,   setFilterType]   = useState('date'); // 'date' | 'profit' | 'tts'
+  const [filterCat,    setFilterCat]    = useState(null);   // null = todas
+  const [config,       setConfig]       = useState(() => DatabaseService.getConfig()); // init síncrono — nunca null
 
   const loadData = () => {
-    const all    = DatabaseService.getAllProducts();
-    const sold   = all.filter(p => p && p.status === 'sold');
+    const all  = DatabaseService.getAllProducts();
+    const sold = all.filter(p => p && p.status === 'sold');
     setSoldProducts(sold);
     setConfig(DatabaseService.getConfig());
   };
@@ -27,8 +27,15 @@ export default function SoldHistoryScreen({ navigation }) {
     return unsub;
   }, [navigation]);
 
+  // Refresh config en foco (puede cambiar desde Settings)
+  if (!config) return null; // salvaguarda (nunca ocurre con init síncrono)
+
+  // Umbrales dinámicos desde Settings — SIEMPRE desde config
+  const ttsLightning = parseInt(config.ttsLightning || 7);
+  const ttsAnchor    = parseInt(config.ttsAnchor    || 30);
+
   // KPIs del historial
-  const kpis = useMemo(() => {
+  const kpis = (() => {
     const revenue = soldProducts.reduce((s, p) => s + Number(p.soldPriceReal || p.soldPrice || p.price || 0), 0);
     const profit  = soldProducts.reduce((s, p) => s + (Number(p.soldPriceReal || p.soldPrice || p.price || 0) - Number(p.price || 0)), 0);
     const ttsList = soldProducts.map(p => {
@@ -39,11 +46,11 @@ export default function SoldHistoryScreen({ navigation }) {
     }).filter(Boolean);
     const avgTTS = ttsList.length ? Math.round(ttsList.reduce((a, b) => a + b, 0) / ttsList.length) : 0;
     return { revenue, profit, avgTTS, count: soldProducts.length };
-  }, [soldProducts]);
+  })();
 
-  // Sorted list
-  const sorted = useMemo(() => {
-    const arr = [...soldProducts];
+  // Lista ordenada + filtrada
+  const sorted = (() => {
+    let arr = [...soldProducts];
     if (filterType === 'date') {
       arr.sort((a, b) => new Date(b.soldDateReal || b.soldDate || b.soldAt || 0) - new Date(a.soldDateReal || a.soldDate || a.soldAt || 0));
     } else if (filterType === 'profit') {
@@ -64,7 +71,10 @@ export default function SoldHistoryScreen({ navigation }) {
     }
     if (filterCat) arr = arr.filter(p => p.category === filterCat);
     return arr;
-  }, [soldProducts, filterType, filterCat]);
+  })();
+
+  // Categorías únicas para el filtro rápido
+  const allCats = [...new Set(soldProducts.map(p => p.category || 'Otros'))];
 
   const renderItem = ({ item }) => {
     const original = Number(item.price || 0);
@@ -73,6 +83,13 @@ export default function SoldHistoryScreen({ navigation }) {
     const start    = item.firstUploadDate || item.createdAt;
     const end      = item.soldDateReal || item.soldDate || item.soldAt;
     const tts      = start && end ? Math.max(1, Math.round((new Date(end) - new Date(start)) / 86_400_000)) : null;
+
+    // ttsLightning y ttsAnchor ya están disponibles (declarados tras guard)
+    const ttsColor = tts === null ? '#999'
+      : tts <= ttsLightning ? '#00D9A3'
+      : tts <= ttsAnchor    ? '#FFB800'
+      : '#E63946';
+    const ttsEmoji = tts === null ? '' : tts <= ttsLightning ? '⚡' : tts <= ttsAnchor ? '🟡' : '⚓';
 
     return (
       <TouchableOpacity
@@ -96,12 +113,14 @@ export default function SoldHistoryScreen({ navigation }) {
               </>
             ) : null}
             <Text style={styles.dot}>·</Text>
-            <Text style={styles.date}>{new Date(item.soldDateReal || item.soldDate || item.soldAt || '').toLocaleDateString('es-ES')}</Text>
+            <Text style={styles.date}>
+              {new Date(item.soldDateReal || item.soldDate || item.soldAt || '').toLocaleDateString('es-ES')}
+            </Text>
             {tts !== null && (
               <>
                 <Text style={styles.dot}>·</Text>
-                <Text style={[styles.ttsChip, { color: tts <= ttsLightning ? '#00D9A3' : tts <= ttsAnchor ? '#FFB800' : '#E63946' }]}>
-                  {tts <= ttsLightning ? '⚡' : tts <= ttsAnchor ? '🟡' : '⚓'} {tts}d
+                <Text style={[styles.ttsChip, { color: ttsColor }]}>
+                  {ttsEmoji} {tts}d
                 </Text>
               </>
             )}
@@ -134,6 +153,11 @@ export default function SoldHistoryScreen({ navigation }) {
     );
   };
 
+  // KPI avgTTS color usando umbrales dinámicos
+  const avgTtsColor = kpis.avgTTS <= ttsLightning ? '#00D9A3'
+    : kpis.avgTTS <= ttsAnchor ? '#FFB800'
+    : '#E63946';
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -158,38 +182,44 @@ export default function SoldHistoryScreen({ navigation }) {
           </View>
           <View style={styles.kpiDivider} />
           <View style={styles.kpiItem}>
-            <Text style={[styles.kpiVal, { color: kpis.avgTTS <= ttsLightning ? '#00D9A3' : kpis.avgTTS <= ttsAnchor ? '#FFB800' : '#E63946' }]}>
+            <Text style={[styles.kpiVal, { color: avgTtsColor }]}>
               {kpis.avgTTS > 0 ? `${kpis.avgTTS}d` : '—'}
             </Text>
             <Text style={styles.kpiLab}>TTS Medio</Text>
           </View>
         </View>
+
+        {/* Leyenda TTS dinámica */}
+        <Text style={styles.ttsLegend}>
+          ⚡≤{ttsLightning}d · 🟡{ttsLightning+1}–{ttsAnchor}d · ⚓&gt;{ttsAnchor}d (según Settings)
+        </Text>
       </View>
 
       {/* Category quick-filter */}
-      {(() => {
-        const cats = [...new Set(soldProducts.map(p => p.category || 'Otros'))];
-        if (cats.length < 2) return null;
-        return (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, marginBottom: 8 }} contentContainerStyle={{ gap: 6 }}>
+      {allCats.length >= 2 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ paddingHorizontal: 16, marginBottom: 8, maxHeight: 44 }}
+          contentContainerStyle={{ gap: 6, alignItems: 'center' }}
+        >
+          <TouchableOpacity
+            style={[styles.catChip, !filterCat && { backgroundColor: '#FF6B35' }]}
+            onPress={() => setFilterCat(null)}
+          >
+            <Text style={[styles.catChipTxt, !filterCat && { color: '#FFF' }]}>Todas</Text>
+          </TouchableOpacity>
+          {allCats.map(cat => (
             <TouchableOpacity
-              style={[styles.catChip, !filterCat && { backgroundColor: '#FF6B35' }]}
-              onPress={() => setFilterCat(null)}
+              key={cat}
+              style={[styles.catChip, filterCat === cat && { backgroundColor: '#FF6B35' }]}
+              onPress={() => setFilterCat(filterCat === cat ? null : cat)}
             >
-              <Text style={[styles.catChipTxt, !filterCat && { color: '#FFF' }]}>Todas</Text>
+              <Text style={[styles.catChipTxt, filterCat === cat && { color: '#FFF' }]}>{cat}</Text>
             </TouchableOpacity>
-            {cats.map(cat => (
-              <TouchableOpacity
-                key={cat}
-                style={[styles.catChip, filterCat === cat && { backgroundColor: '#FF6B35' }]}
-                onPress={() => setFilterCat(filterCat === cat ? null : cat)}
-              >
-                <Text style={[styles.catChipTxt, filterCat === cat && { color: '#FFF' }]}>{cat}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        );
-      })()}
+          ))}
+        </ScrollView>
+      )}
 
       {/* Filter bar */}
       <View style={styles.filterBar}>
@@ -203,21 +233,23 @@ export default function SoldHistoryScreen({ navigation }) {
             style={[styles.filterBtn, filterType === f.id && styles.filterBtnActive]}
             onPress={() => setFilterType(f.id)}
           >
-            <Text style={[styles.filterText, filterType === f.id && { color: '#FFF' }]}>{f.label}</Text>
+            <Text style={[styles.filterText, filterType === f.id && styles.filterTextActive]}>
+              {f.label}
+            </Text>
           </TouchableOpacity>
         ))}
       </View>
 
       <FlatList
         data={sorted}
-        keyExtractor={item => String(item.id)}
         renderItem={renderItem}
-        contentContainerStyle={{ paddingBottom: 100 }}
-        showsVerticalScrollIndicator={false}
+        keyExtractor={item => String(item.id)}
+        contentContainerStyle={styles.list}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Icon name="shopping-bag" size={40} color="#DDD" />
-            <Text style={styles.emptyText}>Sin ventas registradas todavía.</Text>
+            <Text style={styles.emptyText}>Sin ventas todavía.</Text>
+            <Text style={styles.emptySub}>Marca productos como vendidos para ver tu historial.</Text>
           </View>
         }
       />
@@ -227,54 +259,59 @@ export default function SoldHistoryScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container:   { flex: 1, backgroundColor: '#F8F9FA' },
-  header:      { padding: 25, paddingTop: 60, backgroundColor: '#FFF' },
-  headerTitle: { fontSize: 24, fontWeight: '900', color: '#1A1A2E', marginBottom: 16 },
-
-  kpiPanel: {
-    flexDirection: 'row', backgroundColor: '#F8F9FA',
-    borderRadius: 18, padding: 14, alignItems: 'center',
-    borderWidth: 1, borderColor: '#EEE',
+  header: {
+    paddingHorizontal: 20, paddingTop: 56, paddingBottom: 16,
+    backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F0F0F0',
   },
-  kpiItem:    { flex: 1, alignItems: 'center' },
-  kpiVal:     { fontSize: 16, fontWeight: '900', color: '#1A1A2E' },
-  kpiLab:     { fontSize: 8,  fontWeight: '700', color: '#999', marginTop: 2 },
-  kpiDivider: { width: 1, height: 30, backgroundColor: '#EEE' },
+  headerTitle: { fontSize: 22, fontWeight: '900', color: '#1A1A2E', marginBottom: 14 },
 
-  filterBar: { flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 12, gap: 8 },
-  filterBtn: {
-    flex: 1, paddingVertical: 9, borderRadius: 12,
-    backgroundColor: '#FFF', borderWidth: 1, borderColor: '#EEE', alignItems: 'center',
-  },
-  filterBtnActive: { backgroundColor: '#1A1A2E', borderColor: '#1A1A2E' },
-  filterText:      { fontSize: 10, fontWeight: '800', color: '#666' },
+  kpiPanel:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around' },
+  kpiItem:   { alignItems: 'center' },
+  kpiVal:    { fontSize: 18, fontWeight: '900', color: '#1A1A2E', fontFamily: 'monospace' },
+  kpiLab:    { fontSize: 9, color: '#999', fontWeight: '700', marginTop: 2 },
+  kpiDivider:{ width: 1, height: 28, backgroundColor: '#F0F0F0' },
 
-  card: {
-    flexDirection: 'row', backgroundColor: '#FFF',
-    marginHorizontal: 20, marginBottom: 10,
-    padding: 12, borderRadius: 20, alignItems: 'center', elevation: 2,
+  ttsLegend: { fontSize: 9, color: '#BBB', textAlign: 'center', marginTop: 10, letterSpacing: 0.3 },
+
+  catChip:    { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: '#F0F0F0', borderWidth: 1, borderColor: '#E0E0E0' },
+  catChipTxt: { fontSize: 11, fontWeight: '700', color: '#666' },
+
+  filterBar: {
+    flexDirection: 'row', marginHorizontal: 16, marginVertical: 10,
+    backgroundColor: '#F0F0F0', borderRadius: 14, padding: 3,
   },
-  thumbnail:   { width: 82, height: 82, borderRadius: 16 },
-  cardContent: { flex: 1, marginLeft: 12 },
-  titleRow:    { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  title:       { fontSize: 13, fontWeight: '800', color: '#1A1A2E', flex: 1 },
-  lote:        { backgroundColor: '#F0EFFF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  loteText:    { color: '#6C63FF', fontSize: 8, fontWeight: '900' },
-  metaRow:     { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginTop: 3, gap: 2 },
-  category:    { fontSize: 10, fontWeight: '900', color: '#FF6B35' },
-  dot:         { color: '#DDD', marginHorizontal: 3 },
-  date:        { fontSize: 10, color: '#999' },
-  ttsChip:     { fontSize: 10, fontWeight: '800' },
-  catChip:     { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: '#F0F0F0', borderWidth: 1, borderColor: '#E0E0E0' },
-  catChipTxt:  { fontSize: 11, fontWeight: '700', color: '#666' },
-  priceRow:    { flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 6 },
-  priceLabel:  { fontSize: 7,  fontWeight: '900', color: '#CCC' },
-  priceOriginal: { fontSize: 12, fontWeight: '700', color: '#CCC', textDecorationLine: 'line-through' },
-  priceFinal:  { fontSize: 16, fontWeight: '900', color: '#1A1A2E' },
-  diffBadge:   { marginLeft: 4, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  diffText:    { fontSize: 10, fontWeight: '900' },
-  statsRow:    { flexDirection: 'row', gap: 10, marginTop: 6 },
-  statMini:    { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  statText:    { fontSize: 10, fontWeight: '700', color: '#999' },
-  empty:       { alignItems: 'center', paddingTop: 60 },
-  emptyText:   { color: '#CCC', fontSize: 13, marginTop: 12 },
+  filterBtn:       { flex: 1, paddingVertical: 8, borderRadius: 12, alignItems: 'center' },
+  filterBtnActive: { backgroundColor: '#FFF', elevation: 2 },
+  filterText:      { fontSize: 10, fontWeight: '700', color: '#999' },
+  filterTextActive:{ color: '#1A1A2E', fontWeight: '900' },
+
+  list:  { paddingHorizontal: 16, paddingBottom: 40 },
+  card:  {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: '#FFF', borderRadius: 16, padding: 12,
+    marginBottom: 10, elevation: 1,
+  },
+  thumbnail: { width: 64, height: 64, borderRadius: 12, backgroundColor: '#F0F0F0' },
+  cardContent: { flex: 1 },
+  titleRow:  { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  title:     { fontSize: 13, fontWeight: '800', color: '#1A1A2E', flex: 1 },
+  lote:      { backgroundColor: '#004E8920', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1 },
+  loteText:  { fontSize: 8, fontWeight: '900', color: '#004E89' },
+  metaRow:   { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4, marginBottom: 6 },
+  category:  { fontSize: 10, fontWeight: '900', color: '#FF6B35' },
+  dot:       { fontSize: 10, color: '#CCC' },
+  date:      { fontSize: 10, color: '#999' },
+  ttsChip:   { fontSize: 10, fontWeight: '800', fontFamily: 'monospace' },
+  priceRow:  { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  priceLabel:    { fontSize: 8, color: '#999', fontWeight: '700' },
+  priceOriginal: { fontSize: 13, fontWeight: '700', color: '#999' },
+  priceFinal:    { fontSize: 13, fontWeight: '900', color: '#1A1A2E' },
+  diffBadge:     { borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 'auto' },
+  diffText:      { fontSize: 12, fontWeight: '900', fontFamily: 'monospace' },
+  statsRow:  { flexDirection: 'row', gap: 10 },
+  statMini:  { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  statText:  { fontSize: 10, color: '#999' },
+  empty:     { alignItems: 'center', paddingTop: 60 },
+  emptyText: { fontSize: 15, fontWeight: '700', color: '#CCC', marginTop: 12 },
+  emptySub:  { fontSize: 11, color: '#DDD', marginTop: 6, textAlign: 'center' },
 });
