@@ -781,3 +781,342 @@ git commit -m "feat(sprint2+3): categorías/subcategorías globales + config can
 git checkout main
 git merge --no-ff feature/sprint2-categorias-globales -m "merge: Sprint 2+3 categorías globales"
 ```
+
+---
+
+## 📋 Sprint 4 — Light Theme Global + Rediseño de Pantallas de Detalle
+
+> **Sprint 4 · Design System Unificado**
+> Rama: `feature/sprint4-light-theme-detail-screens`
+> Fecha: Marzo 2026
+
+### Objetivo
+
+Unificar toda la aplicación bajo el **Design System Light canónico** (`DS`), mejorar la UX de las pantallas de detalle de pedidos y de vendidos, e introducir el componente `CalPicker` mejorado en toda la app.
+
+---
+
+### [ARCHITECT] — Design System Light Canónico
+
+#### ✅ DS Object — Paleta Oficial ResellHub
+
+Todas las pantallas deben usar este objeto como única fuente de verdad de colores. Definido y exportado implícitamente como constante local en cada pantalla.
+
+```js
+const DS = {
+  bg:        '#F8F9FA',   // Fondo principal
+  white:     '#FFFFFF',   // Superficie / cards
+  surface2:  '#F0F2F5',   // Superficie secundaria
+  border:    '#EAEDF0',   // Bordes suaves
+  primary:   '#FF6B35',   // Acento naranja (marca)
+  primaryBg: '#FFF2EE',   // Fondo acento
+  success:   '#00D9A3',   // Verde (vendido, TTS rápido)
+  successBg: '#E8FBF6',   // Fondo verde
+  warning:   '#FFB800',   // Amarillo (intermedio)
+  danger:    '#E63946',   // Rojo (TTS lento, pérdidas)
+  blue:      '#004E89',   // Azul (categoría/sistema)
+  blueBg:    '#EAF2FB',   // Fondo azul
+  purple:    '#6C63FF',   // Lote/bundle
+  text:      '#1A1A2E',   // Texto principal
+  textMed:   '#5C6070',   // Texto secundario
+  textLow:   '#A0A5B5',   // Texto terciario/labels
+  mono:      Platform.OS === 'android' ? 'monospace' : 'Courier New',
+};
+```
+
+#### ✅ AMOLED → Light: Pantallas migradas
+
+| Pantalla | Estado anterior | Estado Sprint 4 |
+|----------|----------------|----------------|
+| `DashboardScreen` | AMOLED bg `#0A0A12` + text `#E8E8F0` | Light DS ✅ |
+| `SoldEditDetailView` | AMOLED completo | Light DS ✅ |
+| `LogsScreen` | Dark `#0D0D1A` | Light DS ✅ |
+| `DebugScreen` | Dark `#121212` | Light DS ✅ |
+| `ProductDetailScreen` | Ya Light DS (Sprint anterior) | Sin cambios ✅ |
+| `AdvancedStatsScreen` | Ya Light `#F8F9FA` | Sin cambios ✅ |
+| `ProductsScreen` | Ya Light | Sin cambios ✅ |
+| `SoldHistoryScreen` | Ya Light | Sin cambios ✅ |
+| `SettingsScreen` | Ya Light | Sin cambios ✅ |
+
+#### ✅ App.jsx — Tab Bar con fondo blanco
+
+```js
+// ANTES
+tabBarStyle: {
+  height: Platform.OS === 'android' ? 70 : 85,
+  paddingBottom: Platform.OS === 'android' ? 10 : 25,
+}
+
+// DESPUÉS (Sprint 4)
+tabBarStyle: {
+  height: Platform.OS === 'android' ? 70 : 85,
+  paddingBottom: Platform.OS === 'android' ? 10 : 25,
+  backgroundColor: '#FFFFFF',
+  borderTopColor: '#EAEDF0',
+  borderTopWidth: 1,
+  elevation: 8,
+}
+```
+
+---
+
+### [UI_SPECIALIST] — CalPicker — Componente Canónico de Calendario
+
+#### ✅ CalPicker — versión mejorada unificada
+
+Reemplaza el antiguo `CalendarModal` (grid simple sin cabecera colorida, sin selector de año, sin días de la semana) en ambas pantallas de detalle.
+
+**Mejoras vs versión anterior:**
+
+| Feature | CalendarModal (antes) | CalPicker (Sprint 4) |
+|---------|----------------------|---------------------|
+| Header coloreado | ❌ | ✅ con acento dinámico |
+| Label de sección | ❌ | ✅ (ej: "FECHA REAL DE VENTA") |
+| Año en cabecera | ❌ | ✅ |
+| Fecha seleccionada en header | ❌ | ✅ formateada |
+| Selector de año (chips) | ❌ | ✅ 8 años centrados en hoy |
+| Días de la semana (L-D) | ❌ | ✅ |
+| Celdas con offset correcto | ❌ grid lineal | ✅ firstWeekday calculado |
+| Día de hoy resaltado | ❌ | ✅ borde con acento |
+| Botón "HOY" | ❌ | ✅ con icono |
+| acento dinámico | ❌ siempre verde | ✅ prop `accent` |
+
+```jsx
+// Uso canónico:
+<CalPicker
+  visible={showCal}
+  onClose={() => setShowCal(false)}
+  value={editForm.firstUploadDate}
+  onChange={iso => setEditForm(f => ({...f, firstUploadDate: iso}))}
+  accent={DS.primary}           // naranja para subida
+  label="FECHA DE SUBIDA ORIGINAL"
+/>
+<CalPicker
+  visible={showCalSold}
+  onClose={() => setShowCalSold(false)}
+  value={editForm.soldDateReal}
+  onChange={iso => setEditForm(f => ({...f, soldDateReal: iso}))}
+  accent={DS.success}           // verde para venta
+  label="FECHA REAL DE VENTA"
+/>
+```
+
+---
+
+### [UI_SPECIALIST] — ProductDetailScreen — Pantalla Detalle Activos
+
+**Estado tras Sprint 4:** Ya contenía el diseño correcto del ZIP del usuario.
+
+#### ✅ Modo Visualización (renderView)
+- Hero 320px con imagen, badge de estado dinámico, botón back flotante
+- Card superpuesta con `borderTopRadius: 28`, `marginTop: -28`
+- `topRow`: marca (uppercase naranja) + pill de categoría/subcategoría (azul)
+- `titleRow`: título grande + price pill naranja
+- Bundle badge (solo visible si `isBundle: true`) — solo lectura, no editable
+- `statusBar`: semáforo dinámico (OK/FRÍO/CRÍTICO/HOT) con días
+- 3 stat cards: VISTAS · FAVS · DÍAS
+- Historial de precio (últimas 3 entradas)
+- Date bar: fecha de subida original
+- Tags de categoría
+- Descripción
+- `actionsRow`: botón Editar + botón **VENDIDO** (o badge "Ya vendido")
+
+#### ✅ Modo Edición (renderEdit)
+Solo edita los **campos permanentes** (inmunes al import):
+
+| Campo editable | Tipo | Descripción |
+|---------------|------|-------------|
+| `category` | Selector modal | Categoría del diccionario |
+| `subcategory` | Selector modal (paso 2) | Subcategoría |
+| `firstUploadDate` | CalPicker (acento primary) | Fecha real de primera subida |
+
+**Campos NO editables en este formulario (por diseño):**
+- `price` — solo lectura (se refleja en la vista)
+- `isBundle` — solo lectura (refleja estado, no se edita aquí)
+- `title`, `brand` — permanentes, no expuestos para edición directa
+
+#### ✅ SoldModal — Modal "Marcar como Vendido"
+Sheet modal desde abajo con:
+- Header verde con icono check + título del producto
+- `soldPriceRow`: precio publicado vs beneficio calculado en tiempo real
+- Input de precio real (autoFocus, grande, prominente)
+- Fecha de venta con `CalPicker` (acento `DS.success`)
+- Botón CONFIRMAR desactivado si no hay precio
+
+---
+
+### [UI_SPECIALIST] — SoldEditDetailView — Pantalla Detalle Vendidos
+
+**Rediseñada completamente en Sprint 4:**
+
+#### ✅ Cambios principales
+
+| Antes (AMOLED) | Ahora (Light DS) |
+|---------------|-----------------|
+| Fondo `#0A0A12` negro | Fondo `#F8F9FA` blanco ✅ |
+| `CalendarModal` grid simple | `CalPicker` mejorado (mismo que ProductDetail) ✅ |
+| Botón "VENTA EN LOTE" editable | **Eliminado** — solo lectura en vista ✅ |
+| Campo "PRECIO DE PUBLICACIÓN" editable | **Eliminado** — solo visible en panel TTS ✅ |
+| Iconos de texto plano | DS consistente con íconos + colores ✅ |
+| `C.white` = `AMOLED.surface` (gris oscuro) | `DS.white` = `#FFFFFF` ✅ |
+
+#### ✅ Campos editables (SoldEditDetailView)
+
+| Campo | Color acento | Descripción |
+|-------|-------------|-------------|
+| `soldPriceReal` | DS.success (verde) | Precio real de venta |
+| `soldDateReal` | DS.success (verde) | Fecha real de venta — CalPicker |
+| `category` / `subcategory` | DS.blue (azul) | Modal selector |
+| `firstUploadDate` | DS.primary (naranja) | Fecha de subida — CalPicker |
+
+#### ✅ Panel TTS (solo lectura, informativo)
+```
+┌─────────────────────────────────────────────────────┐
+│  🏷 PRECIO SUBIDO │  ⏱ DÍAS HASTA VENTA │  📈 BENEFICIO  │
+│       15€         │      ⚡ 3d           │     +3.50€      │
+└─────────────────────────────────────────────────────┘
+```
+- Colores dinámicos: `ttsLightning` / `ttsAnchor` desde Settings
+- Solo visible cuando `firstUploadDate` y `soldDateReal` están disponibles
+
+#### ✅ Estructura visual
+
+```
+[Hero 320px: imagen + badge VENDIDO + botón back]
+[contentCard: borderRadius 28, overlap -28px]
+  [topRow: marca · catPill con subcategoría]
+  [titleTxt]
+  [ttsPanel]
+  [formCard]
+    [formBanner: "DATOS PERMANENTES"]
+    [Precio final input]
+    [Fecha venta: datePickBtn → CalPicker verde]
+    [Categoría: catSelector → CategoryModal]
+    [Tags sugeridos]
+    [Fecha subida: datePickBtn → CalPicker naranja]
+  [saveBtn: "GUARDAR DATOS DE VENTA"]
+```
+
+---
+
+### [QA_ENGINEER] — Verificaciones Sprint 4
+
+```bash
+# Todas las pantallas sin AMOLED dark palette: ✅
+# SoldEditDetailView: AMOLED eliminado → DS Light ✅
+# SoldEditDetailView: CalendarModal reemplazado por CalPicker ✅
+# SoldEditDetailView: Botón "VENTA EN LOTE" eliminado ✅
+# SoldEditDetailView: Campo "PRECIO PUBLICACIÓN" eliminado de edición ✅
+# ProductDetailScreen: Sin botón Eliminar ✅
+# ProductDetailScreen: Sin botón Resubir ✅
+# ProductDetailScreen: Sin precio editable ✅
+# ProductDetailScreen: Sin lote editable ✅
+# ProductDetailScreen: CalPicker mejorado ✅
+# ProductDetailScreen: SoldModal con CalPicker ✅
+# App.jsx tabBar: fondo blanco ✅
+# DashboardScreen: AMOLED → Light DS ✅
+# LogsScreen: dark → Light DS ✅
+# DebugScreen: dark → Light DS ✅
+```
+
+---
+
+### [DATA_SCIENTIST] — Integridad de Datos Sprint 4
+
+#### ✅ `isBundle` — Comportamiento tras Sprint 4
+
+El campo `isBundle` es un campo permanente (Los 7 Campos Sagrados). En Sprint 4:
+- **ProductDetailScreen**: visible en modo VIEW (badge), pero **no editable** en modo EDIT. Solo se puede cambiar desde `SoldEditDetailView`.
+- **SoldEditDetailView**: botón lote **eliminado** de la UI. El campo permanece en la base de datos pero la interfaz ya no lo expone para editar en esta pantalla.
+- **Razón de diseño**: el lote es una decisión que se toma al crear la publicación, no al registrar la venta.
+
+#### ✅ `soldPriceReal` — Flujo completo
+
+```
+ProductDetailScreen (activo)
+  → Botón "VENDIDO" → SoldModal
+      → Input precio + CalPicker fecha
+      → onConfirm(soldPrice, soldDateReal)
+          → DatabaseService.markAsSold(id, soldPrice, soldDateReal, false)
+              → product.status = 'sold'
+              → product.soldPriceReal = soldPrice
+              → product.soldDateReal = soldDateReal
+  → Alert "¡Vendido! 🎉" con opción "Ver historial"
+
+SoldHistoryScreen
+  → Tarjeta → navigate('SoldEditDetail', {product})
+      → SoldEditDetailView
+          → Editar soldPriceReal, soldDateReal, category, firstUploadDate
+          → handleSave → DatabaseService.updateProduct({...})
+```
+
+---
+
+### Archivos Modificados en Sprint 4
+
+| Archivo | Tipo de cambio |
+|---------|---------------|
+| `screens/SoldEditDetailView.jsx` | Reescritura completa: Light DS, CalPicker, sin Lote/PrecioPublicación |
+| `screens/DashboardScreen.jsx` | Migración AMOLED → Light DS (valores de paleta) |
+| `screens/LogsScreen.jsx` | Migración dark → Light DS |
+| `screens/DebugScreen.jsx` | Migración dark `#121212` → Light DS |
+| `App.jsx` | tabBarStyle: backgroundColor white + border |
+
+### Archivos Sin Cambios (ya correctos)
+
+| Archivo | Estado |
+|---------|--------|
+| `screens/ProductDetailScreen.jsx` | ✅ Ya con DS Light, CalPicker, SoldModal, sin delete/resubir |
+| `screens/AdvancedStatsScreen.jsx` | ✅ Ya Light |
+| `screens/ProductsScreen.jsx` | ✅ Ya Light |
+| `screens/SoldHistoryScreen.jsx` | ✅ Ya Light |
+| `screens/SettingsScreen.jsx` | ✅ Ya Light |
+
+---
+
+### Git Workflow — Sprint 4
+
+```bash
+git checkout main
+git checkout -b feature/sprint4-light-theme-detail-screens
+
+git add App.jsx
+git add screens/DashboardScreen.jsx
+git add screens/SoldEditDetailView.jsx
+git add screens/LogsScreen.jsx
+git add screens/DebugScreen.jsx
+git add SYSTEM_DESIGN.md
+
+git commit -m "feat(sprint4): Light DS global + rediseño pantallas detalle
+
+[ARCHITECT]
+- DS Light canónico definido: #F8F9FA bg, #FFFFFF surface, #EAEDF0 border
+- Eliminado AMOLED de: DashboardScreen, SoldEditDetailView, LogsScreen, DebugScreen
+- App.jsx tabBar: fondo blanco + borde suave
+
+[UI_SPECIALIST]
+- CalPicker: componente unificado con header coloreado, selector año,
+  días semana, acento dinámico y label de sección
+- SoldEditDetailView: reescritura completa Light DS
+  - CalendarModal reemplazado por CalPicker
+  - Botón Lote eliminado de edición
+  - Campo precio publicación eliminado de edición
+  - Panel TTS (read-only) con colores dinámicos desde config
+- ProductDetailScreen: ya correcto desde upload del usuario
+  (sin delete, sin resubir, sin precio editable, sin lote editable)
+
+[QA_ENGINEER]
+- 0 referencias AMOLED dark en lógica de negocio
+- Todos los calendarios usan CalPicker unificado
+- SoldEditDetailView campos: soldPriceReal + soldDateReal + category + firstUploadDate
+
+[DATA_SCIENTIST]
+- isBundle solo lectura en ambas pantallas de detalle
+- soldPriceReal flujo documentado: SoldModal → markAsSold → SoldEditDetailView
+
+[LIBRARIAN]
+- SYSTEM_DESIGN.md: Sprint 4 documentado con tablas, flujos y ejemplos"
+
+git checkout main
+git merge --no-ff feature/sprint4-light-theme-detail-screens -m "merge: Sprint 4 Light DS global"
+```

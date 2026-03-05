@@ -39,7 +39,7 @@ const DebugScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#121212' }, // Estilo oscuro tipo terminal
+  container: { flex: 1, backgroundColor: '#F8F9FA' },
   header: { 
     flexDirection: 'row', 
     justifyContent: 'space-between', 

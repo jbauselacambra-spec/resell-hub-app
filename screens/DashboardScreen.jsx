@@ -8,20 +8,20 @@ import { DatabaseService } from '../services/DatabaseService';
 
 const { width } = Dimensions.get('window');
 
-// ─── AMOLED Palette (Sprint 1 v4.2) ──────────────────────────────────────────
-const AMOLED = {
-  bg:        '#0A0A12',   // AMOLED true black background
-  surface:   '#111120',   // Card surfaces
-  surface2:  '#16162A',   // Elevated cards / modals
-  border:    '#1E1E2E',   // Subtle borders
+// ─── Design System Light — Sprint 4 (migrado de AMOLED) ─────────────────────
+const AMOLED = { // ← valores actualizados a Light DS en Sprint 4
+  bg:        '#F8F9FA',
+  surface:   '#FFFFFF',   // Card surfaces
+  surface2:  '#F0F2F5',   // Elevated cards / modals
+  border:    '#EAEDF0',   // Subtle borders
   primary:   '#FF6B35',   // Primary orange
   success:   '#00D9A3',   // Sold / success
   warning:   '#FFB800',   // Warning / stale
   danger:    '#E63946',   // Critical / error
   blue:      '#004E89',   // Headers / trust
-  textHi:    '#E8E8F0',   // High emphasis text
-  textMed:   '#888899',   // Medium emphasis
-  textLow:   '#444456',   // Low emphasis
+  textHi:    '#1A1A2E',   // High emphasis text
+  textMed:   '#5C6070',   // Medium emphasis
+  textLow:   '#A0A5B5',   // Low emphasis
   mono:      Platform.OS === 'android' ? 'monospace' : 'Courier New',
 };
 

@@ -32,16 +32,16 @@ const CTX_COLORS = {
 };
 
 const C = {
-  bg:      '#0D0D1A',
-  surface: '#141428',
-  card:    '#1A1A35',
-  border:  '#252540',
+  bg:      '#F8F9FA',  // Light DS
+  surface: '#FFFFFF',
+  card:    '#FFFFFF',
+  border:  '#EAEDF0',
   primary: '#FF6B35',
-  blue:    '#4EA8DE',
+  blue:    '#004E89',
   success: '#00D9A3',
   white:   '#FFFFFF',
-  gray:    '#888888',
-  gray2:   '#BBBBBB',
+  gray:    '#5C6070',
+  gray2:   '#A0A5B5',
 };
 
 // ─── Componentes auxiliares ────────────────────────────────────────────────

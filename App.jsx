@@ -30,7 +30,11 @@ function MainTabs() {
         headerShown: false,
         tabBarStyle: { 
           height: Platform.OS === 'android' ? 70 : 85,
-          paddingBottom: Platform.OS === 'android' ? 10 : 25
+          paddingBottom: Platform.OS === 'android' ? 10 : 25,
+          backgroundColor: '#FFFFFF',
+          borderTopColor: '#EAEDF0',
+          borderTopWidth: 1,
+          elevation: 8,
         }
       }}
     >
