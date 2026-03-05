@@ -11,7 +11,7 @@ models:
   # 🧠 CHAT RÁPIDO (Groq)
   - name: CEREBRO-GROQ
     provider: groq
-    apiKey: ${GROQ_API_KEY}
+    apiKey: ${GROQ_KEY}
     apiBase: https://api.groq.com/openai/v1
     model: llama-3.3-70b-versatile
     roles:
@@ -20,8 +20,19 @@ models:
   # 🛠️ EDITOR PRINCIPAL (DeepSeek - OpenRouter)
   - name: OBRERO-DEEPSEEK
     provider: openrouter
-    apiKey: ${OPEN_API_KEY}	
+    apiKey: ${OPENROUTER_API_KEY}
     model: deepseek/deepseek-chat
+    roles:
+      - edit
+      - apply
+      - chat
+    
+    # 🛠️ MODELO OPENAI (Si quieres usar GPT)
+  - name: OBRERO-GPT4
+    provider: openai
+    apiKey: ${OPENAI_KEY}
+    apiBase: https://api.openai.com/v1
+    model: gpt-4o  # <--- Este sí existe en OpenAI
     roles:
       - edit
       - apply
@@ -30,10 +41,19 @@ models:
   # 🧠 RAZONAMIENTO COMPLEJO (Claude)
   - name: ESTRATEGA-CLAUDE
     provider: openrouter
-    apiKey: ${OPEN_API_KEY}	
+    apiKey: ${OPENROUTER_API_KEY}
     model: anthropic/claude-3.5-sonnet
     roles:
       - chat
+
+      # 🧠 EL ESTRATEGA (Máxima Inteligencia - Gemini 3.1)
+  - name: ESTRATEGA-GEMINI
+    provider: gemini
+    apiKey: ${GEMINI_KEY}
+    model: gemini-3.1-pro-preview # <--- El modelo más potente de tu lista
+    roles:
+      - chat
+      - edit
 
   # ⚡ AUTOCOMPLETE LOCAL
   - name: LOCAL-QWEN
