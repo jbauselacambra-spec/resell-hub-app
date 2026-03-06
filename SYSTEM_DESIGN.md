@@ -1120,3 +1120,600 @@ git commit -m "feat(sprint4): Light DS global + rediseño pantallas detalle
 git checkout main
 git merge --no-ff feature/sprint4-light-theme-detail-screens -m "merge: Sprint 4 Light DS global"
 ```
+
+---
+
+## 📋 Sprint 5 — Módulo de Importación Móvil desde Vinted
+
+> **Sprint 5 · feature/vinted-import-mobile**
+> Rama: `feature/vinted-import-mobile`
+> Fecha: Marzo 2026
+
+### Objetivo
+
+Implementar un módulo de importación **100% offline y móvil** que permita al usuario extraer datos de sus ventas y transacciones desde la app de Vinted pegando el HTML de la página directamente en ResellHub, sin necesidad de PC ni APIs externas.
+
+---
+
+### [ARCHITECT] — Decisiones de diseño
+
+#### ✅ Estrategia: HTML Clipboard en lugar de fetch/scraping
+
+| Opción analizada | Problema | Decisión |
+|-----------------|---------|---------|
+| `fetch(url)` desde la app | CORS bloqueado en móvil; requiere proxy server | ❌ Descartado |
+| `expo-clipboard` URL + WebView headless | Requiere native module extra | ❌ Descartado |
+| **HTML pegado + RegEx parser** | 100% offline, sin dependencias | ✅ Elegido |
+
+**Workflow final:**
+```
+Vinted App → ⋮ → Compartir → Copiar HTML/texto
+  ↓
+ResellHub: "Pegar desde Vinted"
+  ↓ detectContentType()
+  ↓ parseVintedHtml()
+  ↓ PreviewCards (usuario confirma)
+  ↓ importar al Inventario Y/O Estadísticas
+```
+
+#### ✅ Dos formatos HTML de Vinted soportados
+
+**Formato A — "Mis pedidos / Año actual"** (`html_sales_current`):
+```html
+<a href="/inbox/19673689711" data-testid="my-orders-item">
+  <div data-testid="my-orders-item--title">Título del artículo</div>
+  <h3 class="...Text__subtitle">5,00 €</h3>
+  <h3>Pedido finalizado. El comprador ha aceptado el artículo</h3>
+  <img src="https://images1.vinted.net/...">
+</a>
+```
+→ Extrae: `orderId`, `title`, `amount` (€), `status` (completada/en_proceso), `imageUrl`
+
+**Formato B — "Historial de transacciones"** (`html_sales_history`):
+```html
+<li class="pile__element">
+  <a href="/inbox/20930332206">
+    <div class="...Cell__title">Compra</div>
+    <div class="...Cell__body">Kirby's Star Alliance</div>
+    <h2 class="...Text__warning">-24,85 €</h2>
+    24 de febrero de 2026
+  </a>
+</li>
+```
+→ Extrae: `orderId`, `type` (venta/compra), `title`, `amount`, `date` (ISO string)
+
+#### ✅ Nueva clave MMKV: `vinted_sales_history`
+
+Almacenamiento separado del inventario para las estadísticas económicas. Usa una instancia `MMKV` con `id: 'vinted-parser'` para aislamiento.
+
+---
+
+### [DATA_SCIENTIST] — VintedParserService.js
+
+**Archivo:** `services/VintedParserService.js`
+
+#### Funciones exportadas
+
+```js
+detectContentType(text)
+// → 'url_product' | 'url_inbox' | 'html_sales_current'
+//   | 'html_sales_history' | 'html_generic' | 'unknown'
+
+parseHtmlSalesCurrent(html)  → VintedSaleItem[]   // Formato A
+parseHtmlSalesHistory(html)  → VintedSaleItem[]   // Formato B
+parseVintedHtml(html)        → VintedSaleItem[]   // Auto-detecta formato
+
+mapToInventoryProduct(item)  → InternalProduct    // Para importFromVinted()
+mapToSaleRecord(item)        → SaleRecord         // Para VintedSalesDB
+
+VintedSalesDB.saveRecords(records)  → { inserted, duplicates }
+VintedSalesDB.getAllRecords()       → SaleRecord[]
+VintedSalesDB.getStats()           → EconomicStats
+VintedSalesDB.clear()
+
+logImportEvent(type, count, details)
+getImportLog() → ImportLogEntry[]
+```
+
+#### Schema VintedSaleItem
+
+```js
+{
+  orderId:      '19673689711',
+  title:        '6 coches de dinosaurio...',
+  amount:       5.00,           // positivo=venta, negativo=compra
+  type:         'venta',        // 'venta' | 'compra' | 'unknown'
+  status:       'completada',   // 'completada' | 'en_proceso' | 'cancelada'
+  date:         '2026-02-24T12:00:00.000Z',  // null si Formato A
+  imageUrl:     'https://images1.vinted.net/...',
+  sourceFormat: 'html_current', // 'html_current' | 'html_history'
+}
+```
+
+#### Schema SaleRecord (historial económico)
+
+```js
+{
+  id:           'vsr_1741000000_abc12',   // UUID interno
+  orderId:      '19673689711',
+  title:        'Título del artículo',
+  amount:       5.00,
+  type:         'venta',
+  date:         '2026-02-24T12:00:00.000Z',
+  imageUrl:     null,
+  status:       'completada',
+  importedAt:   '2026-03-06T...',
+  sourceFormat: 'html_current',
+  // PLACEHOLDERS para Fase 2:
+  // monthYear:       '2026-02'
+  // category:        null
+  // profit:          null
+  // linkedProductId: null
+}
+```
+
+#### VintedSalesDB.getStats() — Estadísticas económicas
+
+```js
+{
+  totalRecords:   42,
+  totalVentas:    35,
+  totalCompras:   7,
+  ingresosBrutos: 234.50,
+  gastos:         89.20,
+  balance:        145.30,
+  byMonth: {
+    '2026-02': { ventas: 89.50, compras: 24.85, count: 5 },
+    '2026-01': { ventas: 145.00, compras: 64.35, count: 12 },
+  }
+}
+```
+
+#### Prueba contra HTML real del usuario
+
+```
+Formato A → orderId=19673689711, title="6 coches de dinosaurio...", amount=5.00€, status=completada ✅
+Formato B → orderId=20930332206, type=compra, title="Kirby's Star Alliance", amount=-24.85€, date=2026-02-24 ✅
+```
+
+---
+
+### [UI_SPECIALIST] — VintedImportScreen.jsx
+
+**Archivo:** `screens/VintedImportScreen.jsx`
+
+#### Flujo de pantalla
+
+```
+[Header: ← Importar desde Vinted]
+     ↓
+[Guía 3 pasos: Abre Vinted → Compartir página → Pegar aquí]
+     ↓
+[Botón naranja: ▼ PEGAR DESDE VINTED]
+     ↓ (si clipboard no disponible)
+[TextArea: pegar HTML manualmente + ANALIZAR CONTENIDO]
+     ↓
+[Badge tipo: "Ventas año actual" · X items detectados]
+     ↓
+[Barra selección: ☑ Seleccionar todo · N/M seleccionados]
+     ↓
+[PreviewCard × N: imagen + tipo + título + importe + fecha]
+     ↓
+[Botón: ↑ IMPORTAR N ITEMS]
+     ↓
+[ConfirmModal]
+  ├── Resumen: VENTAS · COMPRAS · BALANCE
+  ├── Opción A: "Añadir al Inventario de Vendidos"
+  ├── Opción B: "Guardar en Estadísticas Económicas"
+  └── Opción C: "⚡ IMPORTAR TODO (Inventario + Stats)"
+     ↓
+[ResultBanner: ✅ importado X items]
+```
+
+#### Componentes internos
+
+- **`PreviewCard`** — tarjeta checkeable por item con imagen, tipo (↑ VENTA / ↓ COMPRA), importe coloreado, fecha, #orderId
+- **`ConfirmModal`** — bottom sheet con resumen económico y 3 opciones de destino
+- **`STEPS`** — guía de 3 pasos animada con iconos y conectores verticales
+
+#### Acceso desde otras pantallas
+
+| Pantalla | Elemento | Acción |
+|---------|---------|--------|
+| `ProductsScreen` | Botón "Importar" en header | `navigation.navigate('VintedImport')` |
+| `SoldHistoryScreen` | Botón "Importar" junto a título | `navigation.navigate('VintedImport')` |
+
+---
+
+### [QA_ENGINEER] — Consideraciones técnicas
+
+#### ✅ Clipboard: compatibilidad RN 0.76
+
+```js
+// En RN 0.76 el Clipboard está en react-native directamente:
+import { Clipboard } from 'react-native';
+const text = await Clipboard.getString();
+
+// Fallback automático a modo manual si Clipboard no disponible
+```
+
+#### ✅ Deduplicación por orderId
+
+`VintedSalesDB.saveRecords()` usa un `Set` de `orderId` existentes para evitar duplicados. Si el mismo pedido se importa dos veces, `duplicates++` y no se vuelve a insertar.
+
+#### ✅ Integración con importFromVinted() existente
+
+Las ventas importadas se convierten a `InternalProduct` mediante `mapToInventoryProduct()` y pasan por el pipeline existente `DatabaseService.importFromVinted()`, respetando los 7 Campos Sagrados y el merge inteligente.
+
+#### ✅ Sin nuevas dependencias npm
+
+El módulo usa exclusivamente:
+- `react-native-mmkv` (ya instalado)
+- `Clipboard` de `react-native` (built-in)
+- RegEx nativo (sin librerías de parsing HTML)
+
+#### ✅ Preparado para Fase 2 — Importación Masiva
+
+```js
+// Placeholders documentados en SaleRecord:
+// monthYear, category, profit, linkedProductId
+
+// VintedSalesDB.getStats() ya agrega por mes para el dashboard
+// La función parseVintedHtml() puede procesar páginas enteras (paginación manual)
+// logImportEvent() guarda historial de importaciones (últimas 50)
+```
+
+---
+
+### Archivos creados/modificados en Sprint 5
+
+| Archivo | Tipo | Descripción |
+|---------|------|-------------|
+| `services/VintedParserService.js` | **Nuevo** | Parser offline Formato A+B, VintedSalesDB, mappers |
+| `screens/VintedImportScreen.jsx` | **Nuevo** | Pantalla completa de importación con preview y confirm |
+| `App.jsx` | Modificado | Registro de `VintedImportScreen` en Stack.Navigator |
+| `screens/ProductsScreen.jsx` | Modificado | Botón "Importar" en header → VintedImport |
+| `screens/SoldHistoryScreen.jsx` | Modificado | Botón "Importar" junto al título → VintedImport |
+
+---
+
+### Git Workflow — Sprint 5
+
+```bash
+git checkout main
+git checkout -b feature/vinted-import-mobile
+
+git add services/VintedParserService.js
+git add screens/VintedImportScreen.jsx
+git add App.jsx
+git add screens/ProductsScreen.jsx
+git add screens/SoldHistoryScreen.jsx
+git add SYSTEM_DESIGN.md
+
+git commit -m "feat(sprint5): módulo importación móvil desde Vinted
+
+[ARCHITECT]
+- Estrategia: HTML clipboard offline vs fetch (CORS imposible en móvil)
+- Dos formatos Vinted soportados: html_sales_current + html_sales_history
+- Nueva clave MMKV vinted_sales_history para estadísticas económicas
+- Sin nuevas dependencias npm (Clipboard built-in + RegEx nativo)
+
+[DATA_SCIENTIST]
+- VintedParserService: detectContentType, parseHtmlSalesCurrent, parseHtmlSalesHistory
+- parseVintedHtml: auto-detecta formato y despacha al parser correcto
+- mapToInventoryProduct: VintedSaleItem → InternalProduct (compatible con importFromVinted)
+- mapToSaleRecord: VintedSaleItem → SaleRecord (historial económico)
+- VintedSalesDB: saveRecords (dedup por orderId), getStats (por mes), clear
+- logImportEvent + getImportLog (últimas 50 importaciones)
+- Prueba con HTML real del usuario: Formato A ✅ Formato B ✅
+
+[UI_SPECIALIST]
+- VintedImportScreen: guía 3 pasos, paste automático, fallback manual
+- PreviewCard: imagen, ↑VENTA/↓COMPRA, importe coloreado, fecha, #orderId
+- ConfirmModal: resumen ventas/compras/balance + 3 opciones de destino
+- ResultBanner: feedback post-importación con botón 'NUEVA'
+- Acceso desde ProductsScreen (Inventario) y SoldHistoryScreen (Vendidos)
+
+[QA_ENGINEER]
+- Deduplicación automática por orderId en VintedSalesDB
+- Integración con pipeline existente importFromVinted() + 7 Campos Sagrados
+- Placeholders documentados para Fase 2 (importación masiva paginada)
+
+[LIBRARIAN]
+- SYSTEM_DESIGN.md: Sprint 5 documentado con schemas, flujo, decisiones"
+
+git checkout main
+git merge --no-ff feature/vinted-import-mobile -m "merge: Sprint 5 vinted-import-mobile"
+```
+
+---
+
+## 📋 Sprint 6 — Fix completo: 3 Formatos de Importación Móvil
+
+> **Sprint 6 · feature/vinted-import-mobile (fix)**
+> Fecha: Marzo 2026
+
+### Diagnóstico pre-Sprint 6
+
+| Problema | Archivo | Severidad |
+|---------|---------|-----------|
+| `VintedImportScreen` importaba `parseVintedHtml` (legacy) en lugar de `parseVintedContent` | VintedImportScreen.jsx | 🔴 Crítico |
+| `processText` no tenía rama `json_products` → JSON del script producía lista vacía | VintedImportScreen.jsx | 🔴 Crítico |
+| `PreviewCard` llamaba a `item.amount.toFixed(2)` — explota con InternalProduct del JSON | VintedImportScreen.jsx | 🔴 Crítico |
+| `ConfirmModal` no tenía modo JSON ni modo A — solo modo B (historial) | VintedImportScreen.jsx | 🔴 Crítico |
+| Formato A: `soldDateReal=null` sin UI para introducirla antes de confirmar | VintedImportScreen.jsx | 🟡 UX |
+| Script de consola: solo descarga .json → no sirve para flujo móvil sin PC | scriptJSON.txt | 🟡 UX |
+| `VintedParserService` reconocía JSON en `detectContentType` pero `parseVintedHtml` lo ignoraba | VintedParserService.js | 🔴 Crítico |
+
+---
+
+### [ARCHITECT] — Arquitectura de los 3 modos
+
+```
+Texto pegado
+    │
+    ▼
+detectContentType()
+    ├── 'json_products'       → MODO C: parseJsonProducts()
+    │                              → jsonProducts: InternalProduct[]
+    │                              → ProductPreviewCard
+    │                              → ConfirmModal mode="C"
+    │                              → importFromVinted() directo
+    │
+    ├── 'html_sales_current'  → MODO A: parseHtmlSalesCurrent()
+    │                              → parsedItems: VintedSaleItem[]
+    │                              → SalePreviewCard + noDateBadge
+    │                              → ConfirmModal mode="A"
+    │                              → DateConfirmModal (si soldDateReal=null)
+    │                              → executeSalesCurrent(action, items, isoDate)
+    │                                  ├── 'update_permanent': updateProduct() en BD
+    │                                  ├── 'add_new': importFromVinted()
+    │                                  └── 'both': ambos
+    │
+    ├── 'html_sales_history'  → MODO B: parseHtmlSalesHistory()
+    │                              → parsedItems: VintedSaleItem[]
+    │                              → SalePreviewCard
+    │                              → ConfirmModal mode="B"
+    │                              → 'stats': VintedSalesDB.saveRecords()
+    │                              ├── 'inventory': importFromVinted()
+    │                              └── 'both': ambos
+    │
+    └── 'unknown' / URL       → Mensaje de error orientativo
+```
+
+#### Estado React por modo
+
+```js
+// Modo A/B — VintedSaleItem[]
+const [parsedItems, setParsedItems]   = useState([]);
+// Modo C — InternalProduct[]
+const [jsonProducts, setJsonProducts] = useState([]);
+// IDs seleccionados — orderId (A/B) o String(product.id) (C)
+const [checkedIds, setCheckedIds]     = useState(new Set());
+// currentMode derivado de contentType via TYPE_META
+const currentMode = TYPE_META[contentType]?.mode; // 'A' | 'B' | 'C' | null
+```
+
+---
+
+### [DATA_SCIENTIST] — VintedParserService.js (fixes)
+
+#### ✅ Función `parseVintedContent` (dispatcher principal)
+
+```js
+// ANTES (Sprint 5): parseVintedHtml() — solo HTML, ignoraba JSON
+// AHORA (Sprint 6): parseVintedContent() — despacha a los 3 parsers
+export function parseVintedContent(text) {
+  const type = detectContentType(text);
+  switch(type) {
+    case 'html_sales_current': return { type, items: parseHtmlSalesCurrent(text), products: null };
+    case 'html_sales_history': return { type, items: parseHtmlSalesHistory(text), products: null };
+    case 'json_products':      return { type, items: null, products: parseJsonProducts(text) };
+    ...
+  }
+}
+```
+
+#### ✅ `parseHtmlSalesCurrent` — Formato A: nuevos campos
+
+```js
+// ANTES: extraía title, amount, status básico, imageUrl
+// AHORA: añade
+results.push({
+  orderId,
+  title,
+  soldPriceReal,          // ← NUEVO: alias semántico del precio
+  amount: soldPriceReal,  // ← compatibilidad UI
+  type: 'venta',
+  status,                 // desde SVG <title>Estado de la transacción: X</title>
+  date: null,             // ← Formato A NO incluye fecha (documentado)
+  soldDateReal: null,     // ← El usuario lo introduce en DateConfirmModal
+  imageUrl,
+  sourceFormat: 'html_current',
+});
+```
+
+#### ✅ `parseHtmlSalesHistory` — Formato B: fix suffix
+
+```js
+// ANTES: regex Cell__suffix incompleto → amount y fecha no se extraían
+// AHORA: parse correcto de la estructura real:
+//   <div class="Cell__suffix">
+//     <div>
+//       <h2>-24,85 €</h2>    ← dentro del suffix
+//       24 de febrero de 2026 ← texto plano DESPUÉS del h2
+//     </div>
+//   </div>
+
+const suffixMatch = block.match(/Cell__suffix[^>]*>([\s\S]*?)(?:<\/div>\s*<\/div>\s*<\/a>|$)/);
+if (suffixMatch) {
+  const h2Match = suffixMatch[1].match(/<h2[^>]*>([\s\S]*?)<\/h2>/);
+  // amount desde h2, date desde texto después del h2
+  const afterH2 = suffixMatch[1].replace(/<h2[\s\S]*?<\/h2>/, '');
+  date = parseSpanishDate(stripTags(afterH2));
+}
+```
+
+#### ✅ `parseJsonProducts` — Formato C: normalización completa
+
+```js
+export function parseJsonProducts(text) {
+  const arr = JSON.parse(text) (array o objeto);
+  return arr.map(p => ({
+    ...p,
+    id:           p.id || 'vinted_' + random,
+    price:        parseFloat(p.price) || 0,
+    images:       Array.isArray(p.images) ? p.images : [p.images],
+    status:       p.status === 'sold' ? 'sold' : 'available',
+    views:        parseInt(p.views) || 0,
+    favorites:    parseInt(p.favorites) || 0,
+    soldDateReal: p.soldDateReal || p.soldDate || null,
+    soldPriceReal:p.soldPriceReal || p.price || null,
+    createdAt:    p.createdAt || now,
+  }));
+}
+```
+
+---
+
+### [UI_SPECIALIST] — VintedImportScreen.jsx (reescritura)
+
+#### ✅ Nuevos componentes
+
+**`SalePreviewCard`** — Para Modo A y B (VintedSaleItem)
+- Badge `↑ VENTA` / `↓ COMPRA` con colores
+- `noDateBadge` amarillo cuando `item.date === null` (Modo A)
+- `item.amount.toFixed(2)` protegido con `typeof item.amount === 'number'`
+
+**`ProductPreviewCard`** — Para Modo C (InternalProduct del JSON)
+- Badge `ACTIVO` (verde) / `VENDIDO` (gris)
+- Muestra marca, precio, vistas, favoritos
+- Key desde `String(product.id)` (no `orderId`)
+
+**`DateConfirmModal`** — Para Modo A cuando `soldDateReal = null`
+- Input numérico `DD/MM/AAAA`
+- Parser propio: `"15/02/2026"` → ISO string
+- Botón "Saltar" → guarda con `soldDateReal: null` (editable después)
+- Botón "Aplicar fecha" → aplica a todos los items seleccionados
+
+**`ConfirmModal`** — Ahora recibe `mode` prop y renderiza 3 variantes:
+
+| `mode` | Contenido |
+|--------|-----------|
+| `'C'` | Resumen activos/vendidos/total + botón "IMPORTAR N PRODUCTOS" |
+| `'A'` | Resumen ventas/sin-fecha + 2 opciones + "ACTUALIZAR + AÑADIR NUEVOS" |
+| `'B'` | Resumen ventas/compras/balance + 2 opciones + "IMPORTAR TODO" |
+
+**`GUIDE`** — Guía de 3 tarjetas con instrucciones por modo (reemplaza los 3 pasos genéricos)
+
+#### ✅ Flujo Modo A: `executeSalesCurrent(action, items, soldDateReal)`
+
+```js
+// action = 'update_permanent' | 'add_new' | 'both'
+// Actualizar: busca match por orderId o title en la BD y actualiza soldPriceReal + soldDateReal
+// Añadir: mapToInventoryProduct() → importFromVinted()
+```
+
+#### ✅ Flujo Modo C: `handleConfirmJson()`
+
+```js
+// Filtra jsonProducts por checkedIds
+// Llama directamente a DatabaseService.importFromVinted(selected)
+// El pipeline existente preserva los 7 Campos Sagrados y hace merge inteligente
+```
+
+---
+
+### [QA_ENGINEER] — Script de consola v2.0
+
+**Archivo:** `Documentos/scriptJSON.txt`
+
+#### Cambios vs v1.0
+
+| Feature | v1.0 | v2.0 |
+|---------|------|------|
+| Transferencia | Solo descarga .json | Copia al portapapeles + descarga de respaldo |
+| Descripción | Igual que título | Enriquecida con marca, talla, color desde alt |
+| Clipboard API | No | `navigator.clipboard.writeText()` + fallback `execCommand` |
+| Instrucciones | No | Header completo con pasos para flujo móvil |
+| Return value | void | Devuelve `products[]` en consola para inspección |
+
+#### Workflow móvil completo con v2.0
+
+```
+PC: Abre escaparate Vinted → F12 → Consola → Pegar script → Enter
+  → "JSON copiado al portapapeles ✅"
+  → También descarga resellhub_TIMESTAMP.json como respaldo
+
+M�vil: Abre ResellHub → Inventario → Importar desde Vinted
+  → Pulsar "PEGAR DESDE VINTED"
+  → detectContentType → 'json_products'
+  → ProductPreviewCard × N (activos + vendidos)
+  → IMPORTAR N PRODUCTOS → importFromVinted()
+```
+
+---
+
+### [QA_ENGINEER] — Resultados validación Sprint 6
+
+```
+VintedParserService.js     13/13 checks ✅
+VintedImportScreen.jsx     20/20 checks ✅
+scriptJSON.txt v2.0         9/9  checks ✅
+App.jsx                     2/2  checks ✅
+───────────────────────────────────────
+TOTAL                      44/44 checks ✅
+```
+
+---
+
+### Archivos modificados/generados en Sprint 6
+
+| Archivo | Tipo | Sprint 5 → Sprint 6 |
+|---------|------|---------------------|
+| `services/VintedParserService.js` | Modificado | `parseVintedHtml` → `parseVintedContent`; fix Formato B suffix; `soldPriceReal`/`soldDateReal` en SaleItem |
+| `screens/VintedImportScreen.jsx` | Reescrito | 3 modos (A/B/C); 2 PreviewCards; DateConfirmModal; ConfirmModal con mode prop; guía por formato |
+| `Documentos/scriptJSON.txt` | Reescrito v2.0 | Clipboard + download; descripción enriquecida; instrucciones móvil |
+
+---
+
+### Git Workflow — Sprint 6
+
+```bash
+git checkout feature/vinted-import-mobile
+
+git add services/VintedParserService.js
+git add screens/VintedImportScreen.jsx
+git add Documentos/scriptJSON.txt
+git add SYSTEM_DESIGN.md
+
+git commit -m "fix(sprint6): 3 formatos importación Vinted completos y funcionales
+
+[ARCHITECT]
+- parseVintedContent dispatcher: despacha a parser correcto según tipo
+- 2 estados separados: parsedItems (A/B) y jsonProducts (C)
+- currentMode derivado de TYPE_META[contentType].mode
+
+[DATA_SCIENTIST]
+- parseHtmlSalesCurrent: soldPriceReal, SVG status, date=null documentado
+- parseHtmlSalesHistory: fix Cell__suffix → amount + fecha correctos
+- parseJsonProducts: normaliza id, images, soldDateReal, soldPriceReal
+- parseVintedContent: dispatcher único para los 3 formatos
+
+[UI_SPECIALIST]
+- SalePreviewCard: noDateBadge para Modo A, amount protegido con typeof
+- ProductPreviewCard: preview de InternalProduct (Modo C)
+- DateConfirmModal: input DD/MM/AAAA con skip option (Modo A)
+- ConfirmModal: 3 variantes por mode prop (A/B/C)
+- executeSalesCurrent: update_permanent + add_new + both
+- handleConfirmJson: directo a importFromVinted()
+- Guía de 3 tarjetas con instrucciones por modo
+
+[QA_ENGINEER]
+- scriptJSON.txt v2.0: clipboard + download fallback + descripción enriquecida
+- 44/44 checks QA pasan
+- Workflow móvil completo documentado
+
+[LIBRARIAN]
+- SYSTEM_DESIGN.md: Sprint 6 con diagnóstico, arquitectura, flows, tabla cambios"
+```

@@ -17,6 +17,7 @@ import AdvancedStatsScreen from './screens/AdvancedStatsScreen';
 import SettingsScreen from './screens/SettingsScreen'; // NUEVA
 import LoginScreen from './src/screens/LoginScreen';
 import AuthService from './src/services/authService';
+import VintedImportScreen from './screens/VintedImportScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -73,6 +74,7 @@ export default function App() {
             <Stack.Screen name="Main" component={MainTabs} />
             <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
             <Stack.Screen name="SoldEditDetail" component={SoldEditDetailView} />
+            <Stack.Screen name="VintedImport" component={VintedImportScreen} />
           </Stack.Navigator>
         ) : (
           <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -87,6 +89,7 @@ export default function App() {
             <Stack.Screen name="Main" component={MainTabs} />
             <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
             <Stack.Screen name="SoldEditDetail" component={SoldEditDetailView} />
+            <Stack.Screen name="VintedImport" component={VintedImportScreen} />
           </Stack.Navigator>
         )}
       </NavigationContainer>

@@ -13,7 +13,7 @@ const MONTH_NAMES = [
   'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'
 ];
 
-export default function ProductsScreen({ navigation }) {
+export default function ProductsScreen({ navigation, navigation }) {
   const [products, setProducts]     = useState([]);
   const [filter,   setFilter]       = useState('all');
   const [filterCat, setFilterCat]   = useState(null);
@@ -136,8 +136,17 @@ export default function ProductsScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerSub}>ESTRATEGIA DE STOCK</Text>
-        <Text style={styles.headerTitle}>Mi Inventario</Text>
+        <View style={{flex:1}}>
+          <Text style={styles.headerSub}>ESTRATEGIA DE STOCK</Text>
+          <Text style={styles.headerTitle}>Mi Inventario</Text>
+        </View>
+        <TouchableOpacity
+          style={styles.importVintedBtn}
+          onPress={() => navigation.navigate('VintedImport')}
+        >
+          <Icon name="download" size={14} color={DS.primary}/>
+          <Text style={styles.importVintedTxt}>Importar</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Category filter chips */}
@@ -315,4 +324,6 @@ const styles = StyleSheet.create({
   republishText: { color: '#FFF', fontSize: 8, fontWeight: '900' },
   empty:     { alignItems: 'center', paddingTop: 60 },
   emptyText: { color: '#CCC', fontSize: 13, marginTop: 12 },
+  importVintedBtn: { flexDirection:'row', alignItems:'center', gap:5, backgroundColor:'#FFF2EE', paddingHorizontal:12, paddingVertical:8, borderRadius:12, borderWidth:1, borderColor:'#FF6B3530' },
+  importVintedTxt: { fontSize:12, fontWeight:'800', color:'#FF6B35' },
 });

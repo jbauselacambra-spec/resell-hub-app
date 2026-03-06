@@ -1,0 +1,188 @@
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ResellHub — Script de Extracción de Inventario Vinted
+ * Versión: 2.0 (Sprint 6 · feature/vinted-import-mobile)
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * INSTRUCCIONES:
+ *  1. Abre tu escaparate en Vinted (ordenador / navegador)
+ *  2. Pulsa F12 → pestaña "Consola"
+ *  3. Pega este script completo y pulsa Enter
+ *  4. El JSON se copia al portapapeles automáticamente
+ *  5. Abre ResellHub en tu móvil → Inventario → Importar
+ *  6. Pulsa "Pegar desde Vinted" (o pégalo en el campo de texto)
+ *
+ * CAMPOS EXTRAÍDOS POR PRODUCTO:
+ *  id, title, brand, price, description, images, status,
+ *  views, favorites, soldDate, createdAt
+ *
+ * NOTAS:
+ *  - Scroll hasta el final de la página antes de ejecutar para cargar todos los items
+ *  - Funciona tanto con productos activos como vendidos
+ *  - El portapapeles se usa para transferir al móvil sin necesidad de archivos
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+
+const scriptResellHub = (() => {
+    console.log("🚀 ResellHub v2.0 — Iniciando extracción...");
+
+    // ─── 1. Selectores de contenedores de producto ────────────────────────────
+    const items = document.querySelectorAll('.new-item-box__container');
+
+    if (!items.length) {
+        console.error("❌ No se encontraron productos.");
+        console.error("   Asegúrate de estar en tu escaparate de Vinted.");
+        console.error("   Si la página no cargó todos los productos, haz scroll hasta el final primero.");
+        return;
+    }
+
+    const products = [];
+    const seenIds  = new Set();
+    const now      = new Date().toISOString();
+
+    items.forEach((item) => {
+        try {
+            // ── ID ────────────────────────────────────────────────────────────
+            const testId = item.getAttribute('data-testid') || "";
+            const rawId  = testId.split('-').pop();
+            if (!rawId || rawId === testId) return; // sin ID válido
+            const id = `vinted_${rawId}`;
+            if (seenIds.has(id)) return;
+            seenIds.add(id);
+
+            // ── Imagen y alt ──────────────────────────────────────────────────
+            const imgElement = item.querySelector('img[data-testid], img');
+            const altText    = imgElement ? imgElement.alt.trim() : "";
+            const imageUrl   = imgElement ? imgElement.src : "";
+
+            // ── Título: todo lo que hay antes de la primera coma ──────────────
+            // Alt ejemplo: "Capa de baño Mayoral, marca: Mayoral, talla: 2 años, color: azul"
+            const titleRaw = altText.split(',')[0] || "Producto sin título";
+            const title    = titleRaw.trim();
+
+            // ── Marca: buscar "marca: X" en el alt ────────────────────────────
+            const brandMatch = altText.match(/marca:\s*([^,]+)/i);
+            const brand      = brandMatch ? brandMatch[1].trim() : "Genérico";
+
+            // ── Descripción: construir desde los datos disponibles ────────────
+            // Incluimos talla y color si los hay para enriquecer la descripción
+            const sizMatch  = altText.match(/talla:\s*([^,]+)/i);
+            const colorMatch= altText.match(/color:\s*([^,]+)/i);
+            let description = title;
+            if (brand && brand !== 'Genérico') description += `. Marca: ${brand}`;
+            if (sizMatch)   description += `. Talla: ${sizMatch[1].trim()}`;
+            if (colorMatch) description += `. Color: ${colorMatch[1].trim()}`;
+
+            // ── Estado: buscar "Vendido" en el texto del contenedor ───────────
+            const innerText = item.innerText || "";
+            const isSold    = innerText.toLowerCase().includes('vendido');
+
+            // ── Vistas y Favoritos ────────────────────────────────────────────
+            const viewsEl = item.querySelector('[data-testid$="--description-title"]');
+            const favsEl  = item.querySelector('[data-testid$="--description-subtitle"]');
+            const views    = viewsEl ? (parseInt(viewsEl.innerText.replace(/[^0-9]/g, '')) || 0) : 0;
+            const favorites= favsEl  ? (parseInt(favsEl.innerText.replace(/[^0-9]/g,  '')) || 0) : 0;
+
+            // ── Precio ────────────────────────────────────────────────────────
+            const priceEl   = item.querySelector('[data-testid$="--price-text"]');
+            const priceText = priceEl ? priceEl.innerText : "0";
+            const price     = parseFloat(priceText.replace(/[^0-9,.]/g, '').replace(',', '.')) || 0;
+
+            products.push({
+                id:          id,
+                title:       title,
+                brand:       brand,
+                price:       price,
+                description: description,
+                images:      imageUrl ? [imageUrl] : [],
+                status:      isSold ? 'sold' : 'available',
+                views:       views,
+                favorites:   favorites,
+                soldDate:    isSold ? now : null,
+                createdAt:   now,
+            });
+
+        } catch (err) {
+            console.warn("⚠️ Error procesando item:", err.message);
+        }
+    });
+
+    if (!products.length) {
+        console.error("❌ Se encontraron contenedores pero no se pudo extraer ningún producto.");
+        return;
+    }
+
+    const jsonStr = JSON.stringify(products, null, 2);
+
+    // ─── 2. Copiar al portapapeles (para transferir al móvil) ─────────────────
+    const copyToClipboard = async (text) => {
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(text);
+                return true;
+            } else {
+                // Fallback para HTTP o navegadores sin API moderna
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.style.position = 'fixed';
+                textarea.style.opacity  = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                const ok = document.execCommand('copy');
+                document.body.removeChild(textarea);
+                return ok;
+            }
+        } catch (e) {
+            return false;
+        }
+    };
+
+    // ─── 3. Descarga como .json (fallback / respaldo) ─────────────────────────
+    const downloadJson = (text, filename) => {
+        try {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(text);
+            const a       = document.createElement('a');
+            a.setAttribute("href", dataStr);
+            a.setAttribute("download", filename);
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            return true;
+        } catch (e) {
+            return false;
+        }
+    };
+
+    // ─── 4. Ejecutar ambos ────────────────────────────────────────────────────
+    (async () => {
+        const active = products.filter(p => p.status === 'available').length;
+        const sold   = products.filter(p => p.status === 'sold').length;
+        const filename = `resellhub_${new Date().getTime()}.json`;
+
+        const copied    = await copyToClipboard(jsonStr);
+        const downloaded= downloadJson(jsonStr, filename);
+
+        console.log(`\n✅ ResellHub — Extracción completada`);
+        console.log(`   📦 Productos activos: ${active}`);
+        console.log(`   ✔️  Productos vendidos: ${sold}`);
+        console.log(`   📊 Total: ${products.length} productos`);
+        console.log(``);
+        if (copied) {
+            console.log(`   📋 JSON copiado al portapapeles ✅`);
+            console.log(`      → Abre ResellHub → Inventario → Importar`);
+            console.log(`      → Pulsa "Pegar desde Vinted"`);
+        } else {
+            console.warn(`   ⚠️ No se pudo copiar al portapapeles`);
+        }
+        if (downloaded) {
+            console.log(`   💾 Archivo descargado: ${filename}`);
+        }
+
+        if (!copied && !downloaded) {
+            console.error("❌ No se pudo copiar ni descargar. Copia el JSON manualmente:");
+            console.log(jsonStr);
+        }
+    })();
+
+    return products; // también disponible como valor de retorno en la consola
+})();
