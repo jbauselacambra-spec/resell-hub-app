@@ -9,14 +9,15 @@ import Icon from 'react-native-vector-icons/Feather';
 
 import DashboardScreen from './screens/DashboardScreen';
 import ProductsScreen from './screens/ProductsScreen';
-import SoldHistoryScreen from './screens/SoldHistoryScreen'; // NUEVA
+import SoldHistoryScreen from './screens/SoldHistoryScreen';
 import ProductDetailScreen from './screens/ProductDetailScreen';
 import LogsScreen from './screens/LogsScreen';
 import SoldEditDetailView from './screens/SoldEditDetailView';
 import AdvancedStatsScreen from './screens/AdvancedStatsScreen';
-import SettingsScreen from './screens/SettingsScreen'; // NUEVA
+import SettingsScreen from './screens/SettingsScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import AuthService from './src/services/authService';
+// Sprint 8: VintedImportScreen ocupa la posición del tab "Logs"
 import VintedImportScreen from './screens/VintedImportScreen';
 
 const Tab = createBottomTabNavigator();
@@ -39,12 +40,37 @@ function MainTabs() {
         }
       }}
     >
-      <Tab.Screen name="Home" component={DashboardScreen} options={{ tabBarLabel: 'Inicio', tabBarIcon: ({color}) => <Icon name="trending-up" size={22} color={color}/> }} />
-      <Tab.Screen name="Stock" component={ProductsScreen} options={{ tabBarLabel: 'Inventario', tabBarIcon: ({color}) => <Icon name="package" size={22} color={color}/> }} />
-      <Tab.Screen name="History" component={SoldHistoryScreen} options={{ tabBarLabel: 'Vendidos', tabBarIcon: ({color}) => <Icon name="check-circle" size={22} color={color}/> }} />
-      <Tab.Screen name="Stats" component={AdvancedStatsScreen} options={{ tabBarLabel: 'Stats', tabBarIcon: ({color}) => <Icon name="bar-chart-2" size={22} color={color}/> }} />  
-      <Tab.Screen name="Settings" component={SettingsScreen} options={{ tabBarLabel: 'Config', tabBarIcon: ({color}) => <Icon name="settings" size={22} color={color}/> }} />
-      <Tab.Screen name="Debug" component={LogsScreen} options={{ tabBarLabel: 'Logs', tabBarIcon: ({color}) => <Icon name="terminal" size={22} color={color}/> }} />
+      <Tab.Screen
+        name="Home"
+        component={DashboardScreen}
+        options={{ tabBarLabel: 'Inicio', tabBarIcon: ({color}) => <Icon name="trending-up" size={22} color={color}/> }}
+      />
+      <Tab.Screen
+        name="Stock"
+        component={ProductsScreen}
+        options={{ tabBarLabel: 'Inventario', tabBarIcon: ({color}) => <Icon name="package" size={22} color={color}/> }}
+      />
+      <Tab.Screen
+        name="History"
+        component={SoldHistoryScreen}
+        options={{ tabBarLabel: 'Vendidos', tabBarIcon: ({color}) => <Icon name="check-circle" size={22} color={color}/> }}
+      />
+      <Tab.Screen
+        name="Stats"
+        component={AdvancedStatsScreen}
+        options={{ tabBarLabel: 'Stats', tabBarIcon: ({color}) => <Icon name="bar-chart-2" size={22} color={color}/> }}
+      />
+      <Tab.Screen
+        name="Settings"
+        component={SettingsScreen}
+        options={{ tabBarLabel: 'Config', tabBarIcon: ({color}) => <Icon name="settings" size={22} color={color}/> }}
+      />
+      {/* Sprint 8: "Importar" reemplaza a "Logs" en la barra de tabs */}
+      <Tab.Screen
+        name="Import"
+        component={VintedImportScreen}
+        options={{ tabBarLabel: 'Importar', tabBarIcon: ({color}) => <Icon name="upload-cloud" size={22} color={color}/> }}
+      />
     </Tab.Navigator>
   );
 }
@@ -57,41 +83,33 @@ export default function App() {
     try {
       const token = AuthService.getToken();
       setIsAuthenticated(!!token);
+    } catch {
+      setIsAuthenticated(false);
     } finally {
       setIsReady(true);
     }
   }, []);
 
-  if (!isReady) {
-    return null;
-  }
+  if (!isReady) return null;
 
   return (
     <SafeAreaProvider>
       <NavigationContainer>
-        {isAuthenticated ? (
-          <Stack.Navigator screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="Main" component={MainTabs} />
-            <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
-            <Stack.Screen name="SoldEditDetail" component={SoldEditDetailView} />
-            <Stack.Screen name="VintedImport" component={VintedImportScreen} />
-          </Stack.Navigator>
-        ) : (
-          <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          {!isAuthenticated ? (
             <Stack.Screen name="Login">
-              {(props) => (
-                <LoginScreen
-                  {...props}
-                  onLogin={() => setIsAuthenticated(true)}
-                />
-              )}
+              {(props) => <LoginScreen {...props} onLogin={() => setIsAuthenticated(true)} />}
             </Stack.Screen>
-            <Stack.Screen name="Main" component={MainTabs} />
-            <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
-            <Stack.Screen name="SoldEditDetail" component={SoldEditDetailView} />
-            <Stack.Screen name="VintedImport" component={VintedImportScreen} />
-          </Stack.Navigator>
-        )}
+          ) : (
+            <>
+              <Stack.Screen name="Main" component={MainTabs} />
+              <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
+              <Stack.Screen name="SoldEditDetail" component={SoldEditDetailView} />
+              {/* Sprint 8: Logs accesible desde Settings o como stack screen */}
+              <Stack.Screen name="Logs" component={LogsScreen} />
+            </>
+          )}
+        </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>
   );

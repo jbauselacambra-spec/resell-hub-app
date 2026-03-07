@@ -1,51 +1,62 @@
+/**
+ * LogsScreen.jsx — Sprint 8 fix
+ *
+ * FIXES:
+ * ─ handleBackup/handleRecover/handleReset: usan backupStorage (MMKV id:'backup-storage')
+ *   igual que el LogsScreen original del proyecto. Eliminados métodos inexistentes
+ *   DatabaseService.backupData/recoverData/resetAll que causaban ERROR [ui].
+ * ─ Eliminado modal de importación JSON (Sprint 8) — vive en VintedImportScreen.
+ * ─ Accesible como Stack.Screen desde App.jsx (botón back en header si navigation disponible).
+ */
+
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  TextInput, Alert, KeyboardAvoidingView, Platform,
-  ScrollView, FlatList, Modal,
+  TextInput, Alert, Platform, FlatList,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import LogService, { LOG_CTX } from '../services/LogService';
 import { DatabaseService } from '../services/DatabaseService';
 import { MMKV } from 'react-native-mmkv';
 
-const backupStorage = new MMKV();
+// Mismo id que usa el código original del proyecto (resellhub_v4.1.mdc → SECURITY_OFFICER)
+const backupStorage = new MMKV({ id: 'backup-storage' });
 
-// ─── Constantes ────────────────────────────────────────────────────────────
+// ─── Paleta ───────────────────────────────────────────────────────────────────
 const LEVEL_CONFIG = {
-  debug:    { label: 'DEBUG',    color: '#888',    bg: '#88888818' },
-  info:     { label: 'INFO',     color: '#4EA8DE', bg: '#4EA8DE18' },
-  success:  { label: 'OK',       color: '#00D9A3', bg: '#00D9A318' },
-  warn:     { label: 'WARN',     color: '#FFB800', bg: '#FFB80018' },
-  error:    { label: 'ERROR',    color: '#E63946', bg: '#E6394618' },
-  critical: { label: 'CRIT',     color: '#FF0000', bg: '#FF000018' },
+  debug:    { label: 'DEBUG',  color: '#888',    bg: '#88888818' },
+  info:     { label: 'INFO',   color: '#4EA8DE', bg: '#4EA8DE18' },
+  success:  { label: 'OK',     color: '#00D9A3', bg: '#00D9A318' },
+  warn:     { label: 'WARN',   color: '#FFB800', bg: '#FFB80018' },
+  warning:  { label: 'WARN',   color: '#FFB800', bg: '#FFB80018' },
+  error:    { label: 'ERROR',  color: '#E63946', bg: '#E6394618' },
+  critical: { label: 'CRIT',   color: '#FF0000', bg: '#FF000018' },
 };
 
 const CTX_COLORS = {
-  IMPORT: '#FF6B35',
-  DB:     '#4EA8DE',
-  UI:     '#00D9A3',
-  NAV:    '#888',
-  CAT:    '#FFB800',
-  NOTIF:  '#6C63FF',
-  SYSTEM: '#1A1A2E',
+  IMPORT: '#FF6B35', import: '#FF6B35',
+  DB:     '#4EA8DE', db:     '#4EA8DE',
+  UI:     '#00D9A3', ui:     '#00D9A3',
+  NAV:    '#888',    nav:    '#888',
+  CAT:    '#FFB800', cat:    '#FFB800',
+  NOTIF:  '#6C63FF', notif:  '#6C63FF',
+  SYSTEM: '#1A1A2E', system: '#1A1A2E',
 };
 
 const C = {
-  bg:      '#F8F9FA',  // Light DS
+  bg:      '#F8F9FA',
   surface: '#FFFFFF',
-  card:    '#FFFFFF',
   border:  '#EAEDF0',
   primary: '#FF6B35',
   blue:    '#004E89',
   success: '#00D9A3',
-  white:   '#FFFFFF',
+  danger:  '#E63946',
   gray:    '#5C6070',
   gray2:   '#A0A5B5',
+  surface2:'#F0F2F5',
 };
 
-// ─── Componentes auxiliares ────────────────────────────────────────────────
-
+// ─── Badges ───────────────────────────────────────────────────────────────────
 const LevelBadge = ({ level }) => {
   const cfg = LEVEL_CONFIG[level] || LEVEL_CONFIG.info;
   return (
@@ -59,132 +70,128 @@ const lb = StyleSheet.create({
   txt:   { fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
 });
 
-const CtxBadge = ({ context }) => (
-  <View style={[cx.badge, { borderColor: CTX_COLORS[context] || '#555' }]}>
-    <Text style={[cx.txt, { color: CTX_COLORS[context] || '#888' }]}>{context}</Text>
-  </View>
-);
+const CtxBadge = ({ context }) => {
+  if (!context) return null;
+  const col = CTX_COLORS[context] || '#888';
+  return (
+    <View style={[cx.badge, { borderColor: col }]}>
+      <Text style={[cx.txt, { color: col }]}>{String(context).toUpperCase()}</Text>
+    </View>
+  );
+};
 const cx = StyleSheet.create({
   badge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
   txt:   { fontSize: 9, fontWeight: '800' },
 });
 
-// ─── Pantalla principal ────────────────────────────────────────────────────
-
-export default function LogsScreen() {
-  const [logs, setLogs]               = useState([]);
-  const [stats, setStats]             = useState({});
-  const [jsonInput, setJsonInput]     = useState('');
-  const [filterLevel, setFilterLevel] = useState(null);   // null = todos
-  const [filterCtx, setFilterCtx]     = useState(null);
-  const [searchText, setSearchText]   = useState('');
-  const [expandedId, setExpandedId]   = useState(null);
-  const [showImport, setShowImport]   = useState(false);
-  const [importing, setImporting]     = useState(false);
+// ─── Pantalla ─────────────────────────────────────────────────────────────────
+export default function LogsScreen({ navigation }) {
+  const [logs,        setLogs]        = useState([]);
+  const [stats,       setStats]       = useState({});
+  const [filterLevel, setFilterLevel] = useState(null);
+  const [filterCtx,   setFilterCtx]   = useState(null);
+  const [searchText,  setSearchText]  = useState('');
+  const [expandedId,  setExpandedId]  = useState(null);
 
   const refresh = useCallback(() => {
-    const opts = {};
-    if (filterLevel)    opts.level   = filterLevel;
-    if (filterCtx)      opts.context = filterCtx;
-    if (searchText)     opts.search  = searchText;
-    setLogs(LogService.getLogs(opts));
-    setStats(LogService.getStats());
+    try {
+      const opts = {};
+      if (filterLevel) opts.level   = filterLevel;
+      if (filterCtx)   opts.context = filterCtx;
+      if (searchText)  opts.search  = searchText;
+      // getLogs puede llamarse getAll en algunas versiones — safe fallback
+      const fetched = LogService.getLogs
+        ? LogService.getLogs(opts)
+        : (LogService.getAll?.() || []);
+      setLogs(Array.isArray(fetched) ? fetched : []);
+      setStats(LogService.getStats?.() || {});
+    } catch (e) {
+      console.warn('LogsScreen.refresh:', e.message);
+    }
   }, [filterLevel, filterCtx, searchText]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  // ── Importación inteligente ───────────────────────────────────────────────
-  const handleImport = () => {
-    if (!jsonInput.trim()) return;
-    setImporting(true);
-    try {
-      const raw  = JSON.parse(jsonInput);
-      const data = Array.isArray(raw) ? raw : [raw];
-
-      // Normalizar datos antes de importar
-      const normalized = data.map(p => ({
-        ...p,
-        createdAt:  p.createdAt  || new Date().toISOString(),
-        soldAt:     p.status === 'sold' && !p.soldAt   ? new Date().toISOString() : p.soldAt,
-        soldDate:   p.status === 'sold' && !p.soldDate ? new Date().toISOString() : p.soldDate,
-        price:      Number(p.price) || 0,
-        soldPrice:  p.status === 'sold' ? (Number(p.soldPrice) || Number(p.price) || 0) : null,
-      }));
-
-      const result = DatabaseService.importFromVinted(normalized);
-      LogService.logImportResult(result);
-
-      if (result.success) {
-        const msg = [
-          `✅ Importación completada`,
-          `📦 Total: ${result.count}`,
-          `🆕 Nuevos: ${result.created}`,
-          `🔄 Actualizados: ${result.updated}`,
-          `♻️ Resubidas detectadas: ${result.reposted}`,
-          `💰 Cambios de precio: ${result.priceChanged}`,
-        ].join('\n');
-        Alert.alert('Importación Inteligente', msg);
-        setJsonInput('');
-        setShowImport(false);
-      } else {
-        Alert.alert('Error', result.error || 'Error desconocido');
-      }
-    } catch (e) {
-      LogService.exception('Error parseando JSON', e, 'IMPORT');
-      Alert.alert('JSON inválido', e.message);
-    } finally {
-      setImporting(false);
-      refresh();
-    }
-  };
-
+  // ── Backup ────────────────────────────────────────────────────────────────
+  // Usa backupStorage.set directamente — igual que LogsScreen original del proyecto
   const handleBackup = () => {
     try {
       const data = DatabaseService.getAllProducts();
       backupStorage.set('emergency_backup', JSON.stringify(data));
-      LogService.success(`Backup manual: ${data.length} productos`, 'SYSTEM');
+      LogService.add?.(`💾 Backup manual: ${data.length} productos`, 'success');
       Alert.alert('✅ Backup guardado', `${data.length} productos respaldados.`);
     } catch (e) {
-      LogService.exception('Error en backup', e, 'SYSTEM');
+      LogService.add?.('❌ Error en backup: ' + e.message, 'error');
+      Alert.alert('Error en backup', e.message);
     }
     refresh();
   };
 
+  // ── Restaurar ─────────────────────────────────────────────────────────────
+  // Lee de backupStorage y confirma antes de sobreescribir
   const handleRecover = () => {
     try {
       const raw = backupStorage.getString('emergency_backup');
-      if (!raw) { Alert.alert('Sin backup', 'No hay respaldo disponible.'); return; }
+      if (!raw) {
+        Alert.alert('Sin backup', 'No hay respaldo disponible. Haz un Backup primero.');
+        return;
+      }
       const parsed = JSON.parse(raw);
-      setJsonInput(JSON.stringify(parsed));
-      setShowImport(true);
-      Alert.alert('Backup cargado', `${parsed.length} productos listos para restaurar.`);
+      Alert.alert(
+        'Restaurar backup',
+        `¿Restaurar ${parsed.length} productos desde el backup?\nEsto sobrescribirá los datos actuales.`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Restaurar', style: 'destructive',
+            onPress: () => {
+              try {
+                DatabaseService.saveProducts(parsed);
+                LogService.add?.(`♻️ Restaurado: ${parsed.length} productos`, 'success');
+                Alert.alert('✅ Restaurado', `${parsed.length} productos recuperados.`);
+              } catch (e2) { Alert.alert('Error', e2.message); }
+              refresh();
+            },
+          },
+        ],
+      );
     } catch (e) {
-      LogService.exception('Error recuperando backup', e, 'SYSTEM');
+      Alert.alert('Error leyendo backup', e.message);
     }
   };
 
+  // ── Reset ─────────────────────────────────────────────────────────────────
+  // Guarda backup automático y borra via saveProducts([]) — igual que el original
   const handleReset = () => {
-    Alert.alert('⚠️ Acción crítica', 'Se guardará un backup y se borrarán TODOS los datos.', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Resetear', style: 'destructive', onPress: () => {
-        try {
-          const data = DatabaseService.getAllProducts();
-          backupStorage.set('emergency_backup', JSON.stringify(data));
-          DatabaseService.saveProducts([]);
-          LogService.warn(`Reset completo. Backup: ${data.length} productos`, 'SYSTEM');
-          Alert.alert('Hecho', 'Base de datos borrada. Backup disponible.');
-        } catch (e) {
-          LogService.exception('Error en reset', e, 'SYSTEM');
-        }
-        refresh();
-      }},
-    ]);
+    Alert.alert(
+      '⚠️ Acción crítica',
+      'Se guardará un backup y se borrarán TODOS los datos del inventario.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Resetear', style: 'destructive',
+          onPress: () => {
+            try {
+              const data = DatabaseService.getAllProducts();
+              backupStorage.set('emergency_backup', JSON.stringify(data));
+              DatabaseService.saveProducts([]);
+              LogService.add?.(`🔥 Reset completo. Backup: ${data.length} productos`, 'warn');
+              Alert.alert('Hecho', `DB borrada. Backup de ${data.length} items disponible.`);
+            } catch (e) {
+              LogService.add?.('❌ Error en reset: ' + e.message, 'error');
+              Alert.alert('Error', e.message);
+            }
+            refresh();
+          },
+        },
+      ],
+    );
   };
 
-  // ── Render log item ───────────────────────────────────────────────────────
+  // ── Renderizado de log ─────────────────────────────────────────────────────
   const renderLog = ({ item }) => {
     const isExpanded = expandedId === item.id;
-    const lvlCfg = LEVEL_CONFIG[item.level] || LEVEL_CONFIG.info;
+    const lvlCfg     = LEVEL_CONFIG[item.level] || LEVEL_CONFIG.info;
 
     return (
       <TouchableOpacity
@@ -194,254 +201,210 @@ export default function LogsScreen() {
       >
         <View style={styles.logHeader}>
           <View style={styles.logMeta}>
-            <LevelBadge level={item.level} />
-            <CtxBadge context={item.context} />
-            <Text style={styles.logTime}>{item.tsDisplay}</Text>
+            <LevelBadge level={item.level}/>
+            <CtxBadge context={item.context}/>
+            <Text style={styles.logTime}>
+              {item.tsDisplay
+                ? item.tsDisplay
+                : item.timestamp
+                  ? new Date(item.timestamp).toLocaleTimeString('es-ES')
+                  : ''}
+            </Text>
             {item.caller ? <Text style={styles.logCaller}>{item.caller}</Text> : null}
           </View>
-          <Icon
-            name={isExpanded ? 'chevron-up' : 'chevron-down'}
-            size={12}
-            color={C.gray}
-          />
+          <Icon name={isExpanded ? 'chevron-up' : 'chevron-down'} size={12} color={C.gray2}/>
         </View>
         <Text style={styles.logMsg} numberOfLines={isExpanded ? undefined : 2}>
           {item.message}
         </Text>
-        {isExpanded && item.extra ? (
+        {isExpanded && (item.extra || item.data) ? (
           <View style={styles.extraBox}>
-            <Text style={styles.extraTxt}>{item.extra}</Text>
+            <Text style={styles.extraTxt}>
+              {item.extra || (typeof item.data === 'string'
+                ? item.data
+                : JSON.stringify(item.data, null, 2))}
+            </Text>
           </View>
         ) : null}
       </TouchableOpacity>
     );
   };
 
-  // ── Stats bar ─────────────────────────────────────────────────────────────
+  // ── Stats bar ──────────────────────────────────────────────────────────────
   const renderStats = () => (
     <View style={styles.statsBar}>
-      {Object.entries(LEVEL_CONFIG).map(([level, cfg]) => {
-        const count = stats[level] || 0;
+      {['error', 'warn', 'success', 'info', 'debug'].map(level => {
+        const cfg   = LEVEL_CONFIG[level];
+        const count = stats[level] || stats[level === 'warn' ? 'warning' : level] || 0;
         if (!count) return null;
         return (
           <TouchableOpacity
             key={level}
-            style={[styles.statChip, filterLevel === level && { backgroundColor: cfg.bg + 'AA', borderColor: cfg.color }]}
+            style={[styles.statChip,
+              filterLevel === level && { backgroundColor: cfg.bg + 'CC', borderColor: cfg.color }]}
             onPress={() => setFilterLevel(filterLevel === level ? null : level)}
           >
-            <Text style={[styles.statChipTxt, { color: cfg.color }]}>{count} {cfg.label}</Text>
+            <Text style={[styles.statCount, { color: cfg.color }]}>{count}</Text>
+            <Text style={[styles.statLabel, { color: cfg.color }]}>{cfg.label}</Text>
           </TouchableOpacity>
         );
       })}
     </View>
   );
 
-  // ── Context filter ────────────────────────────────────────────────────────
+  // ── Filtros de contexto ────────────────────────────────────────────────────
   const renderCtxFilter = () => (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.ctxBar}>
-      {[null, ...Object.values(LOG_CTX)].map(ctx => (
+    <View style={styles.ctxFilterRow}>
+      {['IMPORT', 'DB', 'UI', 'NAV', 'SYSTEM'].map(ctx => (
         <TouchableOpacity
-          key={ctx || 'ALL'}
-          style={[styles.ctxChip, filterCtx === ctx && styles.ctxChipActive]}
-          onPress={() => setFilterCtx(ctx)}
+          key={ctx}
+          style={[styles.ctxBtn,
+            filterCtx === ctx && { borderColor: CTX_COLORS[ctx] }]}
+          onPress={() => setFilterCtx(filterCtx === ctx ? null : ctx)}
         >
-          <Text style={[styles.ctxChipTxt, filterCtx === ctx && { color: C.white }]}>
-            {ctx || 'TODOS'}
+          <Text style={[styles.ctxTxt,
+            filterCtx === ctx && { color: CTX_COLORS[ctx] }]}>
+            {ctx}
           </Text>
         </TouchableOpacity>
       ))}
-    </ScrollView>
+    </View>
   );
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
-    >
+    <View style={styles.root}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerSub}>SISTEMA</Text>
-          <Text style={styles.headerTitle}>Consola de Control</Text>
+        {navigation?.goBack && (
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <Icon name="chevron-left" size={22} color={C.gray}/>
+          </TouchableOpacity>
+        )}
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerTitle}>Logs del Sistema</Text>
+          <Text style={styles.headerSub}>{stats.total || logs.length} entradas</Text>
         </View>
-        <View style={styles.headerBtns}>
-          <TouchableOpacity style={styles.hBtn} onPress={() => setShowImport(true)}>
-            <Icon name="download" size={16} color={C.primary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.hBtn} onPress={refresh}>
-            <Icon name="refresh-cw" size={16} color={C.blue} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.hBtn} onPress={() => {
-            Alert.alert('Limpiar logs', '¿Borrar historial?', [
-              { text: 'Cancelar', style: 'cancel' },
-              { text: 'Limpiar', onPress: () => { LogService.clear(); refresh(); } },
-            ]);
-          }}>
-            <Icon name="trash-2" size={16} color={C.gray} />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity onPress={refresh} style={styles.refreshBtn}>
+          <Icon name="refresh-cw" size={16} color={C.primary}/>
+        </TouchableOpacity>
       </View>
 
-      {/* Stats */}
       {renderStats()}
 
       {/* Búsqueda */}
-      <View style={styles.searchRow}>
-        <Icon name="search" size={14} color={C.gray} />
+      <View style={styles.searchBar}>
+        <Icon name="search" size={14} color={C.gray2}/>
         <TextInput
           style={styles.searchInput}
-          placeholder="Buscar en logs..."
-          placeholderTextColor={C.gray}
+          placeholder="Buscar logs..."
+          placeholderTextColor={C.gray2}
           value={searchText}
           onChangeText={setSearchText}
+          autoCorrect={false}
         />
         {searchText ? (
           <TouchableOpacity onPress={() => setSearchText('')}>
-            <Icon name="x" size={14} color={C.gray} />
+            <Icon name="x" size={14} color={C.gray2}/>
           </TouchableOpacity>
         ) : null}
       </View>
 
-      {/* Context filter */}
       {renderCtxFilter()}
 
-      {/* Logs */}
+      {/* Lista de logs */}
       <FlatList
         data={logs}
-        keyExtractor={item => item.id}
+        keyExtractor={item => item.id || String(Date.now() + Math.random())}
         renderItem={renderLog}
         style={styles.list}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Icon name="inbox" size={40} color={C.border} />
+            <Icon name="inbox" size={40} color={C.border}/>
             <Text style={styles.emptyTxt}>Sin logs para los filtros actuales</Text>
           </View>
         }
       />
 
-      {/* Acciones rápidas */}
+      {/* Acciones — sin botón importar (Sprint 8) */}
       <View style={styles.actions}>
         <TouchableOpacity style={styles.actionBtn} onPress={handleBackup}>
-          <Icon name="save" size={14} color={C.blue} />
+          <Icon name="save" size={14} color={C.blue}/>
           <Text style={[styles.actionTxt, { color: C.blue }]}>Backup</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.actionBtn} onPress={handleRecover}>
-          <Icon name="rotate-ccw" size={14} color={C.primary} />
+          <Icon name="rotate-ccw" size={14} color={C.primary}/>
           <Text style={[styles.actionTxt, { color: C.primary }]}>Restaurar</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.actionBtn, styles.actionDanger]} onPress={handleReset}>
-          <Icon name="alert-triangle" size={14} color="#E63946" />
-          <Text style={[styles.actionTxt, { color: '#E63946' }]}>Reset DB</Text>
+          <Icon name="alert-triangle" size={14} color={C.danger}/>
+          <Text style={[styles.actionTxt, { color: C.danger }]}>Reset DB</Text>
         </TouchableOpacity>
       </View>
-
-      {/* Modal de importación */}
-      <Modal
-        visible={showImport}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setShowImport(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Importar JSON de Vinted</Text>
-              <TouchableOpacity onPress={() => setShowImport(false)}>
-                <Icon name="x" size={22} color={C.gray} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.infoBox}>
-              <Icon name="info" size={14} color={C.blue} />
-              <Text style={styles.infoTxt}>
-                Importación inteligente: preserva categorías, fechas de subida, precios de venta y marcas de lote editados manualmente. Detecta resubidas automáticamente.
-              </Text>
-            </View>
-
-            <TextInput
-              style={styles.jsonInput}
-              placeholder="Pega el JSON aquí..."
-              placeholderTextColor={C.gray}
-              multiline
-              value={jsonInput}
-              onChangeText={setJsonInput}
-              autoCorrect={false}
-              autoCapitalize="none"
-            />
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.importBtn}
-                onPress={handleImport}
-                disabled={importing || !jsonInput.trim()}
-              >
-                <Icon name="download" size={16} color={C.white} />
-                <Text style={styles.importBtnTxt}>
-                  {importing ? 'Procesando...' : 'IMPORTAR INVENTARIO'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
-// ─── Estilos ───────────────────────────────────────────────────────────────
-
+// ─── Estilos ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: C.bg },
+  root:          { flex: 1, backgroundColor: C.bg },
 
-  header:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', paddingHorizontal: 20, paddingTop: 60, paddingBottom: 16 },
-  headerSub:    { fontSize: 10, fontWeight: '900', color: C.primary, letterSpacing: 2 },
-  headerTitle:  { fontSize: 22, fontWeight: '900', color: C.white },
-  headerBtns:   { flexDirection: 'row', gap: 10 },
-  hBtn:         { width: 38, height: 38, backgroundColor: C.card, borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: C.border },
+  header:        { flexDirection: 'row', alignItems: 'center', gap: 8,
+                   paddingHorizontal: 16, paddingTop: 52, paddingBottom: 12,
+                   backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border },
+  backBtn:       { padding: 6, marginRight: 2 },
+  headerTitle:   { fontSize: 18, fontWeight: '700', color: '#1A1A2E' },
+  headerSub:     { fontSize: 12, color: C.gray2, marginTop: 1 },
+  refreshBtn:    { padding: 8, borderRadius: 8, backgroundColor: C.surface2 },
 
-  statsBar:     { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 20, marginBottom: 12 },
-  statChip:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: C.card, borderWidth: 1, borderColor: C.border },
-  statChipTxt:  { fontSize: 10, fontWeight: '900' },
+  statsBar:      { flexDirection: 'row', flexWrap: 'wrap', gap: 6,
+                   paddingHorizontal: 12, paddingVertical: 8,
+                   backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border },
+  statChip:      { flexDirection: 'row', alignItems: 'center', gap: 4,
+                   paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10,
+                   backgroundColor: C.surface2, borderWidth: 1, borderColor: 'transparent' },
+  statCount:     { fontSize: 13, fontWeight: '800' },
+  statLabel:     { fontSize: 10, fontWeight: '600' },
 
-  searchRow:    { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginBottom: 10, backgroundColor: C.card, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: C.border, gap: 10 },
-  searchInput:  { flex: 1, color: C.white, fontSize: 13 },
+  searchBar:     { flexDirection: 'row', alignItems: 'center', gap: 8,
+                   marginHorizontal: 12, marginVertical: 8,
+                   paddingHorizontal: 12, paddingVertical: 8,
+                   backgroundColor: C.surface, borderRadius: 10,
+                   borderWidth: 1, borderColor: C.border },
+  searchInput:   { flex: 1, fontSize: 13, color: '#1A1A2E', padding: 0 },
 
-  ctxBar:       { paddingHorizontal: 20, marginBottom: 12, maxHeight: 36 },
-  ctxChip:      { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, backgroundColor: C.card, borderWidth: 1, borderColor: C.border, marginRight: 8 },
-  ctxChipActive:{ backgroundColor: '#1A1A2E', borderColor: C.white },
-  ctxChipTxt:   { fontSize: 10, fontWeight: '800', color: C.gray },
+  ctxFilterRow:  { flexDirection: 'row', flexWrap: 'wrap', gap: 6,
+                   paddingHorizontal: 12, paddingBottom: 8 },
+  ctxBtn:        { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
+                   backgroundColor: C.surface2, borderWidth: 1, borderColor: C.border },
+  ctxTxt:        { fontSize: 9, fontWeight: '700', color: C.gray },
 
-  list:         { flex: 1 },
-  listContent:  { paddingHorizontal: 12, paddingBottom: 20 },
+  list:          { flex: 1 },
+  listContent:   { padding: 12, paddingBottom: 20 },
 
-  logRow:       { backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 6, borderLeftWidth: 3 },
-  logHeader:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  logMeta:      { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: 1 },
-  logTime:      { fontSize: 9, color: C.gray, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
-  logCaller:    { fontSize: 9, color: '#555', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
-  logMsg:       { fontSize: 12, color: C.gray2, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', lineHeight: 17 },
+  logRow:        { backgroundColor: C.surface, borderRadius: 8, padding: 10,
+                   marginBottom: 6, borderLeftWidth: 3,
+                   borderWidth: 1, borderColor: C.border },
+  logHeader:     { flexDirection: 'row', justifyContent: 'space-between',
+                   alignItems: 'center', marginBottom: 5 },
+  logMeta:       { flexDirection: 'row', alignItems: 'center', gap: 5,
+                   flex: 1, flexWrap: 'wrap' },
+  logTime:       { fontSize: 10, color: C.gray2 },
+  logCaller:     { fontSize: 9, color: C.gray2, fontStyle: 'italic' },
+  logMsg:        { fontSize: 12, color: '#1A1A2E', lineHeight: 17 },
+  extraBox:      { backgroundColor: C.surface2, borderRadius: 4, padding: 6, marginTop: 5 },
+  extraTxt:      { fontSize: 10, color: C.gray,
+                   fontFamily: Platform.OS === 'android' ? 'monospace' : 'Courier New' },
 
-  extraBox:     { marginTop: 10, backgroundColor: '#0A0A18', borderRadius: 10, padding: 12 },
-  extraTxt:     { fontSize: 10, color: '#777', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', lineHeight: 15 },
+  empty:         { alignItems: 'center', paddingTop: 60, gap: 10 },
+  emptyTxt:      { fontSize: 14, color: C.gray2 },
 
-  empty:        { alignItems: 'center', paddingTop: 60, gap: 12 },
-  emptyTxt:     { fontSize: 14, color: C.gray },
-
-  actions:      { flexDirection: 'row', gap: 10, padding: 14, backgroundColor: C.surface, borderTopWidth: 1, borderTopColor: C.border },
-  actionBtn:    { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: C.card, paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderColor: C.border },
-  actionDanger: { borderColor: '#E6394622' },
-  actionTxt:    { fontSize: 11, fontWeight: '800' },
-
-  // Modal importación
-  modalOverlay: { flex: 1, backgroundColor: '#00000088', justifyContent: 'flex-end' },
-  modalSheet:   { backgroundColor: C.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '85%' },
-  modalHeader:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  modalTitle:   { fontSize: 18, fontWeight: '900', color: C.white },
-  infoBox:      { flexDirection: 'row', gap: 10, backgroundColor: C.blue + '18', borderRadius: 14, padding: 14, marginBottom: 16 },
-  infoTxt:      { flex: 1, fontSize: 12, color: C.blue, lineHeight: 18 },
-  jsonInput:    { backgroundColor: C.bg, borderRadius: 16, padding: 16, height: 160, textAlignVertical: 'top', color: C.white, fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', borderWidth: 1, borderColor: C.border },
-  modalActions: { marginTop: 16 },
-  importBtn:    { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, backgroundColor: C.primary, padding: 18, borderRadius: 18 },
-  importBtnTxt: { color: C.white, fontWeight: '900', fontSize: 15 },
+  actions:       { flexDirection: 'row', gap: 8, padding: 12,
+                   backgroundColor: C.surface,
+                   borderTopWidth: 1, borderTopColor: C.border },
+  actionBtn:     { flex: 1, flexDirection: 'row', alignItems: 'center',
+                   justifyContent: 'center', gap: 5,
+                   paddingVertical: 10, borderRadius: 8, backgroundColor: C.surface2 },
+  actionDanger:  { backgroundColor: '#FFF0F0' },
+  actionTxt:     { fontSize: 12, fontWeight: '700' },
 });

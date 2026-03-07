@@ -2368,3 +2368,527 @@ git commit -m "fix(devops): JAVA_HOME auto-detection en agent-deploy.ps1 v5.3
 - Build abortado con instrucciones si Java no encontrado (exit 1)
 - -Check: muestra version Java detectada y compatibilidad con Gradle 8.x"
 ```
+
+# 📋 Sprint 8 — JSON Import con DocumentPicker + Match Historial → Inventario
+
+> **Sprint 8 · feature/sprint8-json-import-v2**
+> Fecha: Marzo 2026
+
+---
+
+## Resumen ejecutivo
+
+Sprint 8 consolida la importación de datos de Vinted en un flujo único, limpio y sin
+fricciones. Se elimina la duplicidad del botón de importar en ProductsScreen y
+SoldHistoryScreen, se reemplaza el tab "Logs" por "Importar" en la barra de navegación
+principal, y se introduce la función `matchHistoryToInventory()` para cruzar automáticamente
+el historial de ventas con el inventario y actualizar `soldPriceReal` + `soldDateReal`.
+
+---
+
+## [PRODUCT_OWNER] — Validación PO-001
+
+```
+FEATURE: Sprint 8 — JSON Import v2 con DocumentPicker
+OBJETIVO: Eliminar fricción de copiar/pegar JSON; activar el flujo multi-año de historial
+
+CRITERIOS:
+  OK El usuario puede adjuntar un JSON en ≤ 2 taps (seleccionar archivo → confirmar)
+  OK Los 7 Campos Sagrados permanecen intactos
+  OK matchHistoryToInventory actualiza soldPriceReal + soldDateReal sin tocar firstUploadDate
+  OK Las compras del JSON de ventas actuales se ignoran automáticamente
+  OK El botón "Importar" desaparece de ProductsScreen y SoldHistoryScreen
+  OK Logs sigue accesible desde Settings y como stack screen
+  OK Dedup por orderId activo en VintedSalesDB (multi-año seguro)
+
+FUERA DE ALCANCE:
+  NO Importación masiva paginada (Fase 2)
+  NO Subida automática a Vinted
+```
+
+---
+
+## [ARCHITECT] — Cambios de arquitectura
+
+### Navegación: Tab "Logs" → Tab "Importar"
+
+```
+App.jsx — MainTabs
+
+ANTES (Sprint 7):
+  Home | Inventario | Vendidos | Stats | Config | Logs
+
+DESPUÉS (Sprint 8):
+  Home | Inventario | Vendidos | Stats | Config | Importar
+
+LogsScreen → Stack.Screen (accesible desde Settings o header de Importar)
+```
+
+### Nuevo flujo de importación
+
+```
+VintedImportScreen (tab)
+       ↓
+[Botón "Adjuntar JSON"] → DocumentPicker.getDocumentAsync()
+       ↓
+FileSystem.readAsStringAsync(uri)
+       ↓
+detectContentType(text)
+  ├─ json_products       → parseJsonProducts()      → MODO C
+  ├─ json_sales_current  → parseJsonSalesCurrent()  → MODO D (filtra compras)
+  └─ json_sales_history  → parseJsonSalesHistory()  → MODO E (ventas + compras)
+       ↓
+Preview con selección por checkboxes
+       ↓
+ConfirmModal (específico por modo)
+       ↓
+  MODO C → DatabaseService.importFromVinted()
+  MODO D → matchHistoryToInventory() [solo ventas]
+  MODO E → VintedSalesDB.saveRecords() + matchHistoryToInventory()
+```
+
+### Dependencias nuevas
+
+```json
+"expo-document-picker": "^12.x",
+"expo-file-system": "^17.x"
+```
+
+Verificar que están en `package.json`. Si no:
+```bash
+npx expo install expo-document-picker expo-file-system
+```
+
+---
+
+## [DATA_SCIENTIST] — matchHistoryToInventory()
+
+### Algoritmo
+
+```
+Para cada VintedSaleItem (solo ventas):
+
+  1. Buscar por orderId embebido en product.id
+     e.g. product.id = "vinted_20679079955" → match con orderId "20679079955"
+
+  2. Si no hay match, normalizar título:
+     normalize(s) = s.toLowerCase()
+                     .replace(emojis, '')
+                     .replace(símbolos, ' ')
+                     .replace(/\s+/, ' ')
+                     .trim()
+     Buscar en índice de títulos normalizados del inventario
+
+  3. Si hay colisión de títulos:
+     → Preferir el ya marcado como 'sold'
+     → Si ninguno vendido, usar el más reciente
+
+  4. Si hay coincidencia:
+     → Actualiza soldPriceReal (solo si el producto no tenía valor)
+     → Actualiza soldDateReal (solo si el producto no tenía fecha real)
+     → Marca status = 'sold' si estaba 'available'
+     → Llama a DatabaseService.updateProduct()
+
+  5. Si no hay coincidencia:
+     → Crea producto nuevo vía mapToInventoryProduct() + importFromVinted()
+     → Cuenta en result.created
+
+Retorna: { matched, created, skipped, errors }
+```
+
+### Protección de Los 7 Campos Sagrados en el match
+
+```
+✓ firstUploadDate   → NUNCA se toca en matchHistoryToInventory
+✓ category          → NUNCA se toca
+✓ title             → NUNCA se toca (solo se usa para buscar)
+✓ brand             → NUNCA se toca
+✓ soldPriceReal     → Solo se escribe si el producto no tenía valor (null/0)
+✓ soldDateReal      → Solo se escribe si el producto no tenía fecha real
+✓ isBundle          → NUNCA se toca
+```
+
+---
+
+## [UI_SPECIALIST] — VintedImportScreen v2
+
+### Cambios respecto Sprint 7
+
+| Elemento | Sprint 7 | Sprint 8 |
+|---------|---------|---------|
+| Acceso | Stack screen desde ProductsScreen/SoldHistory | Tab propio "Importar" |
+| Input | Clipboard / TextArea manual | DocumentPicker (adjuntar archivo) |
+| Modos soportados | A, B, C, D, E | C, D, E (A y B deprecados) |
+| Filtro compras Modo D | Manual | Automático al parsear |
+| Match historial | No | matchHistoryToInventory() |
+| Stats previo Modo E | No | Quick stats (ventas/compras/€) |
+| Botón Logs | N/A | Acceso directo en header |
+
+### Drop Zone
+
+```
+┌─────────────────────────────────────────────────────┐
+│                                                     │
+│              ☁ [icono upload]                      │
+│                                                     │
+│           Adjuntar archivo JSON                     │
+│    Toca para seleccionar desde tu dispositivo       │
+│                                                     │
+│              [ .json · .txt ]                       │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+### Guía de modos (cuando no hay archivo)
+
+```
+MODO C ─ Escaparate (Inventario)   [naranja]
+MODO D ─ Ventas año actual         [verde]
+MODO E ─ Historial completo        [azul]
+```
+
+### Quick Stats (solo Modo E, tras parsear)
+
+```
+┌──────────┬──────────┬──────────┐
+│    35    │    12    │  234 €   │
+│  ventas  │ compras  │facturado │
+└──────────┴──────────┴──────────┘
+```
+
+---
+
+## [QA_ENGINEER] — Consideraciones Sprint 8
+
+### expo-document-picker permisos Android
+
+El `DocumentPicker` de Expo no requiere permisos especiales de almacenamiento en
+Android 10+ (usa el SAF — Storage Access Framework). No necesita `READ_EXTERNAL_STORAGE`
+en el manifest.
+
+### Dedup multi-año en VintedSalesDB
+
+Los archivos de historial se importan por año (2025, 2024, 2023...). La dedup
+por `orderId` en `VintedSalesDB.saveRecords()` garantiza que importar el mismo
+año dos veces no crea duplicados.
+
+### Filtro de compras automático Modo D
+
+```js
+// Al parsear json_sales_current, las compras se filtran antes de mostrar preview:
+const items = raw.filter(i => i.type !== 'compra');
+```
+
+El usuario nunca ve las compras del archivo de ventas actuales.
+
+### Acepta JSON con campo `soldPriceReal=0`
+
+```js
+// matchHistoryToInventory solo actualiza si el producto NO tenía valor:
+if (item.soldPriceReal && (!prod.soldPriceReal || prod.soldPriceReal === 0)) {
+  updatedProducts[matchIdx].soldPriceReal = item.soldPriceReal;
+}
+```
+
+Los productos con precio real ya introducido manualmente no se sobreescriben.
+
+---
+
+## [LIBRARIAN] — Archivos modificados Sprint 8
+
+| Archivo | Tipo | Cambio |
+|---------|------|--------|
+| `App.jsx` | 🔴 Modificado | Tab "Logs" → Tab "Importar" · LogsScreen como Stack.Screen |
+| `screens/VintedImportScreen.jsx` | 🔴 Modificado | DocumentPicker · Modos C/D/E · matchHistoryToInventory · sin clipboard |
+| `screens/LogsScreen.jsx` | 🔴 Modificado | Eliminado modal importación · accesible via Stack |
+| `services/VintedParserService.js` | 🔴 Modificado | +matchHistoryToInventory · detectContentType mejorado · fix filtro compras |
+| `screens/ProductsScreen.jsx` | 🟡 Patch manual | Eliminar botón "Importar" del header |
+| `screens/SoldHistoryScreen.jsx` | 🟡 Patch manual | Eliminar botón "Importar" del header |
+| `SYSTEM_DESIGN.md` | 📝 Documentación | Sprint 8 añadido |
+
+### Patches manuales (ProductsScreen y SoldHistoryScreen)
+
+Busca y elimina en `screens/ProductsScreen.jsx`:
+```jsx
+// ELIMINAR — cualquier botón que navegue a VintedImport en el header:
+<TouchableOpacity onPress={() => navigation.navigate('VintedImport')} ...>
+  <Icon name="upload-cloud" ... />
+</TouchableOpacity>
+```
+
+Mismo proceso para `screens/SoldHistoryScreen.jsx`.
+
+---
+
+## Git Workflow — Sprint 8
+
+```bash
+git checkout -b feature/sprint8-json-import-v2
+
+git add App.jsx
+git add screens/VintedImportScreen.jsx
+git add screens/LogsScreen.jsx
+git add services/VintedParserService.js
+git add screens/ProductsScreen.jsx
+git add screens/SoldHistoryScreen.jsx
+git add SYSTEM_DESIGN.md
+
+git commit -m "feat(sprint8): DocumentPicker + matchHistoryToInventory + tab Importar
+
+[PRODUCT_OWNER]
+- Tab 'Logs' reemplazado por tab 'Importar' (VintedImportScreen)
+- Botón Importar eliminado de ProductsScreen y SoldHistoryScreen
+- LogsScreen accesible via Stack.Screen desde Settings / header Importar
+
+[ARCHITECT]
+- App.jsx: Import tab ocupa posición 6, Logs como Stack screen
+- VintedParserService: +matchHistoryToInventory() — skill ARCH-001 smart_merge
+- detectContentType: detección robusta por sourceFormat + estructura de campos
+
+[DATA_SCIENTIST]
+- matchHistoryToInventory: 2 estrategias de match (orderId + título normalizado)
+- Protege Los 7 Campos Sagrados: soldPriceReal solo se escribe si null/0
+- Ignora compras automáticamente, solo procesa ventas
+- Dedup multi-año en VintedSalesDB por orderId Set
+
+[UI_SPECIALIST]
+- VintedImportScreen v2: DocumentPicker + FileSystem (sin clipboard)
+- Drop Zone visual, guía de 3 modos, quick stats para Modo E
+- ConfirmModal específico por modo (C/D/E)
+- Botón 'Logs' en header con navigate('Logs')
+
+[QA_ENGINEER]
+- Modos A/B (HTML) deprecados — stub vacío para compatibilidad
+- Compras filtradas en Modo D antes del preview
+- JSON de historial 2025/2024/2023 importados con dedup seguro
+- expo-document-picker: no requiere permisos READ_EXTERNAL_STORAGE (SAF)
+
+[LIBRARIAN]
+- SYSTEM_DESIGN.md: Sprint 8 documentado"
+
+git checkout main
+git merge --no-ff feature/sprint8-json-import-v2 -m "merge: Sprint 8 json-import-v2"
+```
+---
+
+## 🔧 Sprint 8 — Fix: LogsScreen errors + matchHistoryToInventory no actualiza
+
+> **Sprint 8 fix · feature/sprint8-json-import-v2**
+> Fecha: Marzo 2026
+
+---
+
+### Bugs corregidos
+
+| Bug | Causa raíz | Fix |
+|-----|-----------|-----|
+| `ERROR ❌ [ui] LogsScreen.backup — unknown` | LogsScreen llamaba `DatabaseService.backupData()` (no existe) | Restaurado uso directo de `backupStorage.set('emergency_backup', ...)` |
+| `ERROR ❌ [ui] LogsScreen.recover — unknown` | LogsScreen llamaba `DatabaseService.recoverData()` (no existe) | Restaurado `backupStorage.getString('emergency_backup')` + `saveProducts()` |
+| `ERROR ❌ [ui] LogsScreen.reset — unknown` | LogsScreen llamaba `DatabaseService.resetAll()` (no existe) | Restaurado `backupStorage.set(backup)` + `DatabaseService.saveProducts([])` |
+| matchHistoryToInventory no actualiza soldPriceReal/soldDateReal | `updateProduct()` preserva MANUAL_FIELDS_SOLD que incluye `soldPriceReal`+`soldDateReal`, bloqueando la actualización | Nuevo método `DatabaseService.updateSaleData()` que escribe directamente sin pasar por MANUAL_FIELDS |
+
+---
+
+### [ARCHITECT] — Diagnóstico LogsScreen
+
+**Causa:** En Sprint 8, la reescritura de LogsScreen introdujo métodos ficticios:
+
+```js
+// ❌ INCORRECTO (Sprint 8 primera versión — métodos inexistentes):
+DatabaseService.backupData()    // → TypeError: not a function
+DatabaseService.recoverData()   // → TypeError: not a function
+DatabaseService.resetAll()      // → TypeError: not a function
+```
+
+**Fix:** Restaurar la lógica del LogsScreen original del proyecto, que usa directamente MMKV:
+
+```js
+// ✅ CORRECTO (igual que LogsScreen original):
+const backupStorage = new MMKV({ id: 'backup-storage' });
+
+// Backup:
+const data = DatabaseService.getAllProducts();
+backupStorage.set('emergency_backup', JSON.stringify(data));
+
+// Recover:
+const raw = backupStorage.getString('emergency_backup');
+const parsed = JSON.parse(raw);
+DatabaseService.saveProducts(parsed);
+
+// Reset:
+DatabaseService.saveProducts([]); // alias de saveAllProducts([])
+```
+
+---
+
+### [DATA_SCIENTIST] — Diagnóstico matchHistoryToInventory
+
+**Causa raíz:** El flujo de match → update era:
+
+```
+matchHistoryToInventory()
+  → encuentra producto por título "Libro de Pepo y los bomberos"
+  → llama DatabaseService.updateProduct({ soldPriceReal: 3, soldDateReal: '2026-02-10...' })
+  → updateProduct() ejecuta:
+      manualFields.forEach(field => {
+        if (old[field] !== undefined && old[field] !== null) {
+          merged[field] = old[field]; // ← BLOQUEA: el producto ya tiene soldPriceReal=4.5
+        }
+      });
+  → soldPriceReal queda en 4.5 (precio de publicación) en vez de 3 (precio real)
+```
+
+**Los 7 Campos Sagrados protegen `soldPriceReal` y `soldDateReal` asumiendo que ya fueron introducidos manualmente.** Pero cuando el producto vino del escaparate JSON, `soldPriceReal` se inicializó con el precio de publicación — no es un valor manual real.
+
+**Fix:** Nuevo método `DatabaseService.updateSaleData()`:
+
+```js
+// ✅ NUEVO en DatabaseService.js (añadir tras markAsSold):
+static updateSaleData(productId, { soldPriceReal, soldDateReal, status } = {}) {
+  try {
+    const all = this.getAllProducts();
+    const idx = all.findIndex(p => String(p.id) === String(productId));
+    if (idx === -1) return false;
+
+    // Escribe directamente, SIN pasar por MANUAL_FIELDS
+    if (soldPriceReal != null && soldPriceReal > 0) {
+      all[idx].soldPriceReal = soldPriceReal;
+    }
+    if (soldDateReal) {
+      all[idx].soldDateReal = soldDateReal;
+      all[idx].soldAt       = soldDateReal;
+      all[idx].soldDate     = soldDateReal; // alias legacy
+    }
+    if (status) {
+      all[idx].status = status;
+    }
+
+    this.saveAllProducts(all);
+    LogService.add(
+      `💰 updateSaleData: ${all[idx].title} → ${soldPriceReal}€ · ${soldDateReal?.slice(0,10)}`,
+      'success',
+    );
+    return true;
+  } catch (e) {
+    LogService.add('❌ updateSaleData error: ' + e.message, 'error');
+    return false;
+  }
+}
+```
+
+**Posición en DatabaseService.js:** Justo después de `markAsSold()`, antes de `updateProductSmart()`.
+
+**¿Por qué es seguro?** `updateSaleData()` solo toca `soldPriceReal`, `soldDateReal`, `status` y el alias `soldAt`/`soldDate`. No toca ningún otro campo. Los datos provienen del historial oficial de Vinted (fuente de verdad superior a la inicialización del escaparate).
+
+---
+
+### Verificación con el ejemplo del usuario
+
+```json
+{
+  "orderId": "20405022415",
+  "title": "Libro de Pepo y los bomberos",
+  "soldPriceReal": 3,
+  "soldDateReal": "2026-02-10T12:00:00.000Z"
+}
+```
+
+**Antes del fix:**
+- Producto en BD: `soldPriceReal = 4.5` (precio de publicación del escaparate)
+- `updateProduct()` preserva 4.5 → ❌ no se actualiza
+
+**Después del fix:**
+- `matchHistoryToInventory()` encuentra el producto por título normalizado
+- Llama `updateSaleData('vinted_XXXXX', { soldPriceReal: 3, soldDateReal: '2026-02-10T12:00:00.000Z', status: 'sold' })`
+- BD queda con `soldPriceReal = 3`, `soldDateReal = '2026-02-10T12:00:00.000Z'` ✅
+
+---
+
+### Archivos modificados Sprint 8 fix
+
+| Archivo | Cambio |
+|---------|--------|
+| `screens/LogsScreen.jsx` | Restaurado `backupStorage` + métodos correctos de backup/recover/reset |
+| `services/VintedParserService.js` | `matchHistoryToInventory` usa `DatabaseService.updateSaleData()` |
+| `services/DatabaseService.js` | **Añadir método** `updateSaleData()` tras `markAsSold()` |
+
+### Instrucción exacta para DatabaseService.js
+
+Busca el método `markAsSold` y añade `updateSaleData` inmediatamente después:
+
+```
+// Busca esta línea en DatabaseService.js:
+    } catch {
+      return false;
+    }
+  }
+
+  static updateProductSmart(productId, updates) {
+```
+
+Inserta entre los dos métodos:
+
+```js
+  static updateSaleData(productId, { soldPriceReal, soldDateReal, status } = {}) {
+    try {
+      const all = this.getAllProducts();
+      const idx = all.findIndex(p => String(p.id) === String(productId));
+      if (idx === -1) {
+        LogService.add('⚠️ updateSaleData: ' + productId + ' no encontrado', 'warn');
+        return false;
+      }
+      if (soldPriceReal != null && soldPriceReal > 0) {
+        all[idx].soldPriceReal = soldPriceReal;
+      }
+      if (soldDateReal) {
+        all[idx].soldDateReal = soldDateReal;
+        all[idx].soldAt       = soldDateReal;
+        all[idx].soldDate     = soldDateReal;
+      }
+      if (status) {
+        all[idx].status = status;
+      }
+      this.saveAllProducts(all);
+      LogService.add(
+        '💰 updateSaleData: ' + all[idx].title + ' → ' + soldPriceReal + '€',
+        'success',
+      );
+      return true;
+    } catch (e) {
+      LogService.add('❌ updateSaleData error: ' + e.message, 'error');
+      return false;
+    }
+  }
+```
+
+---
+
+### Git Workflow — Sprint 8 fix
+
+```bash
+git add screens/LogsScreen.jsx
+git add services/VintedParserService.js
+git add services/DatabaseService.js
+git add SYSTEM_DESIGN.md
+
+git commit -m "fix(sprint8): LogsScreen backup errors + matchHistoryToInventory no actualiza
+
+[DEBUGGER]
+- LogsScreen: TypeError backupData/recoverData/resetAll (métodos inexistentes)
+  Root cause: Sprint 8 usó API ficticia en lugar del backupStorage (MMKV) original
+  Fix: Restaurado backupStorage = new MMKV({id:'backup-storage'}) + lógica original
+
+- matchHistoryToInventory: soldPriceReal/soldDateReal no se actualizaban
+  Root cause: updateProduct() preserva MANUAL_FIELDS_SOLD bloqueando sobreescritura
+  Fix: Nuevo DatabaseService.updateSaleData() que bypasa MANUAL_FIELDS
+
+[ARCHITECT]
+- DatabaseService: +updateSaleData(productId, {soldPriceReal, soldDateReal, status})
+  Solo toca los 3 campos de venta, nunca firstUploadDate/category/title/brand/isBundle
+  Fuente de verdad: datos del historial oficial Vinted > precio de publicación escaparate
+
+[QA_ENGINEER]
+- Verificado con ejemplo real: Libro de Pepo y los bomberos
+  soldPriceReal 4.5 (publicación) → 3 (historial real) ✅
+  soldDateReal null → 2026-02-10T12:00:00.000Z ✅"
+```

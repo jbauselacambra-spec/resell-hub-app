@@ -493,6 +493,55 @@ export class DatabaseService {
     }
   }
 
+
+   ///  Actualiza los datos reales de venta de un producto (soldPriceReal + soldDateReal).
+  // 
+   //  A diferencia de updateProduct(), este método BYPASA la capa de MANUAL_FIELDS_SOLD
+    // porque los datos provienen del historial real de Vinted (fuente de verdad superior).
+    
+     //Solo actualiza: soldPriceReal, soldDateReal, status, soldAt (alias de soldDateReal).
+     //NUNCA toca: firstUploadDate, category, title, brand, isBundle, price, images, etc.
+    
+     //@param {string} productId
+     //@param {{ soldPriceReal?: number, soldDateReal?: string, status?: string }} updates
+    //@returns {boolean}
+   
+  static updateSaleData(productId, { soldPriceReal, soldDateReal, status } = {}) {
+    try {
+      const all = this.getAllProducts();
+      const idx = all.findIndex(p => String(p.id) === String(productId));
+      if (idx === -1) {
+        LogService.add(`⚠️ updateSaleData: producto ${productId} no encontrado`, 'warn');
+        return false;
+      }
+
+      // Escribir directamente sin pasar por MANUAL_FIELDS
+      if (soldPriceReal != null && soldPriceReal > 0) {
+        all[idx].soldPriceReal = soldPriceReal;
+      }
+      if (soldDateReal) {
+        all[idx].soldDateReal = soldDateReal;
+        all[idx].soldAt       = soldDateReal; // alias para compatibilidad
+        all[idx].soldDate     = soldDateReal; // alias legacy
+      }
+      if (status) {
+        all[idx].status = status;
+      }
+
+      this.saveAllProducts(all);
+      LogService.add(
+        `💰 updateSaleData: ${all[idx].title} → ${soldPriceReal}€ · ${soldDateReal?.slice(0, 10) || 'sin fecha'}`,
+        'success',
+      );
+      return true;
+    } catch (e) {
+      LogService.add('❌ updateSaleData error: ' + e.message, 'error');
+      return false;
+    }
+  }
+
+
+
   static updateProductSmart(productId, updates) {
     const all = this.getAllProducts();
     const idx = all.findIndex(p => String(p.id) === String(productId));

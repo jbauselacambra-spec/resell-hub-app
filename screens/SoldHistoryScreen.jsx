@@ -163,14 +163,7 @@ export default function SoldHistoryScreen({ navigation }) {
       {/* Header */}
       <View style={styles.header}>
         <View style={{flexDirection:'row', alignItems:'center', justifyContent:'space-between'}}>
-          <Text style={styles.headerTitle}>Historial de Ventas</Text>
-          <TouchableOpacity
-            style={{flexDirection:'row', alignItems:'center', gap:5, backgroundColor:'#F0EFFE', paddingHorizontal:12, paddingVertical:8, borderRadius:12}}
-            onPress={() => navigation.navigate('VintedImport')}
-          >
-            <Icon name="download" size={13} color="#6C63FF"/>
-            <Text style={{fontSize:11, fontWeight:'800', color:'#6C63FF'}}>Importar</Text>
-          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Historial de Ventas</Text>         
         </View>
 
         {/* KPI panel */}
