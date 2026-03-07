@@ -1,0 +1,81 @@
+[2026-03-07 09:48:48] [SESSION] ==========================================
+[2026-03-07 09:48:48] [SESSION] Deploy iniciado. Flags: Local=True Cloud=False Check=False
+[2026-03-07 09:48:48] [STEP] Desinstalando APK anterior (com.perdigon85.resellhub)...
+[2026-03-07 09:49:06] [INFO] App encontrada. Desinstalando...
+[2026-03-07 09:49:12] [OK] APK desinstalada correctamente.
+[2026-03-07 09:49:12] [STEP] Limpiando procesos y cache...
+[2026-03-07 09:49:13] [INFO] Cache .expo eliminada
+[2026-03-07 09:49:14] [INFO] Cache Metro/Haste eliminada
+[2026-03-07 09:49:14] [OK] Limpieza completada.
+[2026-03-07 09:49:14] [INFO] EXPO_METRO_PORT=8081
+[2026-03-07 09:49:14] [STEP] Configurando puente ADB Reverse (tcp:8081)...
+[2026-03-07 09:49:14] [OK] ADB Reverse tcp:8081 configurado.
+[2026-03-07 09:49:14] [STEP] Lanzando Expo en modo Localhost...
+[2026-03-07 09:49:14] [LAUNCH] npx expo start --localhost --android
+[2026-03-07 09:49:22] [SESSION] Servidor Expo detenido (Ctrl+C o error)
+[2026-03-07 10:06:33] [SESSION] ==========================================
+[2026-03-07 10:06:33] [SESSION] Deploy v5.2. Flags: Build=False Local=True Cloud=False Check=False
+[2026-03-07 10:06:33] [WARN] ATENCION: La dev build NO esta instalada en el dispositivo.
+[2026-03-07 10:06:33] [WARN] Ejecuta primero: .\agent-deploy.ps1 -Build
+[2026-03-07 10:06:46] [LOCAL] Abortado por usuario (dev build no instalada)
+[2026-03-07 10:06:54] [SESSION] ==========================================
+[2026-03-07 10:06:54] [SESSION] Deploy v5.2. Flags: Build=True Local=False Cloud=False Check=False
+[2026-03-07 10:06:54] [STEP] Desinstalando APK anterior (com.perdigon85.resellhub)...
+[2026-03-07 10:06:54] [OK] App no estaba instalada (instalacion limpia).
+[2026-03-07 10:06:54] [STEP] Limpiando procesos y cache...
+[2026-03-07 10:06:55] [INFO] Cache .expo eliminada
+[2026-03-07 10:06:55] [INFO] Cache Metro/Haste eliminada
+[2026-03-07 10:06:55] [OK] Limpieza completada.
+[2026-03-07 10:06:55] [STEP] Configurando ADB Reverse (tcp:8081)...
+[2026-03-07 10:06:55] [OK] ADB Reverse configurado.
+[2026-03-07 10:06:55] [STEP] Compilando e instalando APK de desarrollo...
+[2026-03-07 10:06:55] [LAUNCH] npx expo run:android --device
+[2026-03-07 10:07:07] [BUILD] expo run:android completado
+[2026-03-07 10:14:34] [SESSION] ==========================================
+[2026-03-07 10:14:34] [SESSION] Deploy v5.3. Flags: Build=False Local=False Cloud=False Check=True
+[2026-03-07 10:14:34] [STEP] Node.js
+[2026-03-07 10:14:34] [OK] Node: v20.20.0
+[2026-03-07 10:14:34] [STEP] npm
+[2026-03-07 10:14:35] [OK] npm: 10.8.2
+[2026-03-07 10:14:35] [STEP] Expo CLI
+[2026-03-07 10:14:36] [OK] expo: 0.22.28
+[2026-03-07 10:14:36] [STEP] Java / JAVA_HOME (requerido para -Build)
+[2026-03-07 10:14:36] [OK] Encontrado: C:\Program Files\Android\Android Studio\jbr
+[2026-03-07 10:14:36] [INFO] openjdk version "21.0.9" 2025-10-21
+[2026-03-07 10:14:37] [OK] Version Java 21 (compatible con Gradle 8.x)
+[2026-03-07 10:14:37] [STEP] ADB
+[2026-03-07 10:14:37] [OK] Android Debug Bridge version 1.0.41
+[2026-03-07 10:14:37] [STEP] Dispositivo ADB
+[2026-03-07 10:14:37] [OK] Dispositivo detectado:
+[2026-03-07 10:14:37] [INFO]   DU99MR9TBUHQTWK7	device
+[2026-03-07 10:14:37] [STEP] App 'com.perdigon85.resellhub' en dispositivo
+[2026-03-07 10:14:37] [OK] App no instalada.
+[2026-03-07 10:14:37] [STEP] Carpeta android/ (bare workflow)
+[2026-03-07 10:14:37] [OK] Carpeta android/ encontrada
+[2026-03-07 10:14:37] [CHECK] Diagnostico completado
+[2026-03-07 10:14:49] [SESSION] ==========================================
+[2026-03-07 10:14:49] [SESSION] Deploy v5.3. Flags: Build=True Local=False Cloud=False Check=False
+[2026-03-07 10:14:49] [STEP] Configurando JAVA_HOME para Gradle...
+[2026-03-07 10:14:49] [OK] JAVA_HOME: C:\Program Files\Android\Android Studio\jbr
+[2026-03-07 10:14:49] [INFO] Version: openjdk version "21.0.9" 2025-10-21
+[2026-03-07 10:14:49] [INFO] JAVA_HOME=C:\Program Files\Android\Android Studio\jbr | openjdk version "21.0.9" 2025-10-21
+[2026-03-07 10:14:49] [STEP] Desinstalando APK anterior (com.perdigon85.resellhub)...
+[2026-03-07 10:14:50] [OK] App no estaba instalada (instalacion limpia).
+[2026-03-07 10:14:50] [STEP] Limpiando procesos y cache...
+[2026-03-07 10:14:50] [INFO] Cache Metro/Haste eliminada
+[2026-03-07 10:14:50] [OK] Limpieza completada.
+[2026-03-07 10:14:50] [STEP] Configurando ADB Reverse (tcp:8081)...
+[2026-03-07 10:14:51] [OK] ADB Reverse configurado.
+[2026-03-07 10:14:51] [STEP] Compilando e instalando APK de desarrollo...
+[2026-03-07 10:14:51] [LAUNCH] npx expo run:android --device | JAVA_HOME=C:\Program Files\Android\Android Studio\jbr
+[2026-03-07 10:17:52] [BUILD] expo run:android completado
+[2026-03-07 10:17:56] [SESSION] ==========================================
+[2026-03-07 10:17:56] [SESSION] Deploy v5.3. Flags: Build=False Local=True Cloud=False Check=False
+[2026-03-07 10:17:56] [OK] Dev build instalada. Iniciando hot reload...
+[2026-03-07 10:17:56] [STEP] Limpiando cache Metro...
+[2026-03-07 10:17:57] [INFO] Cache .expo eliminada
+[2026-03-07 10:17:57] [OK] Cache limpia.
+[2026-03-07 10:17:57] [STEP] Configurando ADB Reverse (tcp:8081)...
+[2026-03-07 10:17:57] [OK] ADB Reverse configurado.
+[2026-03-07 10:17:57] [STEP] Lanzando Metro Bundler (hot reload)...
+[2026-03-07 10:17:57] [LAUNCH] npx expo start --localhost

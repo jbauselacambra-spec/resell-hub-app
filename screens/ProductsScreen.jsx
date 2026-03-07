@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, Image,
-  StyleSheet, Dimensions, Alert, ScrollView,
+  StyleSheet, Dimensions, Alert, ScrollView, Platform,
 } from 'react-native';
+import LogService, { LOG_CTX } from '../services/LogService';
 import Icon from 'react-native-vector-icons/Feather';
 import { DatabaseService } from '../services/DatabaseService';
 
@@ -13,17 +14,31 @@ const MONTH_NAMES = [
   'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'
 ];
 
-export default function ProductsScreen({ navigation, navigation }) {
+// ─── Design System Light ──────────────────────────────────────────────────────
+const DS = {
+  bg:        '#F8F9FA',  white:     '#FFFFFF',  surface2:  '#F0F2F5',
+  border:    '#EAEDF0',  primary:   '#FF6B35',  primaryBg: '#FFF2EE',
+  success:   '#00D9A3',  successBg: '#E8FBF6',  warning:   '#FFB800',
+  danger:    '#E63946',  blue:      '#004E89',  blueBg:    '#EAF2FB',
+  purple:    '#6C63FF',  text:      '#1A1A2E',  textMed:   '#5C6070',
+  textLow:   '#A0A5B5',  mono: Platform.OS === 'android' ? 'monospace' : 'Courier New',
+};
+
+export default function ProductsScreen({ navigation }) {
   const [products, setProducts]     = useState([]);
   const [filter,   setFilter]       = useState('all');
   const [filterCat, setFilterCat]   = useState(null);
   const [config,   setConfig]       = useState(() => DatabaseService.getConfig());  // init síncrono
 
   const loadData = () => {
-    // Fuente única: getActiveProductsWithDiagnostic ya aplica la config
-    const enriched = DatabaseService.getActiveProductsWithDiagnostic();
-    setProducts(enriched);
-    setConfig(DatabaseService.getConfig());  // refresh en foco
+    try {
+      const enriched = DatabaseService.getActiveProductsWithDiagnostic();
+      setProducts(enriched);
+      setConfig(DatabaseService.getConfig());
+      LogService.debug(`ProductsScreen: ${enriched.length} productos cargados`, LOG_CTX.UI);
+    } catch (e) {
+      LogService.error('ProductsScreen.loadData', LOG_CTX.DB, e.message);
+    }
   };
 
   useEffect(() => {
@@ -44,10 +59,10 @@ export default function ProductsScreen({ navigation, navigation }) {
   }), [products]);
 
   const filtered = useMemo(() => {
-    if (filter === 'hot')      return products.filter(p => p.isHot);
-    if (filter === 'stagnant') return products.filter(p => p.isCold || p.isCritical);
-    if (filter === 'critical') return products.filter(p => p.severity?.type === 'CRÍTICO');
-    return products;
+    let arr = products;
+    if (filter === 'hot')      arr = arr.filter(p => p.isHot);
+    else if (filter === 'stagnant') arr = arr.filter(p => p.isCold || p.isCritical);
+    else if (filter === 'critical') arr = arr.filter(p => p.severity?.type === 'CRÍTICO');
     if (filterCat) arr = arr.filter(p => p.category === filterCat);
     return arr;
   }, [products, filter, filterCat]);
@@ -66,7 +81,10 @@ export default function ProductsScreen({ navigation, navigation }) {
     return (
       <TouchableOpacity
         style={[styles.card, { borderColor, borderWidth: sev || item.isHot ? 2 : 0 }]}
-        onPress={() => navigation.navigate('ProductDetail', { product: item })}
+        onPress={() => {
+        LogService.info(`ProductsScreen → ProductDetail: ${item.title}`, LOG_CTX.NAV);
+        navigation.navigate('ProductDetail', { product: item });
+      }}
       >
         <Image source={{ uri: item.images?.[0] }} style={styles.cardImage} />
 
@@ -142,7 +160,10 @@ export default function ProductsScreen({ navigation, navigation }) {
         </View>
         <TouchableOpacity
           style={styles.importVintedBtn}
-          onPress={() => navigation.navigate('VintedImport')}
+          onPress={() => {
+            LogService.info('ProductsScreen → VintedImport', LOG_CTX.NAV);
+            navigation.navigate('VintedImport');
+          }}
         >
           <Icon name="download" size={14} color={DS.primary}/>
           <Text style={styles.importVintedTxt}>Importar</Text>

@@ -64,13 +64,29 @@ export function detectContentType(text) {
   if (!text || typeof text !== 'string') return 'unknown';
   const t = text.trim();
 
-  // Formato C: JSON array de productos (script de consola)
+  // JSON: detectar subtipo por sourceFormat o por campos presentes
   if (t.startsWith('[') || t.startsWith('{')) {
     try {
       const parsed = JSON.parse(t);
       const arr = Array.isArray(parsed) ? parsed : [parsed];
-      if (arr.length > 0 && (arr[0].id !== undefined || arr[0].title !== undefined)) {
-        return 'json_products';
+      if (arr.length > 0) {
+        const first = arr[0];
+        // Formato D: JSON de scriptVentasActuales (json_sales_current)
+        if (first.sourceFormat === 'json_sales_current' ||
+           (first.orderId && first.type === 'venta' && !first.date && first.imageUrl !== undefined)) {
+          return 'json_sales_current';
+        }
+        // Formato E: JSON de scriptHistorialVentas (json_sales_history)
+        if (first.sourceFormat === 'json_sales_history' ||
+           (first.orderId && (first.type === 'venta' || first.type === 'compra') && first.date !== undefined && first.imageUrl === undefined)) {
+          return 'json_sales_history';
+        }
+        // Formato C: JSON de productos del escaparate
+        if (first.id !== undefined || (first.title && !first.orderId)) {
+          return 'json_products';
+        }
+        // Genérico con orderId pero sin sourceFormat conocido
+        if (first.orderId) return 'json_sales_history';
       }
     } catch { /* no es JSON válido */ }
   }
@@ -282,12 +298,78 @@ export function parseJsonProducts(text) {
   }
 }
 
+// ─── 4b. Parser Formato D: JSON de scriptVentasActuales ──────────────────────
+/**
+ * Normaliza el JSON generado por scriptVentasActuales.js
+ * sourceFormat: 'json_sales_current'
+ * Campos: orderId, title, amount, type, status, date(null), imageUrl
+ */
+export function parseJsonSalesCurrent(text) {
+  try {
+    const raw = typeof text === 'string' ? JSON.parse(text) : text;
+    const arr = Array.isArray(raw) ? raw : [raw];
+    return arr
+      .filter(r => r && r.orderId)
+      .map(r => ({
+        orderId:      String(r.orderId),
+        title:        (r.title   || 'Artículo desconocido').trim(),
+        amount:       parseFloat(r.amount) || 0,
+        soldPriceReal:parseFloat(r.amount) || 0,
+        type:         r.type  || 'venta',
+        status:       r.status|| 'completada',
+        date:         r.date  || null,       // null → usuario introduce fecha en app
+        soldDateReal: r.soldDateReal || null,
+        imageUrl:     r.imageUrl    || null,
+        sourceFormat: 'json_sales_current',
+      }));
+  } catch (e) {
+    LogService.error('VintedParserService.parseJsonSalesCurrent', LOG_CTX.IMPORT, e);
+    return [];
+  }
+}
+
+// ─── 4c. Parser Formato E: JSON de scriptHistorialVentas ──────────────────────
+/**
+ * Normaliza el JSON generado por scriptHistorialVentas.js
+ * sourceFormat: 'json_sales_history'
+ * Campos: orderId, title, amount, type, date(ISO), soldPriceReal, soldDateReal
+ */
+export function parseJsonSalesHistory(text) {
+  try {
+    const raw = typeof text === 'string' ? JSON.parse(text) : text;
+    const arr = Array.isArray(raw) ? raw : [raw];
+    return arr
+      .filter(r => r && r.orderId)
+      .map(r => {
+        const amt = parseFloat(r.amount) || 0;
+        const typ = r.type || 'desconocido';
+        return {
+          orderId:      String(r.orderId),
+          title:        (r.title || 'Artículo desconocido').trim(),
+          amount:       typ === 'venta' ? Math.abs(amt) : -Math.abs(amt),
+          soldPriceReal:typ === 'venta' ? Math.abs(amt) : null,
+          type:         typ,
+          status:       r.status || (typ === 'venta' ? 'completada' : 'pagado'),
+          date:         r.date   || null,
+          soldDateReal: r.soldDateReal || (typ === 'venta' ? r.date : null),
+          imageUrl:     null,
+          sourceFormat: 'json_sales_history',
+        };
+      });
+  } catch (e) {
+    LogService.error('VintedParserService.parseJsonSalesHistory', LOG_CTX.IMPORT, e);
+    return [];
+  }
+}
+
 // ─── 5. Dispatcher principal ──────────────────────────────────────────────────
 export function parseVintedContent(text) {
   const type = detectContentType(text);
   switch (type) {
-    case 'html_sales_current':  return { type, items: parseHtmlSalesCurrent(text),  products: null };
-    case 'html_sales_history':  return { type, items: parseHtmlSalesHistory(text),  products: null };
+    case 'html_sales_current':  return { type, items: parseHtmlSalesCurrent(text),   products: null };
+    case 'html_sales_history':  return { type, items: parseHtmlSalesHistory(text),   products: null };
+    case 'json_sales_current':  return { type, items: parseJsonSalesCurrent(text),   products: null };
+    case 'json_sales_history':  return { type, items: parseJsonSalesHistory(text),   products: null };
     case 'json_products':       return { type, items: null, products: parseJsonProducts(text) };
     case 'html_generic': {
       const a = parseHtmlSalesCurrent(text);

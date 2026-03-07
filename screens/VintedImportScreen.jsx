@@ -30,6 +30,8 @@ import { DatabaseService } from '../services/DatabaseService';
 import {
   detectContentType,
   parseVintedContent,
+  parseJsonSalesCurrent,
+  parseJsonSalesHistory,
   mapToInventoryProduct,
   mapToSaleRecord,
   VintedSalesDB,
@@ -52,26 +54,28 @@ const DS = {
 
 // ─── Meta por tipo detectado ───────────────────────────────────────────────────
 const TYPE_META = {
-  html_sales_current: { label: 'Ventas año actual',       color: DS.success,  icon: 'trending-up',   mode: 'A' },
-  html_sales_history: { label: 'Historial transacciones', color: DS.blue,     icon: 'clock',         mode: 'B' },
-  html_generic:       { label: 'HTML Vinted',             color: DS.warning,  icon: 'code',          mode: 'B' },
-  json_products:      { label: 'JSON escaparate',         color: DS.primary,  icon: 'package',       mode: 'C' },
-  url_product:        { label: 'URL producto',            color: DS.textLow,  icon: 'external-link', mode: null },
-  url_inbox:          { label: 'URL pedido',              color: DS.textLow,  icon: 'inbox',         mode: null },
-  unknown:            { label: 'Contenido no reconocido', color: DS.textLow,  icon: 'help-circle',   mode: null },
+  html_sales_current:  { label: 'Ventas año actual (HTML)', color: DS.success,  icon: 'trending-up',   mode: 'A' },
+  html_sales_history:  { label: 'Historial (HTML)',         color: DS.blue,     icon: 'clock',         mode: 'B' },
+  html_generic:        { label: 'HTML Vinted',              color: DS.warning,  icon: 'code',          mode: 'B' },
+  json_products:       { label: 'JSON escaparate',          color: DS.primary,  icon: 'package',       mode: 'C' },
+  json_sales_current:  { label: 'JSON ventas año actual',   color: DS.success,  icon: 'trending-up',   mode: 'D' },
+  json_sales_history:  { label: 'JSON historial completo',  color: DS.blue,     icon: 'bar-chart-2',   mode: 'E' },
+  url_product:         { label: 'URL producto',             color: DS.textLow,  icon: 'external-link', mode: null },
+  url_inbox:           { label: 'URL pedido',               color: DS.textLow,  icon: 'inbox',         mode: null },
+  unknown:             { label: 'Contenido no reconocido',  color: DS.textLow,  icon: 'help-circle',   mode: null },
 };
 
 // ─── Guía de pasos ─────────────────────────────────────────────────────────────
 const GUIDE = [
   {
-    mode: 'A', color: DS.success, icon: 'trending-up', title: 'Ventas año actual',
-    steps: ['Vinted → Mis pedidos', 'Pulsa ⋮ → Compartir página → Copiar', 'Pega aquí → obtienes precio y estado', 'Si la venta ya existe en BD → actualiza datos permanentes'],
-    note: '⚠️ Este formato no incluye fecha de venta — la introducirás manualmente.',
+    mode: 'D', color: DS.success, icon: 'trending-up', title: 'JSON Ventas año actual',
+    steps: ['Vinted → Mis pedidos (ventas) en PC', 'F12 → Consola → Pega scriptVentasActuales.js', 'JSON copiado al portapapeles automáticamente', 'Pega aquí → actualiza precios de venta reales'],
+    note: '⚠️ No incluye fecha de venta — la introducirás manualmente.',
   },
   {
-    mode: 'B', color: DS.blue, icon: 'clock', title: 'Historial transacciones',
-    steps: ['Vinted → Perfil → Historial de transacciones', 'Pulsa ⋮ → Compartir página → Copiar', 'Pega aquí → obtienes tipo (compra/venta), importe y fecha'],
-    note: '✅ Incluye fecha. Ideal para estadísticas económicas históricas.',
+    mode: 'E', color: DS.blue, icon: 'bar-chart-2', title: 'JSON Historial completo',
+    steps: ['Vinted → Perfil → Saldo y pagos (PC)', 'F12 → Consola → Pega scriptHistorialVentas.js', 'JSON copiado al portapapeles automáticamente', 'Pega aquí → estadísticas económicas de todos los años'],
+    note: '✅ Incluye fecha y compras. Ideal para el balance económico completo.',
   },
   {
     mode: 'C', color: DS.primary, icon: 'code', title: 'JSON del script de consola',
@@ -723,7 +727,7 @@ export default function VintedImportScreen({ navigation }) {
       <ConfirmModal
         visible={showConfirm}
         onClose={() => setShowConfirm(false)}
-        mode={currentMode}
+        mode={currentMode === 'D' ? 'A' : currentMode === 'E' ? 'B' : currentMode}
         parsedItems={parsedItems}
         jsonProducts={jsonProducts}
         checkedIds={checkedIds}
@@ -749,12 +753,16 @@ export default function VintedImportScreen({ navigation }) {
         {importResult && (
           <View style={[styles.resultBanner, {
             backgroundColor: importResult.mode === 'C' ? DS.primaryBg :
-                             importResult.mode === 'A' ? DS.successBg : DS.purpleBg,
+                             (importResult.mode === 'A' || importResult.mode === 'D') ? DS.successBg :
+                             (importResult.mode === 'B' || importResult.mode === 'E') ? DS.blueBg : DS.purpleBg,
             borderColor: importResult.mode === 'C' ? DS.primary+'40' :
-                         importResult.mode === 'A' ? DS.success+'40' : DS.purple+'40',
+                         (importResult.mode === 'A' || importResult.mode === 'D') ? DS.success+'40' :
+                         (importResult.mode === 'B' || importResult.mode === 'E') ? DS.blue+'40' : DS.purple+'40',
           }]}>
             <Icon name="check-circle" size={20}
-              color={importResult.mode==='C'?DS.primary:importResult.mode==='A'?DS.success:DS.purple}/>
+              color={importResult.mode==='C'?DS.primary:
+                    (importResult.mode==='A'||importResult.mode==='D')?DS.success:
+                    (importResult.mode==='B'||importResult.mode==='E')?DS.blue:DS.purple}/>
             <View style={{flex:1}}>
               {importResult.mode === 'C' && (
                 <>
@@ -772,7 +780,12 @@ export default function VintedImportScreen({ navigation }) {
                   </Text>
                 </>
               )}
-              {importResult.mode === 'B' && (
+              {(importResult.mode === 'D') && (
+                <Text style={styles.resultBodyText}>
+                  {importResult.updated} ventas actualizadas · {importResult.created} añadidas al inventario
+                </Text>
+              )}
+              {(importResult.mode === 'E') && (
                 <>
                   <Text style={styles.resultTitle}>¡Historial importado!</Text>
                   <Text style={styles.resultSub}>
@@ -879,7 +892,7 @@ export default function VintedImportScreen({ navigation }) {
         {hasResults && (
           <Animated.View style={{opacity: fadeAnim}}>
             {/* Aviso Modo A sin fecha */}
-            {currentMode === 'A' && parsedItems.some(i => !i.date) && (
+            {(currentMode === 'A' || currentMode === 'D') && parsedItems.some(i => !i.date) && (
               <View style={styles.warnBar}>
                 <Icon name="alert-triangle" size={14} color={DS.warning}/>
                 <Text style={styles.warnBarTxt}>
