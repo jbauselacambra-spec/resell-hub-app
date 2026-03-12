@@ -31,3 +31,7 @@ Nueva Responsabilidad: Implementar la lógica del Sprint 9.1.
 Skill v4.2: [[DS-006-kpi_metrics]].
 
 Instrucción: Calcular métricas de ahorro generado y beneficio neto real.
+
+Nueva Skill: [[DS-007-kpi_data_guard]].
+
+Misión Crítica: Asegurar que el cálculo de beneficioNeto no rompa la UI si faltan datos de compra en productos antiguos.

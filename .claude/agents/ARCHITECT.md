@@ -32,3 +32,6 @@ Skill v4.2: [[ARCH-005-backup_system]].
 
 Instrucción: Asegurar que autoRestoreIfNeeded() se ejecute en App.jsx antes de que la app esté lista.
 
+Nuevas Skills: [[ARCH-006-persistence_guarantor]], [[ARCH-007-image_asset_integrity]].
+
+Misión Crítica: Garantizar que las categorías de Settings se incluyan en el stream de datos del backup.

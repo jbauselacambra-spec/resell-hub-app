@@ -25,3 +25,5 @@ SYS-001: Análisis de logs de LogService v2.0.
 - [ ] Comprobar si hay un `early return` en el hook de guardado de categorías (Violación Regla 12).
 - [ ] Rastrear por qué el detalle de 'Vendidos' busca la imagen en una ruta legacy o inexistente.
 - [ ] Validar que los KPIs del Sprint 9.1 no den `NaN` al intentar renderizar el detalle de un vendido sin precio.
+
+Misión Actual: Auditar por qué el InternalBytecode.js reporta éxito en la exportación pero el fichero físico no aparece en la carpeta compartida.

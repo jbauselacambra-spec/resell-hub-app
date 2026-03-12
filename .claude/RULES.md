@@ -10,3 +10,5 @@
 - **Regla 11:** Navegación canónica. El Tab "Importar" es obligatorio; los logs se mueven a una vista secundaria.
 - **Regla 12:** React Rules of Hooks. Hooks siempre antes de cualquier `early return`.
 - **Regla 13:** Contratos de API. Si cambia un servicio, actualizar todos los consumidores inmediatamente.
+
+Regla 18 (Categoría Sync): Al importar un JSON, si el category_id no existe en el catálogo local, el sistema debe pausar la importación o crear la categoría automáticamente con un color por defecto para evitar inconsistencias en el filtrado.
