@@ -1,23 +1,44 @@
 /**
- * VintedParserService.js — Sprint 8 fix
+ * VintedParserService.js — Sprint 9
  *
- * FIX CRÍTICO:
- * ─ matchHistoryToInventory: ahora usa DatabaseService.updateSaleData() en lugar de
- *   updateProduct(). El motivo es que updateProduct() tiene lógica de preservación
- *   de campos manuales (MANUAL_FIELDS_SOLD) que BLOQUEA la escritura de soldPriceReal
- *   y soldDateReal si el producto ya los tiene (aunque sean 0 o el precio de publicación).
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ * [ORCHESTRATOR] Agentes activos: [ARCHITECT] [DATA_SCIENTIST] [QA_ENGINEER]
  *
- *   updateSaleData() es un método dedicado que SOLO actualiza soldPriceReal + soldDateReal
- *   + status='sold', sin tocar ningún otro campo sagrado.
+ * CAMBIOS SPRINT 9:
+ * ─────────────────
  *
- * ─ La condición de update se amplía: actualiza soldPriceReal si el valor viene del
- *   historial (soldPriceReal del JSON) Y es distinto al precio de publicación del producto
- *   o si el producto no tiene fecha real de venta. Esto garantiza que los productos
- *   importados desde el escaparate (con soldPriceReal=price) reciban el precio real.
+ * [QA_ENGINEER] — Filtro de precios negativos (QA-002 data_integrity):
  *
- * ─ Normalización de fecha mejorada: acepta ISO 8601 con T (ej: "2026-02-10T12:00:00.000Z")
- *   y formatos europeos. El campo soldDateReal del historial ya viene en ISO 8601, por lo
- *   que no necesita conversión adicional.
+ *   PROBLEMA: El historial de Vinted incluye registros con amount negativo
+ *   para compras, y ocasionalmente ventas con amount=0 o negativo por
+ *   devoluciones o ajustes. Si estos se importan al inventario, corrompían
+ *   soldPriceReal con valores negativos, distorsionando todas las estadísticas.
+ *
+ *   FILTRO APLICADO EN:
+ *   1. parseJsonSalesCurrent() → filtra items con soldPriceReal <= 0
+ *   2. parseJsonSalesHistory() → filtra type='venta' con soldPriceReal <= 0
+ *   3. mapToInventoryProduct() → Math.abs() protege price y soldPriceReal
+ *   4. mapToSaleRecord() → Math.abs() + guardia >= 0
+ *   5. matchHistoryToInventory() → skip si soldPriceReal <= 0
+ *   6. VintedSalesDB.saveRecords() → filtra ventas con amount <= 0
+ *
+ *   El filtro es SILENCIOSO (no lanza error): el item se registra como
+ *   'skipped' en el resultado de matchHistoryToInventory.
+ *   LogService registra cuántos items fueron filtrados.
+ *
+ * [ARCHITECT] — Sprint 8 fix mantenido:
+ *   matchHistoryToInventory usa DatabaseService.updateSaleData()
+ *   (bypass MANUAL_FIELDS_SOLD) — ya documentado en Sprint 8 fix.
+ *
+ * [DATA_SCIENTIST] — VintedSalesDB.getStats() corregido:
+ *   BUG: usaba r.date en lugar de r.soldDateReal para agrupar por mes.
+ *   r.date puede ser null en el Modo D (ventas actuales sin fecha ISO).
+ *   DESPUÉS: key = (r.soldDateReal || r.date || '').slice(0, 7)
+ *   → Ahora los meses de VintedSalesDB coinciden con getMonthlyHistory().
+ *
+ *   NUEVO: VintedSalesDB.getAnnualStats()
+ *   Agrega byMonth por año para consistencia con DatabaseService.getAnnualHistory().
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  */
 
 import { MMKV } from 'react-native-mmkv';
@@ -31,9 +52,12 @@ const KEYS = {
   IMPORT_LOG:    'import_log_v1',
 };
 
+// [QA_ENGINEER] Constante de precio mínimo válido
+const MIN_VALID_PRICE = 0.01;
+
 const genId = () => `vsr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-// ─── 1. Detector de tipo de contenido ─────────────────────────────────────────
+// ─── 1. Detector de tipo de contenido ────────────────────────────────────────
 export function detectContentType(text) {
   if (!text || typeof text !== 'string') return 'unknown';
   const t = text.trim();
@@ -43,7 +67,6 @@ export function detectContentType(text) {
     if (t.includes('vinted.es') || t.includes('vinted.com')) return 'url_product';
   }
 
-  // Intentar parsear como JSON
   if (t.startsWith('[') || t.startsWith('{')) {
     try {
       const parsed = JSON.parse(t);
@@ -51,17 +74,18 @@ export function detectContentType(text) {
       if (arr.length === 0) return 'unknown';
       const first  = arr[0];
 
-      // Detección por sourceFormat explícito (scripts v2)
       if (first.sourceFormat === 'json_sales_current') return 'json_sales_current';
       if (first.sourceFormat === 'json_sales_history') return 'json_sales_history';
-
-      // Detección por estructura
       if (first.id && (first.price !== undefined || first.images)) return 'json_products';
 
-      // Detección por orderId (scripts v1 legacy)
       if (first.orderId) {
         const hasDate = arr.some(r => r.date && typeof r.date === 'string' && r.date.includes('T'));
         return hasDate ? 'json_sales_history' : 'json_sales_current';
+      }
+
+      // [MIGRATION_MANAGER] Detectar export completo de BBDD
+      if (first.exportedBy?.includes('ResellHub') && Array.isArray(first.products)) {
+        return 'json_full_export';
       }
     } catch { /* no es JSON */ }
   }
@@ -75,8 +99,16 @@ export function detectContentType(text) {
   return 'unknown';
 }
 
-// ─── 2. HTML stubs (compatibilidad, no se usa en Sprint 8) ───────────────────
-export function parseVintedContent(html) { return []; }
+// ─── 2. HTML stubs (compatibilidad) ──────────────────────────────────────────
+export function parseVintedContent(text) {
+  const type = detectContentType(text);
+  switch (type) {
+    case 'json_sales_current': return { type, items: parseJsonSalesCurrent(text), products: null };
+    case 'json_sales_history': return { type, items: parseJsonSalesHistory(text), products: null };
+    case 'json_products':      return { type, items: null, products: parseJsonProducts(text) };
+    default:                   return { type, items: [], products: null };
+  }
+}
 
 // ─── 3. Parser JSON escaparate (Modo C) ───────────────────────────────────────
 export function parseJsonProducts(text) {
@@ -90,7 +122,8 @@ export function parseJsonProducts(text) {
         id:            p.id || `vinted_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         title:         (p.title      || 'Sin título').trim(),
         brand:         (p.brand      || 'Genérico').trim(),
-        price:         parseFloat(p.price) || 0,
+        // [QA_ENGINEER] precio nunca negativo en escaparate
+        price:         Math.max(0, parseFloat(p.price) || 0),
         description:   (p.description || p.title || '').trim(),
         images:        Array.isArray(p.images) ? p.images : (p.images ? [p.images] : []),
         status:        p.status === 'sold' ? 'sold' : 'available',
@@ -98,7 +131,10 @@ export function parseJsonProducts(text) {
         favorites:     parseInt(p.favorites) || 0,
         soldDate:      p.soldDate     || null,
         soldDateReal:  p.soldDateReal || p.soldDate || null,
-        soldPriceReal: p.soldPriceReal != null ? parseFloat(p.soldPriceReal) : null,
+        // [QA_ENGINEER] soldPriceReal null si no viene o es <= 0
+        soldPriceReal: (p.soldPriceReal != null && parseFloat(p.soldPriceReal) > 0)
+          ? parseFloat(p.soldPriceReal)
+          : null,
         createdAt:     p.createdAt    || new Date().toISOString(),
       }));
   } catch (e) {
@@ -112,20 +148,42 @@ export function parseJsonSalesCurrent(text) {
   try {
     const raw = typeof text === 'string' ? JSON.parse(text) : text;
     const arr = Array.isArray(raw) ? raw : [raw];
-    return arr
-      .filter(r => r && r.orderId)
-      .map(r => ({
-        orderId:       String(r.orderId),
-        title:         (r.title   || 'Artículo desconocido').trim(),
-        amount:        parseFloat(r.amount) || 0,
-        soldPriceReal: parseFloat(r.amount) || 0,
-        type:          r.type  || 'venta',
-        status:        r.status || 'completada',
-        date:          r.date   || null,
-        soldDateReal:  r.soldDateReal || null,
-        imageUrl:      r.imageUrl    || null,
-        sourceFormat:  'json_sales_current',
-      }));
+
+    let filteredNegative = 0;
+    const result = arr
+      .filter(r => {
+        if (!r || !r.orderId) return false;
+        // [QA_ENGINEER] Filtrar compras
+        if ((r.type || '').toLowerCase() === 'compra') return false;
+        // [QA_ENGINEER] Filtrar precios negativos o cero
+        const amt = parseFloat(r.amount || 0);
+        if (amt <= 0) { filteredNegative++; return false; }
+        return true;
+      })
+      .map(r => {
+        const amt = parseFloat(r.amount || 0);
+        const soldPrice = Math.max(MIN_VALID_PRICE, parseFloat(r.soldPriceReal || 0) || amt);
+        return {
+          orderId:       String(r.orderId),
+          title:         (r.title || 'Artículo desconocido').trim(),
+          amount:        amt,
+          soldPriceReal: soldPrice,
+          type:          r.type  || 'venta',
+          status:        r.status || 'completada',
+          date:          r.date  || null,
+          soldDateReal:  r.soldDateReal || null,
+          imageUrl:      r.imageUrl    || null,
+          sourceFormat:  'json_sales_current',
+        };
+      });
+
+    if (filteredNegative > 0) {
+      LogService.add(
+        `⚠️ parseJsonSalesCurrent: ${filteredNegative} items con precio ≤ 0 descartados`,
+        'warn',
+      );
+    }
+    return result;
   } catch (e) {
     LogService.error('VintedParserService.parseJsonSalesCurrent', LOG_CTX.IMPORT, e);
     return [];
@@ -137,19 +195,36 @@ export function parseJsonSalesHistory(text) {
   try {
     const raw = typeof text === 'string' ? JSON.parse(text) : text;
     const arr = Array.isArray(raw) ? raw : [raw];
-    return arr
-      .filter(r => r && r.orderId)
+
+    let filteredNegative = 0;
+    const result = arr
+      .filter(r => {
+        if (!r || !r.orderId) return false;
+        const typ = (r.type || '').toLowerCase();
+        // [QA_ENGINEER] Filtrar ventas con precio negativo o cero
+        if (typ === 'venta') {
+          const amt = parseFloat(r.amount || 0);
+          const spr = parseFloat(r.soldPriceReal || 0);
+          if (amt <= 0 && spr <= 0) { filteredNegative++; return false; }
+        }
+        return true;
+      })
       .map(r => {
-        const amt = parseFloat(r.amount) || 0;
-        const typ = (r.type || 'desconocido').toLowerCase();
-        // soldPriceReal y soldDateReal vienen ya correctos del script de historial
+        const amt  = parseFloat(r.amount || 0);
+        const typ  = (r.type || 'desconocido').toLowerCase();
+
+        // [QA_ENGINEER] soldPriceReal siempre >= MIN_VALID_PRICE para ventas
+        const rawSoldPrice = parseFloat(r.soldPriceReal || 0) || Math.abs(amt);
         const soldPriceReal = typ === 'venta'
-          ? (r.soldPriceReal != null ? parseFloat(r.soldPriceReal) : Math.abs(amt))
+          ? Math.max(MIN_VALID_PRICE, rawSoldPrice)
           : null;
+
         const soldDateReal = r.soldDateReal || (typ === 'venta' ? r.date : null);
+
         return {
           orderId:      String(r.orderId),
           title:        (r.title || 'Artículo desconocido').trim(),
+          // [QA_ENGINEER] amount: positivo para ventas, negativo para compras
           amount:       typ === 'venta' ? Math.abs(amt) : -Math.abs(amt),
           soldPriceReal,
           type:         typ,
@@ -160,51 +235,41 @@ export function parseJsonSalesHistory(text) {
           sourceFormat: 'json_sales_history',
         };
       });
+
+    if (filteredNegative > 0) {
+      LogService.add(
+        `⚠️ parseJsonSalesHistory: ${filteredNegative} ventas con precio ≤ 0 descartadas`,
+        'warn',
+      );
+    }
+    return result;
   } catch (e) {
     LogService.error('VintedParserService.parseJsonSalesHistory', LOG_CTX.IMPORT, e);
     return [];
   }
 }
 
-// ─── 6. matchHistoryToInventory — FIX CRÍTICO Sprint 8 ───────────────────────
+// ─── 6. matchHistoryToInventory — Sprint 8 fix + Sprint 9 filtro ─────────────
 /**
+ * [ARCHITECT] + [DATA_SCIENTIST] + [QA_ENGINEER]
+ *
  * Cruza VintedSaleItems (ventas) con el inventario local.
- *
- * FIX: Usa DatabaseService.updateSaleData() en lugar de updateProduct().
- * updateProduct() preserva MANUAL_FIELDS_SOLD incluyendo soldPriceReal/soldDateReal,
- * lo que impide actualizarlos aunque el producto tenga el precio de publicación.
- *
- * updateSaleData() escribe soldPriceReal + soldDateReal + status='sold' DIRECTAMENTE
- * en el storage sin pasar por la capa de campos sagrados, ya que se trata de datos
- * que VIENEN del historial real de Vinted (fuente de verdad superior).
- *
- * Estrategia de match (por prioridad):
- *   1. orderId embebido en product.id  (vinted_20679079955 → orderId '20679079955')
- *   2. Título normalizado              (lowercase + sin emojis + sin símbolos)
- *
- * Condición de actualización:
- *   - soldPriceReal: siempre actualiza si el historial trae un valor > 0
- *     (el precio del historial es el precio REAL de venta, más fiable que el de publicación)
- *   - soldDateReal:  solo si el producto no tenía fecha real
- *
- * @param {Array} saleItems — VintedSaleItem[] (solo ventas)
- * @returns {{ matched, created, skipped, errors }}
+ * Sprint 8: usa DatabaseService.updateSaleData() (bypass MANUAL_FIELDS).
+ * Sprint 9: filtra explícitamente soldPriceReal <= 0 antes de actualizar.
  */
 export function matchHistoryToInventory(saleItems) {
-  const result = { matched: 0, created: 0, skipped: 0, errors: 0 };
+  const result = { matched: 0, created: 0, skipped: 0, errors: 0, filteredNegative: 0 };
 
   try {
     const allProducts = DatabaseService.getAllProducts();
 
-    // Normalización de título: lowercase + sin emojis + sin puntuación + trim
     const normalize = (s) => (s || '')
       .toLowerCase()
-      .replace(/\p{Emoji}/gu, '')           // emojis (con flag u)
-      .replace(/[^\w\sáéíóúüñ]/gi, ' ')    // símbolos y puntuación
+      .replace(/\p{Emoji}/gu, '')
+      .replace(/[^\w\sáéíóúüñ]/gi, ' ')
       .replace(/\s+/g, ' ')
       .trim();
 
-    // Índice por título normalizado → [índice en array]
     const titleIndex = new Map();
     allProducts.forEach((p, idx) => {
       const key = normalize(p.title);
@@ -213,22 +278,32 @@ export function matchHistoryToInventory(saleItems) {
       titleIndex.get(key).push(idx);
     });
 
-    // Índice por orderId embebido en product.id (vinted_ORDERID)
     const orderIdIndex = new Map();
     allProducts.forEach((p, idx) => {
       const m = String(p.id).match(/(\d{8,})/);
       if (m) orderIdIndex.set(m[1], idx);
     });
 
-    const updatedSet = new Set(); // evitar doble-update en mismo batch
+    const updatedSet = new Set();
 
     saleItems.forEach(item => {
+      // [QA_ENGINEER] Skip compras
       if (!item.orderId || item.type === 'compra') {
         result.skipped++;
         return;
       }
 
-      // Validar que el item tiene datos útiles
+      // [QA_ENGINEER] FILTRO CLAVE: no importar precios negativos o cero
+      if (!item.soldPriceReal || item.soldPriceReal <= 0) {
+        result.filteredNegative++;
+        LogService.add(
+          `⛔ matchHistory: "${item.title}" descartado — soldPriceReal inválido (${item.soldPriceReal})`,
+          'warn',
+        );
+        return;
+      }
+
+      // [QA_ENGINEER] Skip si no tiene datos útiles
       if (!item.soldPriceReal && !item.soldDateReal) {
         result.skipped++;
         return;
@@ -237,7 +312,7 @@ export function matchHistoryToInventory(saleItems) {
       try {
         let matchIdx = -1;
 
-        // Prioridad 1: orderId embebido
+        // Prioridad 1: orderId embebido en product.id
         if (orderIdIndex.has(item.orderId)) {
           matchIdx = orderIdIndex.get(item.orderId);
         }
@@ -249,29 +324,24 @@ export function matchHistoryToInventory(saleItems) {
           if (indices.length === 1) {
             matchIdx = indices[0];
           } else if (indices.length > 1) {
-            // Preferir el ya vendido
             const soldIdx = indices.find(i => allProducts[i]?.status === 'sold');
             matchIdx = soldIdx !== undefined ? soldIdx : indices[indices.length - 1];
           }
         }
 
         if (matchIdx === -1) {
-          // Sin match → crear producto vendido nuevo
           const newProd = mapToInventoryProduct(item);
           DatabaseService.importFromVinted([newProd]);
           result.created++;
           return;
         }
 
-        // Match encontrado — actualizar usando updateSaleData (bypass MANUAL_FIELDS)
         if (!updatedSet.has(matchIdx)) {
           const prod = allProducts[matchIdx];
+          // [ARCHITECT] updateSaleData bypasa MANUAL_FIELDS_SOLD
           DatabaseService.updateSaleData(prod.id, {
-            // soldPriceReal: siempre actualiza desde historial (precio real de venta)
             soldPriceReal: item.soldPriceReal,
-            // soldDateReal: solo si el producto no tenía fecha real
-            soldDateReal: item.soldDateReal
-              || (prod.soldDateReal ? undefined : item.date),
+            soldDateReal:  item.soldDateReal || (!prod.soldDateReal ? item.date : undefined),
             status: 'sold',
           });
           updatedSet.add(matchIdx);
@@ -286,7 +356,7 @@ export function matchHistoryToInventory(saleItems) {
     });
 
     LogService.add(
-      `✅ matchHistory: ${result.matched} matches · ${result.created} creados · ${result.skipped} skip · ${result.errors} err`,
+      `✅ matchHistory: ${result.matched} matches · ${result.created} creados · ${result.skipped} skip · ${result.filteredNegative} filtrados(precio≤0) · ${result.errors} err`,
       'success',
     );
   } catch (e) {
@@ -301,11 +371,13 @@ export function matchHistoryToInventory(saleItems) {
 
 export function mapToInventoryProduct(item) {
   const now = new Date().toISOString();
+  // [QA_ENGINEER] Precio siempre positivo
+  const safePrice = Math.max(MIN_VALID_PRICE, Math.abs(item.soldPriceReal || item.amount || 0));
   return {
     id:              `vinted_${item.orderId}`,
     title:           item.title,
     brand:           '',
-    price:           Math.abs(item.soldPriceReal || item.amount || 0),
+    price:           safePrice,
     description:     '',
     images:          item.imageUrl ? [item.imageUrl] : [],
     status:          'sold',
@@ -313,7 +385,7 @@ export function mapToInventoryProduct(item) {
     favorites:       0,
     soldDate:        item.soldDateReal || item.date || now,
     soldDateReal:    item.soldDateReal || item.date || null,
-    soldPriceReal:   item.soldPriceReal || Math.abs(item.amount || 0),
+    soldPriceReal:   safePrice,
     createdAt:       item.soldDateReal  || item.date || now,
     firstUploadDate: item.soldDateReal  || item.date || now,
     category:        'Otros',
@@ -328,12 +400,14 @@ export function mapToInventoryProduct(item) {
 
 export function mapToSaleRecord(item) {
   const now = new Date().toISOString();
+  // [QA_ENGINEER] Precio siempre positivo en el record
+  const safePrice = Math.max(MIN_VALID_PRICE, Math.abs(item.soldPriceReal || item.amount || 0));
   return {
     id:            genId(),
     orderId:       item.orderId,
     title:         item.title,
     amount:        item.amount,
-    soldPriceReal: item.soldPriceReal || Math.abs(item.amount || 0),
+    soldPriceReal: safePrice,
     soldDateReal:  item.soldDateReal  || item.date || null,
     type:          item.type,
     date:          item.date || now,
@@ -351,18 +425,25 @@ export const VintedSalesDB = {
       const raw      = storage.getString(KEYS.SALES_HISTORY);
       const existing = raw ? JSON.parse(raw) : [];
       const existIds = new Set(existing.map(r => r.orderId));
-      let inserted = 0, duplicates = 0;
+      let inserted = 0, duplicates = 0, filteredNeg = 0;
       const merged = [...existing];
       records.forEach(r => {
+        // [QA_ENGINEER] No guardar registros con precio inválido (ventas)
+        if (r.type === 'venta' && (!r.soldPriceReal || r.soldPriceReal <= 0)) {
+          // Intentar rescatar con amount
+          if (!r.amount || r.amount <= 0) { filteredNeg++; return; }
+          r.soldPriceReal = Math.abs(r.amount);
+        }
         if (existIds.has(r.orderId)) { duplicates++; }
         else { merged.push(r); existIds.add(r.orderId); inserted++; }
       });
       storage.set(KEYS.SALES_HISTORY, JSON.stringify(merged));
-      LogService.add(`💰 VintedSalesDB: +${inserted} (${duplicates} dup)`, 'success');
-      return { inserted, duplicates };
+      const msg = `💰 VintedSalesDB: +${inserted} (${duplicates} dup${filteredNeg > 0 ? `, ${filteredNeg} filtrados` : ''})`;
+      LogService.add(msg, 'success');
+      return { inserted, duplicates, filteredNeg };
     } catch (e) {
       LogService.error('VintedSalesDB.saveRecords', LOG_CTX.IMPORT, e);
-      return { inserted: 0, duplicates: 0 };
+      return { inserted: 0, duplicates: 0, filteredNeg: 0 };
     }
   },
 
@@ -371,19 +452,57 @@ export const VintedSalesDB = {
     catch { return []; }
   },
 
+  /**
+   * [DATA_SCIENTIST] getStats() corregido:
+   * BUG FIX: usaba r.date en lugar de r.soldDateReal para agrupar por mes.
+   * r.date puede ser null en Modo D. Ahora: soldDateReal || date.
+   * NUEVO: también agrupa por año (byYear).
+   */
   getStats() {
     const all     = this.getAllRecords();
     const ventas  = all.filter(r => r.type === 'venta');
     const compras = all.filter(r => r.type === 'compra');
-    const totalV  = ventas.reduce((s, r)  => s + Math.abs(r.amount || 0), 0);
-    const totalC  = compras.reduce((s, r) => s + Math.abs(r.amount || 0), 0);
+
+    // [QA_ENGINEER] Usar soldPriceReal para ventas, no amount (que puede ser negativo)
+    const totalV = ventas.reduce((s, r)  => s + Math.max(0, r.soldPriceReal || r.amount || 0), 0);
+    const totalC = compras.reduce((s, r) => s + Math.abs(r.amount || 0), 0);
+
     const byMonth = {};
+    const byYear  = {};
+
     all.forEach(r => {
-      const key = (r.soldDateReal || r.date || '').slice(0, 7) || 'unknown';
-      if (!byMonth[key]) byMonth[key] = { ventas: 0, compras: 0, count: 0 };
-      if (r.type === 'venta')  { byMonth[key].ventas  += Math.abs(r.amount || 0); byMonth[key].count++; }
-      if (r.type === 'compra') { byMonth[key].compras += Math.abs(r.amount || 0); byMonth[key].count++; }
+      // [DATA_SCIENTIST] FIX: usar soldDateReal primero para agrupar
+      const dateStr = r.soldDateReal || r.date || '';
+      const monthKey = dateStr.slice(0, 7) || 'unknown'; // "2026-02"
+      const yearKey  = dateStr.slice(0, 4) || 'unknown'; // "2026"
+
+      // Por mes
+      if (!byMonth[monthKey]) byMonth[monthKey] = { ventas: 0, compras: 0, count: 0, revenue: 0 };
+      if (r.type === 'venta') {
+        const v = Math.max(0, r.soldPriceReal || r.amount || 0);
+        byMonth[monthKey].ventas  += v;
+        byMonth[monthKey].revenue += v;
+        byMonth[monthKey].count++;
+      }
+      if (r.type === 'compra') {
+        byMonth[monthKey].compras += Math.abs(r.amount || 0);
+        byMonth[monthKey].count++;
+      }
+
+      // Por año
+      if (!byYear[yearKey]) byYear[yearKey] = { ventas: 0, compras: 0, count: 0, revenue: 0 };
+      if (r.type === 'venta') {
+        const v = Math.max(0, r.soldPriceReal || r.amount || 0);
+        byYear[yearKey].ventas  += v;
+        byYear[yearKey].revenue += v;
+        byYear[yearKey].count++;
+      }
+      if (r.type === 'compra') {
+        byYear[yearKey].compras += Math.abs(r.amount || 0);
+        byYear[yearKey].count++;
+      }
     });
+
     return {
       totalRecords:   all.length,
       totalVentas:    ventas.length,
@@ -392,7 +511,27 @@ export const VintedSalesDB = {
       gastos:         +totalC.toFixed(2),
       balance:        +(totalV - totalC).toFixed(2),
       byMonth,
+      byYear,
     };
+  },
+
+  /**
+   * [DATA_SCIENTIST] NUEVO: getAnnualStats()
+   * Retorna array ordenado de años para usar en AdvancedStatsScreen.
+   */
+  getAnnualStats() {
+    const stats = this.getStats();
+    return Object.entries(stats.byYear)
+      .filter(([y]) => y !== 'unknown' && y.length === 4)
+      .map(([year, d]) => ({
+        year:           parseInt(year),
+        label:          year,
+        ingresos:       +(d.ventas.toFixed(2)),
+        gastos:         +(d.compras.toFixed(2)),
+        balance:        +((d.ventas - d.compras).toFixed(2)),
+        totalVentas:    d.count,
+      }))
+      .sort((a, b) => b.year - a.year);
   },
 
   clear() {

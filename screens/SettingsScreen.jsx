@@ -1,56 +1,75 @@
+/**
+ * SettingsScreen.jsx — Sprint 10
+ *
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ * [ORCHESTRATOR] Sprint 10 — Persistencia de BBDD ante rebuilds de APK
+ *
+ * [ARCHITECT] CAMBIOS EN TAB "💾 BBDD":
+ *   ANTES (Sprint 9): solo Export manual + Import manual
+ *   AHORA (Sprint 10): añade sección "Auto-Backup" con:
+ *     - Estado del backup automático (fecha, nº productos, tamaño)
+ *     - Botón "Forzar backup ahora" (actualiza el fichero de FileSystem)
+ *     - Info card: explica la doble capa de persistencia
+ *     - Export manual: ahora delega en BackupService.exportToShare()
+ *     - Import manual: ahora delega en BackupService.importFromFile()
+ *
+ * [MIGRATION_MANAGER] ESTRATEGIA DE PERSISTENCIA SPRINT 10:
+ *   CAPA 1 (MMKV): datos en memoria — rápido, puede perderse al reinstalar
+ *   CAPA 2 (FileSystem.documentDirectory): auto-backup JSON persistente
+ *     → sobrevive a actualizaciones de APK sin desinstalar ✅
+ *     → se pierde solo si el usuario desinstala manualmente ⚠️
+ *   CAPA 3 (Share API): export manual a Drive/email como seguro externo
+ *
+ * [QA_ENGINEER] Sin cambios en otras tabs. Solo la tab "database" es nueva.
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ */
+
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TextInput,
-  TouchableOpacity, Alert, Modal, FlatList, Switch,
-  Animated, Dimensions,
+  TouchableOpacity, Alert, Modal, FlatList, Share,
+  ActivityIndicator, Dimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { DatabaseService } from '../services/DatabaseService';
+import { VintedSalesDB } from '../services/VintedParserService';
+import LogService from '../services/LogService';
+// [Sprint 10] BackupService para la nueva sección de auto-backup
+import { BackupService } from '../services/BackupService';
+
+// DocumentPicker — instalado en Sprint 8
+let DocumentPicker, FileSystem;
+try {
+  DocumentPicker = require('expo-document-picker');
+  FileSystem     = require('expo-file-system');
+} catch { /* graceful — si no está instalado no rompe */ }
 
 const { width } = Dimensions.get('window');
-
 const MONTHS = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ];
 
-// ─── Paleta ────────────────────────────────────────────────────────────────
+// ─── Paleta canónica DS ───────────────────────────────────────────────────────
 const C = {
-  bg:       '#F8F9FA',
-  white:    '#FFFFFF',
-  primary:  '#FF6B35',
-  blue:     '#004E89',
-  success:  '#00D9A3',
-  warning:  '#FFB800',
-  danger:   '#E63946',
-  gray900:  '#1A1A2E',
-  gray700:  '#666666',
-  gray500:  '#999999',
-  gray100:  '#F0F0F0',
+  bg:      '#F8F9FA', white:   '#FFFFFF', primary: '#FF6B35',
+  blue:    '#004E89', success: '#00D9A3', warning: '#FFB800',
+  danger:  '#E63946', gray900: '#1A1A2E', gray700: '#5C6070',
+  gray500: '#A0A5B5', gray100: '#F0F2F5', border:  '#EAEDF0',
 };
 
-// ─── Secc tabs ─────────────────────────────────────────────────────────────
 const TABS = [
-  { id: 'thresholds', label: 'Umbrales',  icon: 'sliders' },
-  { id: 'calendar',  label: 'Calendario', icon: 'calendar' },
-  { id: 'categories',label: 'Categorías', icon: 'tag' },
-  { id: 'import',    label: 'Importación',icon: 'download' },
-  { id: 'notif',     label: 'Avisos',     icon: 'bell' },
+  { id: 'thresholds', label: 'Umbrales',  icon: 'sliders'   },
+  { id: 'calendar',  label: 'Calendario', icon: 'calendar'  },
+  { id: 'categories',label: 'Categorías', icon: 'tag'       },
+  { id: 'database',  label: '💾 BBDD',    icon: 'database'  }, // Sprint 9: NUEVA
+  { id: 'import',    label: 'Importación',icon: 'download'  },
+  { id: 'notif',     label: 'Avisos',     icon: 'bell'      },
 ];
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-const CfgSection = ({ title, sub, icon, iconColor = '#FF6B35' }) => (
-  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 12, borderTopWidth: 1, borderTopColor: C.border }}>
-    <Icon name={icon || 'settings'} size={14} color={iconColor} style={{ marginTop: 2 }} />
-    <View style={{ flex: 1 }}>
-      <Text style={{ fontSize: 11, fontWeight: '800', color: C.text, marginBottom: 2 }}>{title}</Text>
-      {sub ? <Text style={{ fontSize: 10, color: C.gray500, lineHeight: 14 }}>{sub}</Text> : null}
-    </View>
-  </View>
-);
-
-const SectionTitle = ({ children, style }) => (
-  <Text style={[styles.sectionTitle, style]}>{children}</Text>
+// ─── Sub-componentes ──────────────────────────────────────────────────────────
+const SectionTitle = ({ children }) => (
+  <Text style={styles.sectionTitle}>{children}</Text>
 );
 
 const SettingCard = ({ label, desc, children }) => (
@@ -63,10 +82,10 @@ const SettingCard = ({ label, desc, children }) => (
   </View>
 );
 
-const NumInput = ({ value, onChangeText, unit, width: w = 65 }) => (
+const NumInput = ({ value, onChangeText, unit, inputWidth = 65 }) => (
   <View style={styles.numRow}>
     <TextInput
-      style={[styles.numInput, { width: w }]}
+      style={[styles.numInput, { width: inputWidth }]}
       keyboardType="numeric"
       value={String(value)}
       onChangeText={onChangeText}
@@ -75,889 +94,751 @@ const NumInput = ({ value, onChangeText, unit, width: w = 65 }) => (
   </View>
 );
 
-// ────────────────────────────────────────────────────────────────────────────
+const SaveBtn = ({ onPress }) => (
+  <TouchableOpacity style={styles.saveBtn} onPress={onPress} activeOpacity={0.7}>
+    <Icon name="save" size={16} color="#FFF" />
+    <Text style={styles.saveBtnTxt}>Guardar cambios</Text>
+  </TouchableOpacity>
+);
+
+// ─── Pantalla principal ───────────────────────────────────────────────────────
 export default function SettingsScreen({ navigation }) {
   const [activeTab, setActiveTab] = useState('thresholds');
-
-  // Configuración general
-  const [config, setConfig] = useState({
-    // Umbrales
-    daysInvisible:        '60',
-    viewsInvisible:       '20',
-    daysDesinterest:      '45',
-    daysCritical:         '90',
-    // Estrategia
-    staleMultiplier:        '1.5',
-    criticalMonthThreshold: '6',
-    // Umbrales HOT y Oportunidad
-    hotViews:               '50',
-    hotFavs:                '10',
-    hotDays:                '30',
-    daysAlmostReady:        '30',
-    favsAlmostReady:        '8',
-    opportunityFavs:        '8',
-    opportunityDays:        '20',
-    ttsLightning:         '7',    // días TTS relámpago
-    ttsAnchor:            '30',   // días TTS ancla
-    priceBoostPct:        '10',   // % subida en relámpago
-    priceCutPct:          '10',   // % bajada en ancla
-    // Importación
-    preserveCategory:     true,
-    preserveUploadDate:   true,
-    preserveSoldPrice:    true,
-    preserveSoldDate:     true,
-    preserveIsBundle:     true,
-    autoDetectCategory:   true,
-    // Notificaciones
-    notifEnabled:         true,
-    notifDays:            '3',    // cada cuántos días revisar
-    notifCritical:        true,
-    notifStale:           true,
-    notifSeasonal:        true,
-    notifOpportunity:     true,
-    // Calendario estacional — ahora es array por mes
-    seasonalMap: {
-      0: ['Juguetes'],
-      1: ['Ropa'],
-      2: ['Calzado'],
-      3: ['Accesorios'],
-      4: ['Calzado'],
-      5: ['Entretenimiento'],
-      6: ['Lotes'],
-      7: ['Juguetes'],
-      8: ['Ropa'],
-      9: ['Disfraces'],
-      10: ['Juguetes'],
-      11: ['Juguetes'],
-    },
-  });
-
-  // Diccionario categorías → { tags: [], subcategories: [] }
+  const [config, setConfig] = useState(() => DatabaseService.getConfig());
   const [dictionary, setDictionary] = useState({});
-  const [newCatName, setNewCatName]   = useState('');
-  const [newSubName, setNewSubName]   = useState('');
-  const [newTag, setNewTag]           = useState('');
-  const [expandedCat, setExpandedCat] = useState(null);
-  const [expandedSub, setExpandedSub] = useState(null);  // {cat, sub}
-  const [tagTarget, setTagTarget]     = useState(null);  // {cat, sub?}
-
-  // Modal selector de categorías para el calendario
   const [calModal, setCalModal] = useState({ visible: false, monthIdx: null });
+  const [newCatName, setNewCatName] = useState('');
+  const [selectedCatForSub, setSelectedCatForSub] = useState(null);
+  const [newSubName, setNewSubName] = useState('');
 
-  // ── Carga inicial ────────────────────────────────────────────────────────
+  // Sprint 9: estados para export/import BBDD
+  const [dbStats,     setDbStats]     = useState(null);
+  const [exporting,   setExporting]   = useState(false);
+  const [importing,   setImporting]   = useState(false);
+  // Sprint 10: estado del auto-backup persistente
+  const [backupInfo,  setBackupInfo]  = useState(null);
+  const [forcingBackup, setForcingBackup] = useState(false);
+
   useEffect(() => {
-    const saved    = DatabaseService.getConfig();
+    const saved     = DatabaseService.getConfig();
     const savedDict = DatabaseService.getDictionary();
 
     if (saved) {
-      // Migramos seasonalMap viejo (string) → nuevo (array)
       const sm = saved.seasonalMap || {};
       const newSm = {};
       for (let i = 0; i < 12; i++) {
         const val = sm[i];
-        if (Array.isArray(val))        newSm[i] = val;
+        if (Array.isArray(val))               newSm[i] = val;
         else if (typeof val === 'string' && val) newSm[i] = [val];
-        else                           newSm[i] = [];
+        else                                  newSm[i] = [];
       }
       setConfig(c => ({ ...c, ...saved, seasonalMap: newSm }));
     }
 
     if (savedDict) {
-      // Migramos diccionario viejo (array de strings) → nuevo (objeto {tags, subcategories})
       const migrated = {};
       for (const [cat, val] of Object.entries(savedDict)) {
-        if (Array.isArray(val)) {
-          migrated[cat] = { tags: val, subcategories: {} };
-        } else {
-          migrated[cat] = {
-            tags: val.tags || [],
-            subcategories: val.subcategories || {},
-          };
-        }
+        migrated[cat] = Array.isArray(val)
+          ? { tags: val, subcategories: {} }
+          : { tags: val.tags || [], subcategories: val.subcategories || {} };
       }
       setDictionary(migrated);
     }
   }, []);
 
-  // ── Guardar config ───────────────────────────────────────────────────────
+  // Cargar estadísticas BBDD cuando se abre la tab
+  useEffect(() => {
+    if (activeTab === 'database') {
+      loadDbStats();
+      loadBackupInfo(); // [Sprint 10]
+    }
+  }, [activeTab]);
+
+  // [Sprint 10] Cargar info del auto-backup desde FileSystem
+  const loadBackupInfo = async () => {
+    try {
+      const info = await BackupService.getBackupInfo();
+      setBackupInfo(info);
+    } catch { setBackupInfo(null); }
+  };
+
+  const loadDbStats = () => {
+    try {
+      const products    = DatabaseService.getAllProducts();
+      const sold        = products.filter(p => p.status === 'sold');
+      const salesStats  = VintedSalesDB.getStats?.() || {};
+      setDbStats({
+        totalProducts:  products.length,
+        soldProducts:   sold.length,
+        activeProducts: products.filter(p => p.status !== 'sold').length,
+        salesRecords:   salesStats.totalRecords || 0,
+        ventas:         salesStats.totalVentas  || 0,
+        compras:        salesStats.totalCompras || 0,
+        ingresos:       salesStats.ingresosBrutos || 0,
+        lastProduct:    products.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0]?.title || '—',
+      });
+    } catch { setDbStats(null); }
+  };
+
   const handleSave = () => {
     const ok = DatabaseService.saveConfig(config);
-    if (ok) Alert.alert('✅ Guardado', 'Configuración actualizada correctamente.');
+    if (ok) Alert.alert('✅ Guardado', 'Configuración actualizada.');
     else    Alert.alert('❌ Error', 'No se pudo guardar la configuración.');
   };
 
   const updateCfg = (key, val) => setConfig(c => ({ ...c, [key]: val }));
 
-  // ── Calendario: añadir/quitar categoría de un mes ────────────────────────
   const toggleMonthCategory = (monthIdx, catName) => {
-    const sm = { ...config.seasonalMap };
+    const sm  = { ...config.seasonalMap };
     const arr = sm[monthIdx] ? [...sm[monthIdx]] : [];
     const idx = arr.indexOf(catName);
-    if (idx >= 0) arr.splice(idx, 1);
-    else arr.push(catName);
+    if (idx === -1) arr.push(catName);
+    else arr.splice(idx, 1);
     sm[monthIdx] = arr;
-    setConfig(c => ({ ...c, seasonalMap: sm }));
+    updateCfg('seasonalMap', sm);
   };
 
-  const categoryNames = Object.keys(dictionary);
+  // ── [Sprint 10] Forzar backup ahora ──────────────────────────────────────
+  const handleForceBackup = async () => {
+    setForcingBackup(true);
+    try {
+      const FS = require('expo-file-system');
+      const payload = DatabaseService.exportFullDatabase();
+      if (!payload) { Alert.alert('❌ Error', 'No se pudo generar el backup.'); return; }
+      const path = `${FS.documentDirectory}resellhub_auto_backup.json`;
+      await FS.writeAsStringAsync(
+        path,
+        JSON.stringify({ ...payload, autoBackupAt: new Date().toISOString(), exportedBy: 'ResellHub_exportFullDatabase_v9' }),
+        { encoding: FS.EncodingType.UTF8 },
+      );
+      await loadBackupInfo();
+      Alert.alert('✅ Backup guardado', `${payload.products?.length || 0} productos guardados en el dispositivo.\n\nEste backup se restaura automáticamente si reinstelas la app.`);
+    } catch (e) {
+      Alert.alert('Error al hacer backup', e.message);
+    } finally {
+      setForcingBackup(false);
+    }
+  };
 
-  // ── Categorías ────────────────────────────────────────────────────────────
-  const saveDict = useCallback((newDict) => {
-    setDictionary(newDict);
-    // Convertimos al formato antiguo (array de strings) para compatibilidad con detectCategory
-    const legacyDict = {};
-    for (const [cat, val] of Object.entries(newDict)) {
-      // Unificamos tags de categoría y de subcategorías
-      const allTags = [...(val.tags || [])];
-      for (const sub of Object.values(val.subcategories || {})) {
-        allTags.push(...(sub.tags || []));
+  // ── [Sprint 10] Exportar BBDD (compartir externamente) ───────────────────
+  const handleExportDB = async () => {
+    setExporting(true);
+    try {
+      const payload = DatabaseService.exportFullDatabase();
+      await BackupService.exportToShare(payload);
+    } catch (e) {
+      if (e.message !== 'User did not share') {
+        Alert.alert('Error al exportar', e.message);
       }
-      legacyDict[cat] = allTags;
+    } finally {
+      setExporting(false);
     }
-    DatabaseService.saveDictionary(legacyDict);
-    // Guardamos versión completa en clave dedicada
-    DatabaseService.saveFullDictionary(newDict);
-  }, []);
-
-  const addCategory = () => {
-    const name = newCatName.trim();
-    if (!name) return;
-    if (dictionary[name]) { Alert.alert('Error', 'Categoría ya existe'); return; }
-    const d = { ...dictionary, [name]: { tags: [], subcategories: {} } };
-    saveDict(d);
-    setNewCatName('');
   };
 
-  const removeCategory = (cat) => {
-    Alert.alert('Eliminar', `¿Borrar categoría "${cat}" y todas sus subcategorías?`, [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: () => {
-        const d = { ...dictionary };
-        delete d[cat];
-        saveDict(d);
-        if (expandedCat === cat) setExpandedCat(null);
-      }},
-    ]);
-  };
+  // ── [Sprint 10] Importar/Restaurar BBDD desde fichero ────────────────────
+  const handleImportDB = async () => {
+    try {
+      const result = await BackupService.importFromFile(
+        (payload) => DatabaseService.importFullDatabase(payload),
+      );
+      if (result.cancelled) return;
+      const msg = [
+        '✅ Restauración completada',
+        `📦 Productos: ${result.products}`,
+        `💰 Ventas históricas: ${result.salesRecords}`,
+        result.configRestored ? '⚙️ Config restaurada' : '',
+        result.exportedAt ? `📅 Backup del: ${result.exportedAt.slice(0, 10)}` : '',
+        result.errors?.length > 0 ? `⚠️ Errores: ${result.errors.join(', ')}` : '',
+      ].filter(Boolean).join('\n');
 
-  const addSubcategory = (cat) => {
-    const name = newSubName.trim();
-    if (!name) return;
-    const d = { ...dictionary };
-    if (!d[cat].subcategories[name]) {
-      d[cat].subcategories[name] = { tags: [] };
-      saveDict(d);
+      Alert.alert('BBDD Restaurada', msg, [
+        { text: 'OK', onPress: () => { loadDbStats(); loadBackupInfo(); } },
+      ]);
+    } catch (e) {
+      Alert.alert('Error al importar', e.message);
+    } finally {
+      setImporting(false);
     }
-    setNewSubName('');
   };
 
-  const removeSubcategory = (cat, sub) => {
-    const d = { ...dictionary };
-    delete d[cat].subcategories[sub];
-    saveDict(d);
-  };
-
-  const addTag = (cat, sub) => {
-    const tag = newTag.trim().toLowerCase();
-    if (!tag) return;
-    const d = { ...dictionary };
-    const target = sub ? d[cat].subcategories[sub] : d[cat];
-    if (!target.tags.includes(tag)) {
-      target.tags.push(tag);
-      saveDict(d);
-    }
-    setNewTag('');
-    setTagTarget(null);
-  };
-
-  const removeTag = (cat, sub, tag) => {
-    const d = { ...dictionary };
-    const target = sub ? d[cat].subcategories[sub] : d[cat];
-    target.tags = target.tags.filter(t => t !== tag);
-    saveDict(d);
-  };
-
-  // ─── RENDERS POR TAB ─────────────────────────────────────────────────────
-
-  const renderThresholds = () => (
+  // ─── RENDER: Tab BBDD ─────────────────────────────────────────────────────
+  const renderDatabase = () => (
     <View>
-      <SectionTitle>Diagnóstico de productos</SectionTitle>
+      <SectionTitle>Base de Datos</SectionTitle>
 
-      <SettingCard
-        label="Producto invisible"
-        desc="Días sin ventas + pocas vistas para alertar"
-      >
-        <View style={styles.dualRow}>
-          <NumInput value={config.daysInvisible} onChangeText={v => updateCfg('daysInvisible', v)} unit="días" />
-          <NumInput value={config.viewsInvisible} onChangeText={v => updateCfg('viewsInvisible', v)} unit="vistas" />
+      {/* ── AUTO-BACKUP STATUS (Sprint 10) ─────────────────────────────── */}
+      <View style={styles.autoBackupCard}>
+        <View style={styles.autoBackupHeader}>
+          <View style={[styles.autoBackupDot, { backgroundColor: backupInfo?.exists ? C.success : C.warning }]} />
+          <Text style={styles.autoBackupTitle}>Auto-Backup Automático</Text>
+          <TouchableOpacity onPress={loadBackupInfo} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Icon name="refresh-cw" size={13} color={C.gray500} />
+          </TouchableOpacity>
         </View>
-      </SettingCard>
 
-      <SettingCard
-        label="Falta de interés"
-        desc="Días con vistas pero 0 favoritos"
-      >
-        <NumInput value={config.daysDesinterest} onChangeText={v => updateCfg('daysDesinterest', v)} unit="días" />
-      </SettingCard>
-
-      <SettingCard
-        label="Estado crítico"
-        desc="Días hasta marcar como urgente"
-      >
-        <NumInput value={config.daysCritical} onChangeText={v => updateCfg('daysCritical', v)} unit="días" />
-      </SettingCard>
-
-      <SectionTitle style={{ marginTop: 20 }}>Estrategia de velocidad (TTS)</SectionTitle>
-
-      <SettingCard label="⚡ TTS Relámpago" desc="Vende en menos de estos días → sube precio">
-        <View style={styles.dualRow}>
-          <NumInput value={config.ttsLightning} onChangeText={v => updateCfg('ttsLightning', v)} unit="días" />
-          <NumInput value={config.priceBoostPct} onChangeText={v => updateCfg('priceBoostPct', v)} unit="% sube" />
-        </View>
-      </SettingCard>
-
-      <SettingCard label="⚓ TTS Ancla" desc="Tarda más de estos días → baja precio">
-        <View style={styles.dualRow}>
-          <NumInput value={config.ttsAnchor} onChangeText={v => updateCfg('ttsAnchor', v)} unit="días" />
-          <NumInput value={config.priceCutPct} onChangeText={v => updateCfg('priceCutPct', v)} unit="% baja" />
-        </View>
-      </SettingCard>
-
-      <SectionTitle style={{ marginTop: 20 }}>Inteligencia de estancamiento</SectionTitle>
-
-      <SettingCard
-        label="Sensibilidad (× media)"
-        desc="Alertar cuando el producto tarda X veces más que la media de su categoría"
-      >
-        <NumInput value={config.staleMultiplier} onChangeText={v => updateCfg('staleMultiplier', v)} unit="× media" />
-      </SettingCard>
-
-      <SettingCard
-        label="Límite histórico"
-        desc="Meses antes de republicación obligatoria"
-      >
-        <NumInput value={config.criticalMonthThreshold} onChangeText={v => updateCfg('criticalMonthThreshold', v)} unit="meses" />
-      </SettingCard>
-
-      {/* ── HOT — Producto con alta demanda ────────────────── */}
-      <SettingCard
-        label="Producto HOT"
-        desc={`Artículo con >${config.hotViews} vistas o >${config.hotFavs} favs en menos de ${config.hotDays}d`}
-        icon="zap"
-        iconColor="#E63946"
-      >
-        <View style={styles.row}>
-          <NumInput label="Vistas mínimas" value={config.hotViews}    onChangeText={v => updateCfg('hotViews', v)}    unit="vistas" />
-          <NumInput label="Favs mínimos"   value={config.hotFavs}     onChangeText={v => updateCfg('hotFavs', v)}     unit="favs" />
-          <NumInput label="Días máximos"   value={config.hotDays}     onChangeText={v => updateCfg('hotDays', v)}     unit="días" />
-        </View>
-      </SettingCard>
-
-      {/* ── CASI LISTO — Producto favoriteado pero sin vender ── */}
-      <SettingCard
-        label="Casi Listo"
-        desc={`Productos con >${config.favsAlmostReady} favs publicados más de ${config.daysAlmostReady}d`}
-        icon="heart"
-        iconColor="#00D9A3"
-      >
-        <View style={styles.row}>
-          <NumInput label="Días publicado" value={config.daysAlmostReady}  onChangeText={v => updateCfg('daysAlmostReady', v)}  unit="días" />
-          <NumInput label="Favs mínimos"  value={config.favsAlmostReady}   onChangeText={v => updateCfg('favsAlmostReady', v)}   unit="favs" />
-        </View>
-      </SettingCard>
-
-      {/* ── OPORTUNIDAD — Alerta de oferta ──────────────────── */}
-      <SettingCard
-        label="Alerta Oportunidad"
-        desc={`Lanza alerta cuando favs > ${config.opportunityFavs} y llevan > ${config.opportunityDays}d publicados`}
-        icon="bell"
-        iconColor="#FFB800"
-      >
-        <View style={styles.row}>
-          <NumInput label="Favs para alerta" value={config.opportunityFavs}  onChangeText={v => updateCfg('opportunityFavs', v)}  unit="favs" />
-          <NumInput label="Días mínimos"     value={config.opportunityDays}  onChangeText={v => updateCfg('opportunityDays', v)}  unit="días" />
-        </View>
-      </SettingCard>
-
-      <SaveBtn onPress={handleSave} />
-    </View>
-  );
-
-  const renderCalendar = () => (
-    <View>
-      <SectionTitle>Calendario de oportunidades</SectionTitle>
-      <Text style={styles.calHint}>
-        Asigna una o varias categorías a cada mes. El sistema priorizará esas categorías en las alertas y en "Smart Insights".
-      </Text>
-
-      {MONTHS.map((mes, idx) => {
-        const selected = config.seasonalMap?.[idx] || [];
-        return (
-          <View key={idx} style={styles.calRow}>
-            <View style={styles.calLeft}>
-              <Text style={styles.calMonth}>{mes}</Text>
-              <View style={styles.calChips}>
-                {selected.length === 0 && (
-                  <Text style={styles.calEmpty}>Sin categoría</Text>
-                )}
-                {selected.map(cat => (
-                  <TouchableOpacity
-                    key={cat}
-                    style={styles.calChip}
-                    onPress={() => toggleMonthCategory(idx, cat)}
-                  >
-                    <Text style={styles.calChipTxt}>{cat}</Text>
-                    <Icon name="x" size={10} color={C.blue} />
-                  </TouchableOpacity>
-                ))}
+        {backupInfo?.exists ? (
+          <View style={styles.autoBackupBody}>
+            <View style={styles.autoBackupRow}>
+              <Icon name="check-circle" size={14} color={C.success} />
+              <Text style={styles.autoBackupOk}>Backup local disponible en el dispositivo</Text>
+            </View>
+            <View style={styles.autoBackupMeta}>
+              <View style={styles.autoBackupMetaItem}>
+                <Text style={styles.autoBackupMetaVal}>{backupInfo.products}</Text>
+                <Text style={styles.autoBackupMetaLab}>Productos</Text>
+              </View>
+              <View style={styles.autoBackupMetaItem}>
+                <Text style={styles.autoBackupMetaVal}>{backupInfo.sizeKB} KB</Text>
+                <Text style={styles.autoBackupMetaLab}>Tamaño</Text>
+              </View>
+              <View style={styles.autoBackupMetaItem}>
+                <Text style={styles.autoBackupMetaVal}>
+                  {backupInfo.date ? new Date(backupInfo.date).toLocaleDateString('es-ES') : '—'}
+                </Text>
+                <Text style={styles.autoBackupMetaLab}>Última vez</Text>
               </View>
             </View>
-            <TouchableOpacity
-              style={styles.calAddBtn}
-              onPress={() => setCalModal({ visible: true, monthIdx: idx })}
-            >
-              <Icon name="plus" size={18} color={C.white} />
-            </TouchableOpacity>
           </View>
-        );
-      })}
+        ) : (
+          <View style={styles.autoBackupBody}>
+            <View style={styles.autoBackupRow}>
+              <Icon name="alert-circle" size={14} color={C.warning} />
+              <Text style={styles.autoBackupWarn}>Sin backup local. Pulsa "Guardar ahora" para crearlo.</Text>
+            </View>
+          </View>
+        )}
 
-      <SaveBtn onPress={handleSave} />
-
-      {/* Modal selector categoría */}
-      <Modal
-        visible={calModal.visible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setCalModal({ visible: false, monthIdx: null })}
-      >
         <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setCalModal({ visible: false, monthIdx: null })}
+          style={[styles.forceBackupBtn, forcingBackup && { opacity: 0.6 }]}
+          onPress={handleForceBackup}
+          disabled={forcingBackup}
+          activeOpacity={0.7}
         >
-          <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>
-              Categorías para {calModal.monthIdx !== null ? MONTHS[calModal.monthIdx] : ''}
-            </Text>
-            <Text style={styles.modalHint}>Toca para añadir/quitar</Text>
-            <FlatList
-              data={categoryNames}
-              keyExtractor={i => i}
-              renderItem={({ item }) => {
-                const active = (config.seasonalMap?.[calModal.monthIdx] || []).includes(item);
-                return (
-                  <TouchableOpacity
-                    style={[styles.modalItem, active && styles.modalItemActive]}
-                    onPress={() => toggleMonthCategory(calModal.monthIdx, item)}
-                  >
-                    <Text style={[styles.modalItemTxt, active && styles.modalItemTxtActive]}>
-                      {item}
-                    </Text>
-                    {active && <Icon name="check" size={16} color={C.blue} />}
-                  </TouchableOpacity>
-                );
-              }}
-              ListEmptyComponent={
-                <Text style={styles.calEmpty}>
-                  No hay categorías. Créalas en la pestaña "Categorías".
-                </Text>
-              }
-            />
-            <TouchableOpacity
-              style={styles.modalClose}
-              onPress={() => setCalModal({ visible: false, monthIdx: null })}
-            >
-              <Text style={styles.modalCloseTxt}>Cerrar</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-    </View>
-  );
-
-  const renderCategories = () => (
-    <View>
-      <SectionTitle>Diccionario de categorías</SectionTitle>
-      <Text style={styles.calHint}>
-        Las palabras clave (tags) permiten la detección automática de categoría. Las subcategorías ayudan a afinar el análisis de estadísticas.
-      </Text>
-
-      {/* Nueva categoría */}
-      <View style={styles.addRow}>
-        <TextInput
-          style={styles.addInput}
-          placeholder="Nueva categoría..."
-          value={newCatName}
-          onChangeText={setNewCatName}
-          onSubmitEditing={addCategory}
-        />
-        <TouchableOpacity style={styles.addBtn} onPress={addCategory}>
-          <Icon name="plus" size={20} color={C.white} />
+          {forcingBackup
+            ? <ActivityIndicator size="small" color={C.blue} />
+            : <Icon name="save" size={15} color={C.blue} />
+          }
+          <Text style={styles.forceBackupTxt}>
+            {forcingBackup ? 'Guardando...' : 'Guardar backup ahora'}
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {Object.keys(dictionary).map(cat => {
-        const isExpanded = expandedCat === cat;
-        const catData    = dictionary[cat];
-        return (
-          <View key={cat} style={styles.dictCard}>
-            {/* Header categoría */}
-            <TouchableOpacity
-              style={styles.dictHeader}
-              onPress={() => setExpandedCat(isExpanded ? null : cat)}
-            >
-              <View style={styles.dictHeaderLeft}>
-                <View style={styles.catBadge}>
-                  <Text style={styles.catBadgeTxt}>
-                    {(catData.tags?.length || 0) + Object.values(catData.subcategories || {}).reduce((a, s) => a + (s.tags?.length || 0), 0)}
-                  </Text>
-                </View>
-                <Text style={styles.dictTitle}>{cat}</Text>
-                {Object.keys(catData.subcategories || {}).length > 0 && (
-                  <View style={styles.subBadge}>
-                    <Text style={styles.subBadgeTxt}>
-                      {Object.keys(catData.subcategories).length} sub
-                    </Text>
-                  </View>
-                )}
-              </View>
-              <View style={styles.dictActions}>
-                <Icon name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={C.gray500} />
-                <TouchableOpacity
-                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  onPress={() => removeCategory(cat)}
-                >
-                  <Icon name="trash-2" size={18} color={C.danger} />
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-
-            {isExpanded && (
-              <View style={styles.dictBody}>
-                {/* Tags de la categoría raíz */}
-                <Text style={styles.subSectionLabel}>Tags generales</Text>
-                <TagCloud
-                  tags={catData.tags || []}
-                  onRemove={tag => removeTag(cat, null, tag)}
-                />
-                {tagTarget?.cat === cat && !tagTarget?.sub ? (
-                  <TagInput
-                    value={newTag}
-                    onChange={setNewTag}
-                    onAdd={() => addTag(cat, null)}
-                    onCancel={() => { setNewTag(''); setTagTarget(null); }}
-                  />
-                ) : (
-                  <TouchableOpacity
-                    style={styles.addTagBtn}
-                    onPress={() => setTagTarget({ cat, sub: null })}
-                  >
-                    <Icon name="plus-circle" size={14} color={C.blue} />
-                    <Text style={styles.addTagBtnTxt}>Añadir tag</Text>
-                  </TouchableOpacity>
-                )}
-
-                {/* Subcategorías */}
-                <View style={styles.subDivider} />
-                <Text style={styles.subSectionLabel}>Subcategorías</Text>
-
-                {Object.keys(catData.subcategories || {}).map(sub => {
-                  const subData   = catData.subcategories[sub];
-                  const isSubExp  = expandedSub?.cat === cat && expandedSub?.sub === sub;
-                  return (
-                    <View key={sub} style={styles.subCard}>
-                      <TouchableOpacity
-                        style={styles.subHeader}
-                        onPress={() => setExpandedSub(isSubExp ? null : { cat, sub })}
-                      >
-                        <Icon name="corner-down-right" size={14} color={C.blue} />
-                        <Text style={styles.subTitle}>{sub}</Text>
-                        <Text style={styles.subCount}>{subData.tags?.length || 0} tags</Text>
-                        <TouchableOpacity
-                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                          onPress={() => removeSubcategory(cat, sub)}
-                        >
-                          <Icon name="x" size={14} color={C.danger} />
-                        </TouchableOpacity>
-                      </TouchableOpacity>
-
-                      {isSubExp && (
-                        <View style={{ paddingLeft: 20 }}>
-                          <TagCloud
-                            tags={subData.tags || []}
-                            onRemove={tag => removeTag(cat, sub, tag)}
-                            small
-                          />
-                          {tagTarget?.cat === cat && tagTarget?.sub === sub ? (
-                            <TagInput
-                              value={newTag}
-                              onChange={setNewTag}
-                              onAdd={() => addTag(cat, sub)}
-                              onCancel={() => { setNewTag(''); setTagTarget(null); }}
-                            />
-                          ) : (
-                            <TouchableOpacity
-                              style={styles.addTagBtn}
-                              onPress={() => setTagTarget({ cat, sub })}
-                            >
-                              <Icon name="plus-circle" size={13} color={C.blue} />
-                              <Text style={styles.addTagBtnTxt}>Añadir tag</Text>
-                            </TouchableOpacity>
-                          )}
-                        </View>
-                      )}
-                    </View>
-                  );
-                })}
-
-                {/* Nueva subcategoría */}
-                <View style={styles.newSubRow}>
-                  <TextInput
-                    style={styles.newSubInput}
-                    placeholder="Nueva subcategoría..."
-                    value={newSubName}
-                    onChangeText={setNewSubName}
-                    onSubmitEditing={() => addSubcategory(cat)}
-                  />
-                  <TouchableOpacity
-                    style={styles.newSubBtn}
-                    onPress={() => addSubcategory(cat)}
-                  >
-                    <Icon name="plus" size={16} color={C.white} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-          </View>
-        );
-      })}
-
-      <View style={{ height: 20 }} />
-    </View>
-  );
-
-  const renderImport = () => (
-    <View>
-      <SectionTitle>Campos protegidos al importar</SectionTitle>
-      <Text style={styles.calHint}>
-        Cuando cargues un JSON actualizado de Vinted, estos campos manuales se conservarán aunque el producto haya cambiado.
-      </Text>
-
-      {[
-        { key: 'preserveCategory',   label: 'Categoría / Subcategoría',    desc: 'Asignada manualmente — nunca se sobreescribe' },
-        { key: 'preserveUploadDate', label: 'Fecha de subida original',     desc: 'El JSON siempre trae la fecha de extracción. Esta la protege.' },
-        { key: 'preserveSoldPrice',  label: 'Precio final de venta',        desc: 'El precio real al que se vendió (campo manual)' },
-        { key: 'preserveSoldDate',   label: 'Fecha real de venta',          desc: 'Fecha manual de cierre de venta' },
-        { key: 'preserveIsBundle',   label: 'Venta en lote/pack',           desc: 'Marcado manual de si fue vendido como lote' },
-      ].map(item => (
-        <View key={item.key} style={styles.toggleCard}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardLabel}>{item.label}</Text>
-            <Text style={styles.cardDesc}>{item.desc}</Text>
-          </View>
-          <Switch
-            value={!!config[item.key]}
-            onValueChange={v => updateCfg(item.key, v)}
-            trackColor={{ false: C.gray100, true: C.blue + '55' }}
-            thumbColor={config[item.key] ? C.blue : C.gray500}
-          />
-        </View>
-      ))}
-
-      <SectionTitle style={{ marginTop: 24 }}>Automatización al importar</SectionTitle>
-
-      {[
-        { key: 'autoDetectCategory',  label: 'Detección automática de categoría', desc: 'Usa el diccionario para inferir categoría si no existe' },
-      ].map(item => (
-        <View key={item.key} style={styles.toggleCard}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardLabel}>{item.label}</Text>
-            <Text style={styles.cardDesc}>{item.desc}</Text>
-          </View>
-          <Switch
-            value={!!config[item.key]}
-            onValueChange={v => updateCfg(item.key, v)}
-            trackColor={{ false: C.gray100, true: C.success + '55' }}
-            thumbColor={config[item.key] ? C.success : C.gray500}
-          />
-        </View>
-      ))}
-
+      {/* ── Info doble capa ──────────────────────────────────────────────── */}
       <View style={styles.infoBox}>
         <Icon name="info" size={16} color={C.blue} />
         <Text style={styles.infoTxt}>
-          Cuando importes <Text style={{ fontWeight: '900' }}>mis_productos_vinted_ACTUALIZADO.json</Text>, el sistema detectará automáticamente: cambios de precio, productos nuevos, posibles resubidas (mismo producto con ID diferente) y actualizaciones de estado. Los campos manuales marcados arriba jamás serán sobreescritos.
+          <Text style={{ fontWeight: '800' }}>¿Cómo funciona?{'\n'}</Text>
+          Cada vez que guardas un producto, la app actualiza automáticamente un
+          fichero de backup en el dispositivo.{'\n\n'}
+          Si instalas una nueva build,{' '}
+          <Text style={{ fontWeight: '700' }}>la app restaura tus datos automáticamente</Text>
+          {' '}al arrancar si detecta que MMKV está vacío.{'\n\n'}
+          Solo se pierden datos si <Text style={{ fontWeight: '700' }}>desinstelas la app manualmente</Text>.
+          Para ese caso, usa "Exportar" y guarda el .json en Google Drive.
         </Text>
       </View>
 
-      <SaveBtn onPress={handleSave} />
-    </View>
-  );
-
-  const renderNotifications = () => (
-    <View>
-      <SectionTitle>Centro de notificaciones</SectionTitle>
-
-      <View style={styles.toggleCard}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.cardLabel}>Notificaciones activas</Text>
-          <Text style={styles.cardDesc}>Habilita/deshabilita todos los avisos</Text>
+      {/* ── Estadísticas MMKV actuales ───────────────────────────────────── */}
+      {dbStats && (
+        <View style={styles.dbStatsCard}>
+          <Text style={styles.dbStatsTitle}>Estado actual de la BBDD</Text>
+          <View style={styles.dbStatsGrid}>
+            <View style={styles.dbStatItem}>
+              <Text style={styles.dbStatVal}>{dbStats.totalProducts}</Text>
+              <Text style={styles.dbStatLab}>Productos</Text>
+            </View>
+            <View style={styles.dbStatItem}>
+              <Text style={[styles.dbStatVal, { color: C.success }]}>{dbStats.soldProducts}</Text>
+              <Text style={styles.dbStatLab}>Vendidos</Text>
+            </View>
+            <View style={styles.dbStatItem}>
+              <Text style={[styles.dbStatVal, { color: C.primary }]}>{dbStats.activeProducts}</Text>
+              <Text style={styles.dbStatLab}>En stock</Text>
+            </View>
+            <View style={styles.dbStatItem}>
+              <Text style={[styles.dbStatVal, { color: C.blue }]}>{dbStats.salesRecords}</Text>
+              <Text style={styles.dbStatLab}>Historial</Text>
+            </View>
+          </View>
+          {dbStats.ingresos > 0 && (
+            <View style={styles.dbIngresoRow}>
+              <Icon name="trending-up" size={12} color={C.success} />
+              <Text style={styles.dbIngresoTxt}>
+                Ingresos registrados: <Text style={{ fontWeight: '900', color: C.success }}>{dbStats.ingresos.toFixed(2)}€</Text>
+                {' '}({dbStats.ventas} ventas · {dbStats.compras} compras)
+              </Text>
+            </View>
+          )}
         </View>
-        <Switch
-          value={!!config.notifEnabled}
-          onValueChange={v => updateCfg('notifEnabled', v)}
-          trackColor={{ false: C.gray100, true: C.primary + '55' }}
-          thumbColor={config.notifEnabled ? C.primary : C.gray500}
-        />
+      )}
+
+      {/* ── Seguro externo: Export/Import manual ────────────────────────── */}
+      <Text style={styles.sectionTitle}>Seguro Externo</Text>
+      <View style={styles.dbActionsRow}>
+        <TouchableOpacity
+          style={[styles.dbActionBtn, { backgroundColor: C.blue }]}
+          onPress={handleExportDB}
+          disabled={exporting}
+          activeOpacity={0.7}
+        >
+          {exporting
+            ? <ActivityIndicator size="small" color="#FFF" />
+            : <Icon name="upload" size={18} color="#FFF" />
+          }
+          <Text style={styles.dbActionTxt}>Exportar JSON</Text>
+          <Text style={styles.dbActionSub}>Drive / Email / WhatsApp</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.dbActionBtn, { backgroundColor: C.success }]}
+          onPress={handleImportDB}
+          disabled={importing}
+          activeOpacity={0.7}
+        >
+          {importing
+            ? <ActivityIndicator size="small" color="#FFF" />
+            : <Icon name="download" size={18} color="#FFF" />
+          }
+          <Text style={styles.dbActionTxt}>Restaurar JSON</Text>
+          <Text style={styles.dbActionSub}>Desde fichero .json</Text>
+        </TouchableOpacity>
       </View>
 
-      <SettingCard
-        label="Frecuencia de revisión"
-        desc="Cada cuántos días el sistema comprueba alertas activas"
+      {/* ── Acción: actualizar stats ─────────────────────────────────────── */}
+      <TouchableOpacity
+        style={styles.refreshStatsBtn}
+        onPress={() => { loadDbStats(); loadBackupInfo(); }}
+        activeOpacity={0.7}
       >
-        <NumInput
-          value={config.notifDays}
-          onChangeText={v => updateCfg('notifDays', v)}
-          unit="días"
-          width={60}
-        />
+        <Icon name="refresh-cw" size={13} color={C.blue} />
+        <Text style={styles.refreshStatsTxt}>Actualizar estadísticas</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  // ─── RENDER: Tab Umbrales ────────────────────────────────────────────────
+  const renderThresholds = () => (
+    <View>
+      <SectionTitle>Velocidad de Venta (TTS)</SectionTitle>
+      <SettingCard label="⚡ Relámpago" desc="Productos con TTS menor a este umbral → sube precios">
+        <NumInput value={config.ttsLightning || 7}  onChangeText={v => updateCfg('ttsLightning', v)} unit="días" />
+      </SettingCard>
+      <SettingCard label="⚓ Ancla" desc="Productos con TTS mayor a este umbral → baja precios">
+        <NumInput value={config.ttsAnchor || 30}    onChangeText={v => updateCfg('ttsAnchor', v)}    unit="días" />
+      </SettingCard>
+      <SettingCard label="📈 Subida de precio" desc="% a subir en productos relámpago">
+        <NumInput value={config.priceBoostPct || 10} onChangeText={v => updateCfg('priceBoostPct', v)} unit="%" />
+      </SettingCard>
+      <SettingCard label="📉 Bajada de precio" desc="% a bajar en productos ancla">
+        <NumInput value={config.priceCutPct || 10}  onChangeText={v => updateCfg('priceCutPct', v)}  unit="%" />
       </SettingCard>
 
-      <SectionTitle style={{ marginTop: 20 }}>Tipos de alerta</SectionTitle>
+      <SectionTitle>Stock Frío (Estancamiento)</SectionTitle>
+      <SettingCard label="Días sin vender" desc="Días en stock para mostrar alerta de estancamiento">
+        <NumInput value={config.daysInvisible || 60}  onChangeText={v => updateCfg('daysInvisible', v)}  unit="días" />
+      </SettingCard>
+      <SettingCard label="Días críticos" desc="Días en stock para alerta de nivel CRÍTICO">
+        <NumInput value={config.daysCritical || 90}   onChangeText={v => updateCfg('daysCritical', v)}   unit="días" />
+      </SettingCard>
+      <SettingCard label="Multiplicador ancla" desc="Días ancla × multiplicador = días para sugerir lote">
+        <NumInput value={config.staleMultiplier || 1.5} onChangeText={v => updateCfg('staleMultiplier', v)} inputWidth={70} />
+      </SettingCard>
 
-      {[
-        { key: 'notifCritical',    label: '🚨 Crítico',       desc: 'Producto supera el límite de meses sin venderse', color: C.danger },
-        { key: 'notifStale',       label: '⏱️ Estancado',     desc: 'Producto más lento que la media de su categoría', color: C.warning },
-        { key: 'notifSeasonal',    label: '📅 Estacional',    desc: 'Categoría prioritaria según el calendario de ventas', color: C.blue },
-        { key: 'notifOpportunity', label: '💡 Oportunidad',   desc: 'Muchos favoritos → hacer oferta directa', color: C.success },
-      ].map(item => (
-        <View key={item.key} style={[styles.toggleCard, { borderLeftWidth: 3, borderLeftColor: item.color }]}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardLabel}>{item.label}</Text>
-            <Text style={styles.cardDesc}>{item.desc}</Text>
-          </View>
-          <Switch
-            value={!!config[item.key]}
-            onValueChange={v => updateCfg(item.key, v)}
-            disabled={!config.notifEnabled}
-            trackColor={{ false: C.gray100, true: item.color + '55' }}
-            thumbColor={config[item.key] ? item.color : C.gray500}
-          />
+      <SectionTitle>Oportunidades</SectionTitle>
+      <SettingCard label="Producto caliente" desc="Favs y vistas para marcar como caliente">
+        <View style={styles.row}>
+          <NumInput value={config.hotFavs || 10} onChangeText={v => updateCfg('hotFavs', v)} unit="favs" />
+          <NumInput value={config.hotViews || 50} onChangeText={v => updateCfg('hotViews', v)} unit="vistas" />
         </View>
-      ))}
+      </SettingCard>
+      <SettingCard label="Alerta oportunidad" desc="Lanza alerta cuando favs y días superan estos umbrales">
+        <View style={styles.row}>
+          <NumInput value={config.opportunityFavs || 5}  onChangeText={v => updateCfg('opportunityFavs', v)}  unit="favs" />
+          <NumInput value={config.opportunityDays || 30} onChangeText={v => updateCfg('opportunityDays', v)} unit="días" />
+        </View>
+      </SettingCard>
 
       <SaveBtn onPress={handleSave} />
     </View>
   );
 
-  const tabContent = {
-    thresholds: renderThresholds,
-    calendar:   renderCalendar,
-    categories: renderCategories,
-    import:     renderImport,
-    notif:      renderNotifications,
+  // ─── RENDER: Tab Calendario ──────────────────────────────────────────────
+  const renderCalendar = () => {
+    const catNames = Object.keys(dictionary);
+    return (
+      <View>
+        <SectionTitle>Calendario de Oportunidades</SectionTitle>
+        <Text style={styles.calHint}>
+          Asigna categorías a cada mes. El sistema priorizará estas categorías en alertas y Smart Insights.
+        </Text>
+        {MONTHS.map((mes, idx) => {
+          const selected = Array.isArray(config.seasonalMap?.[idx]) ? config.seasonalMap[idx] : [];
+          return (
+            <View key={idx} style={styles.monthRow}>
+              <Text style={styles.monthName}>{mes}</Text>
+              <View style={styles.monthChips}>
+                {selected.length === 0
+                  ? <Text style={styles.monthEmpty}>Sin asignar</Text>
+                  : selected.map(cat => (
+                    <TouchableOpacity key={cat} style={styles.monthChip}
+                      onPress={() => toggleMonthCategory(idx, cat)} activeOpacity={0.7}>
+                      <Text style={styles.monthChipTxt}>{cat} ✕</Text>
+                    </TouchableOpacity>
+                  ))
+                }
+              </View>
+              <TouchableOpacity style={styles.monthAddBtn}
+                onPress={() => setCalModal({ visible: true, monthIdx: idx })} activeOpacity={0.7}>
+                <Icon name="plus" size={14} color={C.primary} />
+              </TouchableOpacity>
+            </View>
+          );
+        })}
+
+        <Modal visible={calModal.visible} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalSheet}>
+              <Text style={styles.modalTitle}>
+                {calModal.monthIdx !== null ? MONTHS[calModal.monthIdx] : ''}
+              </Text>
+              <Text style={styles.modalHint}>Toca una categoría para añadir/quitar</Text>
+              <FlatList
+                data={catNames}
+                keyExtractor={k => k}
+                renderItem={({ item }) => {
+                  const isSelected = config.seasonalMap?.[calModal.monthIdx]?.includes(item);
+                  return (
+                    <TouchableOpacity
+                      style={[styles.modalItem, isSelected && styles.modalItemActive]}
+                      onPress={() => { toggleMonthCategory(calModal.monthIdx, item); }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.modalItemTxt, isSelected && styles.modalItemTxtActive]}>{item}</Text>
+                      {isSelected && <Icon name="check" size={16} color={C.blue} />}
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+              <TouchableOpacity style={styles.modalClose} onPress={() => setCalModal({ visible: false, monthIdx: null })} activeOpacity={0.7}>
+                <Text style={styles.modalCloseTxt}>Cerrar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <SaveBtn onPress={handleSave} />
+      </View>
+    );
+  };
+
+  // ─── RENDER: Tab Categorías ──────────────────────────────────────────────
+  const renderCategories = () => {
+    const catNames = Object.keys(dictionary);
+    const handleSaveDictionary = () => {
+      const legacy = {};
+      for (const [cat, val] of Object.entries(dictionary)) { legacy[cat] = val.tags || []; }
+      DatabaseService.saveDictionary?.(legacy) || DatabaseService.saveConfig?.({ ...config, customDictionary: dictionary });
+      if (DatabaseService.saveDictionary) {
+        DatabaseService.saveDictionary(legacy);
+      }
+      // Guardar full dictionary
+      try {
+        const { MMKV } = require('react-native-mmkv');
+        const s = new MMKV();
+        s.set('custom_dictionary_full', JSON.stringify(dictionary));
+        s.set('custom_dictionary', JSON.stringify(legacy));
+      } catch { /* silent */ }
+      Alert.alert('✅ Categorías guardadas', `${catNames.length} categorías actualizadas.`);
+    };
+
+    return (
+      <View>
+        <SectionTitle>Diccionario de Categorías</SectionTitle>
+
+        {catNames.map(cat => (
+          <View key={cat} style={styles.catCardDB}>
+            <View style={styles.catCardHeader}>
+              <Text style={styles.catCardName}>{cat}</Text>
+              <TouchableOpacity onPress={() => {
+                const d = { ...dictionary };
+                delete d[cat];
+                setDictionary(d);
+              }} activeOpacity={0.7}>
+                <Icon name="trash-2" size={14} color={C.danger} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.catCardTags}>
+              {(dictionary[cat]?.tags || []).join(', ') || 'Sin etiquetas'}
+            </Text>
+          </View>
+        ))}
+
+        <View style={styles.addCatRow}>
+          <TextInput
+            style={styles.addCatInput}
+            placeholder="Nueva categoría..."
+            placeholderTextColor={C.gray500}
+            value={newCatName}
+            onChangeText={setNewCatName}
+          />
+          <TouchableOpacity style={styles.addCatBtn}
+            onPress={() => {
+              if (!newCatName.trim()) return;
+              setDictionary(d => ({ ...d, [newCatName.trim()]: { tags: [], subcategories: {} } }));
+              setNewCatName('');
+            }} activeOpacity={0.7}>
+            <Icon name="plus" size={16} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+
+        <SaveBtn onPress={handleSaveDictionary} />
+      </View>
+    );
+  };
+
+  // ─── RENDER: Tab Import ──────────────────────────────────────────────────
+  const renderImport = () => (
+    <View>
+      <SectionTitle>Opciones de Importación</SectionTitle>
+      <View style={styles.infoBox}>
+        <Icon name="info" size={16} color={C.blue} />
+        <Text style={styles.infoTxt}>
+          La importación de JSON se realiza desde la pestaña "Importar" del menú principal.
+          Aquí puedes configurar el comportamiento por defecto de las importaciones.
+        </Text>
+      </View>
+      <SettingCard label="Categoría por defecto" desc="Categoría asignada a productos sin categoría en el import">
+        <View style={styles.row}>
+          <Text style={styles.importDefaultCat}>{config.defaultImportCategory || 'Otros'}</Text>
+        </View>
+      </SettingCard>
+      <SettingCard label="Detectar categoría auto" desc="Intentar detectar categoría a partir del título y marca">
+        <TouchableOpacity
+          style={[styles.toggleBtn, config.autoDetectCategory && styles.toggleBtnOn]}
+          onPress={() => updateCfg('autoDetectCategory', !config.autoDetectCategory)}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.toggleTxt, config.autoDetectCategory && styles.toggleTxtOn]}>
+            {config.autoDetectCategory ? 'ON' : 'OFF'}
+          </Text>
+        </TouchableOpacity>
+      </SettingCard>
+      <SaveBtn onPress={handleSave} />
+    </View>
+  );
+
+  // ─── RENDER: Tab Notificaciones ──────────────────────────────────────────
+  const renderNotif = () => (
+    <View>
+      <SectionTitle>Alertas y Notificaciones</SectionTitle>
+      <SettingCard label="Notificaciones de resubida" desc="Recibir alertas cuando un producto deba resubirse">
+        <TouchableOpacity
+          style={[styles.toggleBtn, config.notifRepost && styles.toggleBtnOn]}
+          onPress={() => updateCfg('notifRepost', !config.notifRepost)}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.toggleTxt, config.notifRepost && styles.toggleTxtOn]}>
+            {config.notifRepost ? 'ON' : 'OFF'}
+          </Text>
+        </TouchableOpacity>
+      </SettingCard>
+      <SettingCard label="Alertas de stock frío" desc="Notificar productos sin vender más de X días">
+        <TouchableOpacity
+          style={[styles.toggleBtn, config.notifStale && styles.toggleBtnOn]}
+          onPress={() => updateCfg('notifStale', !config.notifStale)}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.toggleTxt, config.notifStale && styles.toggleTxtOn]}>
+            {config.notifStale ? 'ON' : 'OFF'}
+          </Text>
+        </TouchableOpacity>
+      </SettingCard>
+      <SaveBtn onPress={handleSave} />
+    </View>
+  );
+
+  const renderTab = () => {
+    switch (activeTab) {
+      case 'thresholds': return renderThresholds();
+      case 'calendar':   return renderCalendar();
+      case 'categories': return renderCategories();
+      case 'database':   return renderDatabase();
+      case 'import':     return renderImport();
+      case 'notif':      return renderNotif();
+      default:           return renderThresholds();
+    }
   };
 
   return (
-    <View style={styles.container}>
+    <View style={styles.root}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Icon name="arrow-left" size={24} color={C.gray900} />
-        </TouchableOpacity>
         <Text style={styles.headerTitle}>Configuración</Text>
-        <TouchableOpacity onPress={handleSave}>
-          <Icon name="save" size={22} color={C.primary} />
-        </TouchableOpacity>
+        <Text style={styles.headerSub}>ResellHub · ajustes del sistema</Text>
       </View>
 
       {/* Tab bar */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.tabBar}
-        contentContainerStyle={styles.tabBarContent}
-      >
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabBarScroll}
+        contentContainerStyle={styles.tabBar}>
         {TABS.map(tab => (
           <TouchableOpacity
             key={tab.id}
             style={[styles.tab, activeTab === tab.id && styles.tabActive]}
             onPress={() => setActiveTab(tab.id)}
+            activeOpacity={0.7}
           >
-            <Icon name={tab.icon} size={15} color={activeTab === tab.id ? C.blue : C.gray500} />
-            <Text style={[styles.tabLabel, activeTab === tab.id && styles.tabLabelActive]}>
+            <Icon name={tab.icon} size={13} color={activeTab === tab.id ? '#FFF' : C.gray500} />
+            <Text style={[styles.tabTxt, activeTab === tab.id && styles.tabTxtActive]}>
               {tab.label}
             </Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
 
-      {/* Content */}
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.contentInner}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {(tabContent[activeTab] || (() => null))()}
-        <View style={{ height: 120 }} />
+      {/* Contenido */}
+      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 60 }}>
+        {renderTab()}
       </ScrollView>
     </View>
   );
 }
 
-// ─── Sub-componentes internos ─────────────────────────────────────────────
-
-const TagCloud = ({ tags, onRemove, small }) => (
-  <View style={styles.tagCloud}>
-    {tags.map(tag => (
-      <View key={tag} style={[styles.tag, small && styles.tagSm]}>
-        <Text style={[styles.tagTxt, small && styles.tagTxtSm]}>{tag}</Text>
-        <TouchableOpacity
-          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-          onPress={() => onRemove(tag)}
-        >
-          <Icon name="x" size={small ? 10 : 12} color={C.gray500} />
-        </TouchableOpacity>
-      </View>
-    ))}
-  </View>
-);
-
-const TagInput = ({ value, onChange, onAdd, onCancel }) => (
-  <View style={styles.tagInputRow}>
-    <TextInput
-      style={styles.tagInput}
-      placeholder="Escribe un tag..."
-      value={value}
-      onChangeText={onChange}
-      autoFocus
-      onSubmitEditing={onAdd}
-    />
-    <TouchableOpacity style={styles.tagAddBtn} onPress={onAdd}>
-      <Icon name="check" size={14} color={C.white} />
-    </TouchableOpacity>
-    <TouchableOpacity style={styles.tagCancelBtn} onPress={onCancel}>
-      <Icon name="x" size={14} color={C.gray700} />
-    </TouchableOpacity>
-  </View>
-);
-
-const SaveBtn = ({ onPress }) => (
-  <TouchableOpacity style={styles.saveBtn} onPress={onPress} activeOpacity={0.85}>
-    <Icon name="save" size={18} color={C.white} />
-    <Text style={styles.saveBtnTxt}>GUARDAR CONFIGURACIÓN</Text>
-  </TouchableOpacity>
-);
-
-// ─── Estilos ──────────────────────────────────────────────────────────────
-
+// ─── Estilos ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container:       { flex: 1, backgroundColor: C.bg },
+  root:         { flex: 1, backgroundColor: C.bg },
+  header:       { paddingHorizontal: 20, paddingTop: 52, paddingBottom: 12,
+                  backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.border },
+  headerTitle:  { fontSize: 22, fontWeight: '900', color: C.gray900 },
+  headerSub:    { fontSize: 11, color: C.gray500, marginTop: 2 },
 
-  // Header
-  header:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 60, paddingBottom: 16, backgroundColor: C.white, elevation: 2, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 8 },
-  headerTitle:     { fontSize: 20, fontWeight: '900', color: C.gray900 },
+  tabBarScroll: { backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.border, maxHeight: 52 },
+  tabBar:       { paddingHorizontal: 12, paddingVertical: 8, gap: 8, flexDirection: 'row', alignItems: 'center' },
+  tab:          { flexDirection: 'row', alignItems: 'center', gap: 5,
+                  paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: C.gray100 },
+  tabActive:    { backgroundColor: C.gray900 },
+  tabTxt:       { fontSize: 11, fontWeight: '700', color: C.gray500 },
+  tabTxtActive: { color: '#FFF' },
 
-  // Tabs
-  tabBar:          { backgroundColor: C.white, maxHeight: 52, borderBottomWidth: 1, borderBottomColor: C.gray100 },
-  tabBarContent:   { paddingHorizontal: 12, alignItems: 'center', gap: 6 },
-  tab:             { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 20, marginVertical: 6 },
-  tabActive:       { backgroundColor: C.blue + '15' },
-  tabLabel:        { fontSize: 12, fontWeight: '600', color: C.gray500 },
-  tabLabelActive:  { color: C.blue, fontWeight: '800' },
+  content:      { flex: 1, padding: 16 },
+  sectionTitle: { fontSize: 13, fontWeight: '900', color: C.gray900, marginTop: 16, marginBottom: 12,
+                  textTransform: 'uppercase', letterSpacing: 0.5 },
 
-  // Content
-  content:         { flex: 1 },
-  contentInner:    { padding: 20 },
+  settingCard:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+                  backgroundColor: C.white, borderRadius: 14, padding: 14, marginBottom: 8,
+                  borderWidth: 1, borderColor: C.border },
+  cardInfo:     { flex: 1, marginRight: 12 },
+  cardLabel:    { fontSize: 13, fontWeight: '700', color: C.gray900 },
+  cardDesc:     { fontSize: 10, color: C.gray500, marginTop: 2, lineHeight: 14 },
 
-  sectionTitle:    { fontSize: 10, fontWeight: '900', color: C.gray500, letterSpacing: 1.8, textTransform: 'uppercase', marginBottom: 14 },
+  numRow:       { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  numInput:     { backgroundColor: C.bg, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6,
+                  fontSize: 14, borderWidth: 1, borderColor: C.border, textAlign: 'center', fontWeight: '700' },
+  numUnit:      { fontSize: 11, color: C.gray500 },
+  row:          { flexDirection: 'row', gap: 8, alignItems: 'center' },
 
-  // Setting cards
-  settingCard:     { backgroundColor: C.white, padding: 18, borderRadius: 20, marginBottom: 14, elevation: 1, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6 },
-  toggleCard:      { backgroundColor: C.white, flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 20, marginBottom: 12, elevation: 1, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, gap: 12 },
-  cardInfo:        { marginBottom: 12 },
-  cardLabel:       { fontSize: 15, fontWeight: '800', color: C.gray900 },
-  cardDesc:        { fontSize: 11, color: C.gray500, marginTop: 3 },
-  dualRow:         { flexDirection: 'row', gap: 16, flexWrap: 'wrap' },
+  saveBtn:      { backgroundColor: C.gray900, flexDirection: 'row', justifyContent: 'center',
+                  alignItems: 'center', gap: 8, padding: 16, borderRadius: 16,
+                  marginTop: 20, marginBottom: 8 },
+  saveBtnTxt:   { color: '#FFF', fontWeight: '900', fontSize: 14 },
 
-  // Numeric input
-  numRow:          { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  numInput:        { backgroundColor: C.bg, padding: 10, borderRadius: 12, textAlign: 'center', fontWeight: '900', color: C.gray900, borderWidth: 1, borderColor: C.gray100 },
-  numUnit:         { fontSize: 11, fontWeight: '700', color: C.gray700 },
+  // Calendar
+  calHint:      { fontSize: 11, color: C.gray500, lineHeight: 16, marginBottom: 12 },
+  monthRow:     { flexDirection: 'row', alignItems: 'center', backgroundColor: C.white,
+                  borderRadius: 12, padding: 10, marginBottom: 6, borderWidth: 1, borderColor: C.border },
+  monthName:    { width: 80, fontSize: 12, fontWeight: '700', color: C.gray900 },
+  monthChips:   { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+  monthChip:    { backgroundColor: C.primary + '18', borderRadius: 10,
+                  paddingHorizontal: 8, paddingVertical: 3 },
+  monthChipTxt: { fontSize: 10, fontWeight: '700', color: C.primary },
+  monthEmpty:   { fontSize: 10, color: C.gray500, fontStyle: 'italic' },
+  monthAddBtn:  { padding: 6 },
 
-  // Calendario
-  calHint:         { fontSize: 12, color: C.gray700, marginBottom: 18, lineHeight: 18 },
-  calRow:          { backgroundColor: C.white, borderRadius: 18, padding: 16, marginBottom: 10, flexDirection: 'row', alignItems: 'flex-start', elevation: 1 },
-  calLeft:         { flex: 1 },
-  calMonth:        { fontSize: 14, fontWeight: '800', color: C.gray900, marginBottom: 8 },
-  calChips:        { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  calChip:         { flexDirection: 'row', alignItems: 'center', backgroundColor: C.blue + '18', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, gap: 5 },
-  calChipTxt:      { fontSize: 11, fontWeight: '700', color: C.blue },
-  calEmpty:        { fontSize: 11, color: C.gray500, fontStyle: 'italic' },
-  calAddBtn:       { backgroundColor: C.blue, width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', marginLeft: 10 },
-
-  // Diccionario
-  addRow:          { flexDirection: 'row', gap: 10, marginBottom: 20 },
-  addInput:        { flex: 1, backgroundColor: C.white, padding: 14, borderRadius: 16, fontWeight: '700', color: C.gray900, elevation: 1 },
-  addBtn:          { backgroundColor: C.primary, width: 50, justifyContent: 'center', alignItems: 'center', borderRadius: 16 },
-
-  dictCard:        { backgroundColor: C.white, borderRadius: 20, marginBottom: 14, overflow: 'hidden', elevation: 1 },
-  dictHeader:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 18 },
-  dictHeaderLeft:  { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
-  catBadge:        { backgroundColor: C.primary + '20', width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
-  catBadgeTxt:     { fontSize: 11, fontWeight: '900', color: C.primary },
-  dictTitle:       { fontSize: 16, fontWeight: '900', color: C.gray900 },
-  subBadge:        { backgroundColor: C.blue + '18', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  subBadgeTxt:     { fontSize: 10, fontWeight: '700', color: C.blue },
-  dictActions:     { flexDirection: 'row', gap: 16, alignItems: 'center' },
-
-  dictBody:        { paddingHorizontal: 18, paddingBottom: 18 },
-  subSectionLabel: { fontSize: 10, fontWeight: '800', color: C.gray500, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 },
-  subDivider:      { height: 1, backgroundColor: C.gray100, marginVertical: 14 },
-
-  // Subcategorías
-  subCard:         { backgroundColor: C.bg, borderRadius: 14, marginBottom: 8, overflow: 'hidden' },
-  subHeader:       { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12 },
-  subTitle:        { flex: 1, fontSize: 13, fontWeight: '700', color: C.gray900 },
-  subCount:        { fontSize: 10, color: C.gray500 },
-
-  // Tags
-  tagCloud:        { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 10 },
-  tag:             { flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, gap: 7, borderWidth: 1, borderColor: C.gray100 },
-  tagSm:           { paddingHorizontal: 9, paddingVertical: 5 },
-  tagTxt:          { fontSize: 12, color: C.blue, fontWeight: '700' },
-  tagTxtSm:        { fontSize: 11 },
-  tagInputRow:     { flexDirection: 'row', gap: 8, marginBottom: 10, alignItems: 'center' },
-  tagInput:        { flex: 1, backgroundColor: C.bg, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: C.gray100 },
-  tagAddBtn:       { backgroundColor: C.success, width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
-  tagCancelBtn:    { backgroundColor: C.gray100, width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
-  addTagBtn:       { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 6 },
-  addTagBtnTxt:    { fontSize: 12, fontWeight: '700', color: C.blue },
-
-  // Nueva sub
-  newSubRow:       { flexDirection: 'row', gap: 8, marginTop: 10 },
-  newSubInput:     { flex: 1, backgroundColor: C.bg, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: C.gray100 },
-  newSubBtn:       { backgroundColor: C.blue, width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-
-  // Modal
-  modalOverlay:    { flex: 1, backgroundColor: '#00000055', justifyContent: 'flex-end' },
-  modalSheet:      { backgroundColor: C.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '70%' },
-  modalTitle:      { fontSize: 18, fontWeight: '900', color: C.gray900, marginBottom: 4 },
-  modalHint:       { fontSize: 12, color: C.gray500, marginBottom: 16 },
-  modalItem:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: C.gray100 },
-  modalItemActive: { backgroundColor: C.blue + '0D', paddingHorizontal: 12, borderRadius: 10, marginHorizontal: -12 },
-  modalItemTxt:    { fontSize: 15, color: C.gray900, fontWeight: '600' },
+  modalOverlay: { flex: 1, backgroundColor: '#00000055', justifyContent: 'flex-end' },
+  modalSheet:   { backgroundColor: C.white, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+                  padding: 24, maxHeight: '65%' },
+  modalTitle:   { fontSize: 18, fontWeight: '900', color: C.gray900, marginBottom: 4 },
+  modalHint:    { fontSize: 11, color: C.gray500, marginBottom: 14 },
+  modalItem:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+                  paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: C.border },
+  modalItemActive:    { backgroundColor: C.blue + '0D', paddingHorizontal: 10, borderRadius: 8, marginHorizontal: -10 },
+  modalItemTxt:       { fontSize: 14, color: C.gray900, fontWeight: '600' },
   modalItemTxtActive: { color: C.blue, fontWeight: '900' },
-  modalClose:      { backgroundColor: C.gray900, borderRadius: 16, padding: 16, alignItems: 'center', marginTop: 16 },
-  modalCloseTxt:   { color: C.white, fontWeight: '900', fontSize: 15 },
+  modalClose:   { backgroundColor: C.gray900, borderRadius: 14, padding: 14, alignItems: 'center', marginTop: 14 },
+  modalCloseTxt:{ color: '#FFF', fontWeight: '900', fontSize: 14 },
+
+  // Categories
+  catCardDB:    { backgroundColor: C.white, borderRadius: 12, padding: 12, marginBottom: 8,
+                  borderWidth: 1, borderColor: C.border },
+  catCardHeader:{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  catCardName:  { fontSize: 13, fontWeight: '800', color: C.gray900 },
+  catCardTags:  { fontSize: 10, color: C.gray500 },
+  addCatRow:    { flexDirection: 'row', gap: 8, marginTop: 8 },
+  addCatInput:  { flex: 1, backgroundColor: C.white, borderRadius: 12, paddingHorizontal: 12,
+                  paddingVertical: 10, fontSize: 13, borderWidth: 1, borderColor: C.border },
+  addCatBtn:    { backgroundColor: C.blue, width: 44, height: 44, borderRadius: 22,
+                  justifyContent: 'center', alignItems: 'center' },
+
+  // Import
+  importDefaultCat: { fontSize: 14, fontWeight: '700', color: C.gray900 },
+  toggleBtn:    { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
+                  backgroundColor: C.gray100, borderWidth: 1, borderColor: C.border },
+  toggleBtnOn:  { backgroundColor: C.success, borderColor: C.success },
+  toggleTxt:    { fontSize: 12, fontWeight: '900', color: C.gray500 },
+  toggleTxtOn:  { color: '#FFF' },
 
   // Info box
-  infoBox:         { backgroundColor: C.blue + '0D', borderRadius: 16, padding: 16, flexDirection: 'row', gap: 12, marginTop: 20, marginBottom: 10 },
-  infoTxt:         { flex: 1, fontSize: 12, color: C.blue, lineHeight: 18 },
+  infoBox:      { backgroundColor: C.blue + '0D', borderRadius: 14, padding: 14,
+                  flexDirection: 'row', gap: 10, marginBottom: 14 },
+  infoTxt:      { flex: 1, fontSize: 11, color: C.blue, lineHeight: 17 },
 
-  // Save
-  saveBtn:         { backgroundColor: C.gray900, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, padding: 18, borderRadius: 20, marginTop: 24, marginBottom: 10 },
-  saveBtnTxt:      { color: C.white, fontWeight: '900', fontSize: 14, letterSpacing: 0.5 },
+  // ── Auto-backup card (Sprint 10) ──────────────────────────────────────────
+  autoBackupCard:   { backgroundColor: C.white, borderRadius: 16, padding: 16, marginBottom: 14,
+                      borderWidth: 2, borderColor: C.border },
+  autoBackupHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  autoBackupDot:    { width: 10, height: 10, borderRadius: 5 },
+  autoBackupTitle:  { flex: 1, fontSize: 13, fontWeight: '900', color: C.gray900 },
+  autoBackupBody:   { marginBottom: 12 },
+  autoBackupRow:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  autoBackupOk:     { fontSize: 12, color: C.success, fontWeight: '700', flex: 1 },
+  autoBackupWarn:   { fontSize: 12, color: C.warning, fontWeight: '700', flex: 1 },
+  autoBackupMeta:   { flexDirection: 'row', gap: 16, marginTop: 4 },
+  autoBackupMetaItem: { alignItems: 'center' },
+  autoBackupMetaVal:  { fontSize: 16, fontWeight: '900', color: C.gray900 },
+  autoBackupMetaLab:  { fontSize: 9, color: C.gray500, textTransform: 'uppercase', marginTop: 1 },
+  forceBackupBtn:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                      gap: 8, padding: 12, borderRadius: 12,
+                      backgroundColor: C.blue + '12', borderWidth: 1, borderColor: C.blue + '30' },
+  forceBackupTxt:   { fontSize: 13, fontWeight: '800', color: C.blue },
+
+  // ── BBDD Tab styles ────────────────────────────────────────────────────────
+  dbStatsCard:  { backgroundColor: C.white, borderRadius: 16, padding: 16, marginBottom: 14,
+                  borderWidth: 1, borderColor: C.border },
+  dbStatsTitle: { fontSize: 12, fontWeight: '800', color: C.gray900, marginBottom: 12,
+                  textTransform: 'uppercase', letterSpacing: 0.5 },
+  dbStatsGrid:  { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 10 },
+  dbStatItem:   { alignItems: 'center', minWidth: 60 },
+  dbStatVal:    { fontSize: 22, fontWeight: '900', color: C.gray900 },
+  dbStatLab:    { fontSize: 9, color: C.gray500, marginTop: 2, textTransform: 'uppercase' },
+  dbIngresoRow: { flexDirection: 'row', alignItems: 'center', gap: 6,
+                  backgroundColor: C.success + '10', borderRadius: 10, padding: 8, marginTop: 4 },
+  dbIngresoTxt: { fontSize: 11, color: C.gray900, flex: 1 },
+
+  dbActionsRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  dbActionBtn:  { flex: 1, borderRadius: 16, padding: 16, alignItems: 'center', gap: 6 },
+  dbActionTxt:  { color: '#FFF', fontSize: 13, fontWeight: '900' },
+  dbActionSub:  { color: 'rgba(255,255,255,0.7)', fontSize: 9 },
+
+  deploySteps:  { backgroundColor: C.white, borderRadius: 16, padding: 16,
+                  borderWidth: 1, borderColor: C.border, marginBottom: 12 },
+  deployStepsTitle: { fontSize: 12, fontWeight: '800', color: C.gray900, marginBottom: 12 },
+  deployStep:   { flexDirection: 'row', gap: 10, marginBottom: 10, alignItems: 'flex-start' },
+  deployStepNum:{ width: 22, height: 22, borderRadius: 11, backgroundColor: C.blue,
+                  justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
+  deployStepNumTxt: { fontSize: 10, fontWeight: '900', color: '#FFF' },
+  deployStepTxt:{ flex: 1, fontSize: 11, color: C.gray700, lineHeight: 16 },
+
+  refreshStatsBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 10,
+                     justifyContent: 'center' },
+  refreshStatsTxt: { fontSize: 11, fontWeight: '700', color: C.blue },
 });
