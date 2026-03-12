@@ -15,3 +15,13 @@ Hook Watcher: Detectar violaciones de la Regla 12 (Hooks antes de returns).
 Skills Vinculadas:
 
 SYS-001: Análisis de logs de LogService v2.0.
+
+# Agente: DEBUGGER (Diagnóstico v4.2.1)
+
+**Misión Actual:** Investigar por qué `SettingsScreen` no persiste categorías.
+
+**Checklist de Diagnóstico:**
+- [ ] Verificar si `SettingsService.saveCategories()` está invocando `_triggerBackup()`.
+- [ ] Comprobar si hay un `early return` en el hook de guardado de categorías (Violación Regla 12).
+- [ ] Rastrear por qué el detalle de 'Vendidos' busca la imagen en una ruta legacy o inexistente.
+- [ ] Validar que los KPIs del Sprint 9.1 no den `NaN` al intentar renderizar el detalle de un vendido sin precio.

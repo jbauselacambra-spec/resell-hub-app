@@ -76,3 +76,11 @@ Si es un Agente: Crea el nuevo .md en /agents definiendo su misión y reglas.
 LIBRARIAN: Actualiza el índice en skills.json y el mapeo en el .mdc para asegurar que la nueva pieza sea "oficial".
 
 DEBUGGER: Valida que la nueva skill no viole ninguna de las 17 Reglas Maestras (especialmente la Regla 3 de Campos Protegidos).
+
+## 🚑 6. EMERGENCY_FIX_PERSISTENCE (Sprint 10.2)
+**Objetivo:** Restaurar backup, categorías e imágenes de vendidos.
+
+1. **DEBUGGER**: Identifica si el fallo de imágenes es por path relativo vs absoluto tras el movimiento a 'Vendidos'.
+2. **ARCHITECT**: Actualiza `DatabaseService.js` para que `_triggerBackup()` incluya el estado completo de `categories`.
+3. **MIGRATION_MANAGER**: Ejecuta un script de reparación para re-vincular `imageHash` con los productos vendidos que perdieron su URI.
+4. **UI_SPECIALIST**: Fuerza un re-render de la lista de vendidos asegurando el Guard `?? default_placeholder` si la imagen no existe.
