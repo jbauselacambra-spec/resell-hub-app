@@ -1,0 +1,44 @@
+Eres diseñador de producto sénior con experiencia en interfaces [MÓVILES]
+
+Diseña un [COMPONENTE] para [Monitorizar productos y resubir productos que se quedan sin vender durante un par de meses]
+
+Requisitos:
+
+- Objetivo del usuario: [Necesito que puedas acceder a una carpeta donde yo voy a ir dejando los repositorios con imagenes de productos, mi idea es que cojas las imagenes y busques que producto he subido, que marca,descripcion, etiquetas y precio medio de venta tiene de segunda mano para poder subir a Vinted. Quiero tambien que recortes un pixel por cada lado las imagenes y si vienen en un formato webp las pongas en jpeg. Ademas quiero que guardes las estadisticas de cuando las has procesado para poder determinar cuanto tiempo llevan ahi y basandonos en algunos algotitmos tipo tiempo que hace que las procesamos, categoria, precio, o etiquetas, podamos ver en un panel las estadisticas e incluso lanzarme notificaciones para que pueda volver a reprocesarla y subirla de  nuevo a la aplicacion. El proceso de subida lo hare yo a mano de momento pero si que necesito tener esa informacion para poder rellenar el formulario y subir o resubir el producto dependiendo las caracteristicas anteriormente comentadas]
+
+- Sistema de diseño: [MODERNO]
+
+- Preferencias de color: ["SORPRENDEME"]
+
+- Elementos clave: [- Leer datos del directorio y detectar carpeta nueva
+					- Comprobar si el formato de imagen es distinto a jpeg poner en jpeg
+					- recortar 1 px por cada lado, asi si la foto es resubida Vinted no la entiende como antigua por que cambian sus metadatos
+					- Buscar en el contenido de almenos 1 imagen datos de Producto, Descripcion,Titulo,marca,etiquetas y precio medio de segundamano para poder generarme los datos que necesito para rellenar el formulario de subida de precios
+					- llevar las estadisticas para poder comprobar que productos se nos quedan colgados o sin interes 
+					- poder ver graficamente estas estadisticas con datos, graficos, etc
+					- poder configurar notificaciones de resubida y la posibilidad por tanto de reprocesar productos procesados, por lo menos la parte de la imagen por los metadatos
+					- tener la posibilidad de marcar como vendidos los productos y llevar tambien estadisticas de vendidos por fechas , tipos y etiquetas]
+
+Proporciona:
+
+1. Descripción detallada del diseño con medidas. El diseño quiero que sea una apk para android la voy a usar desde mi moviil,
+tengo instalado el android estudio por si lo necesitas para compilar la apk.
+
+2. Jerarquía y espaciado de los componentes
+al acceder a la apk lo mas importante es que me muestre las estadisticas y los avisos de resubida.
+
+3. Estados de interacción (al pasar el cursor, activo, deshabilitado)
+
+
+4. Comportamiento responsivo para dispositivos móviles
+si, quiero que sea responsivo y bien adaptado a mi movil es un poco x7 pro
+
+5. Consideraciones de accesibilidad
+
+6. Código del componente React/Tailwind
+el codigo puede ser el mas actualizable, elige la tecnologia que mas se use para este tipo de aplicaciones
+
+Estilo: [TENDENCIA DE DISEÑO]
+
+Inspiración: [Vinted,wallapop]
+

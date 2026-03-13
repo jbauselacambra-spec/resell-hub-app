@@ -154,20 +154,10 @@ export default function ProductsScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <View style={{flex:1}}>
-          <Text style={styles.headerSub}>ESTRATEGIA DE STOCK</Text>
-          <Text style={styles.headerTitle}>Mi Inventario</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.importVintedBtn}
-          onPress={() => {
-            LogService.info('ProductsScreen → VintedImport', LOG_CTX.NAV);
-            navigation.navigate('VintedImport');
-          }}
-        >
-          <Icon name="download" size={14} color={DS.primary}/>
-          <Text style={styles.importVintedTxt}>Importar</Text>
-        </TouchableOpacity>
+           <View style={{flexDirection:'row', alignItems:'center', justifyContent:'space-between'}}>
+              <Text style={styles.headerTitle}>Mi Inventario</Text>  
+              <Text style={styles.headerSub}>ESTRATEGIA DE STOCK</Text>          
+        </View>       
       </View>
 
       {/* Category filter chips */}

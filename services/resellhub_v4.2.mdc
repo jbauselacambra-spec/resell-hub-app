@@ -1,0 +1,198 @@
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║        RESELLHUB — SISTEMA DE ORQUESTACIÓN DE AGENTES v4.2             ║
+# ║        Motor de Resubida Inteligente · Metodología Completa             ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+#
+#  FUENTE DE VERDAD:   @SYSTEM_DESIGN.md  (antes @DESIGN_SYSTEM.md)
+#  SKILLS REF:         @skills.json (v3.0 — Skills activas por agente)
+#  DISEÑO VISUAL:      @ResellHub_Dashboard.html (referencia UI para Cursor)
+#  STACK:              React Native 0.76 · Expo 52 · MMKV · LogService v2.0
+#  DISPOSITIVO:        Poco X7 Pro (393dp · 120Hz · Android 14)
+#  VERSIÓN:            4.2 — Marzo 2026
+#
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  REGLAS MAESTRAS (leer SIEMPRE primero — nunca saltarse)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+#  1. Usa SIEMPRE @SYSTEM_DESIGN.md como fuente de verdad
+#  2. Consulta @skills.json para conocer las Skills activas de cada agente
+#  3. Los 7 campos PROTEGIDOS nunca se sobreescriben:
+#       firstUploadDate · category, title, brand, soldDateReal, soldPriceReal, isBundle
+#  4. seoTags está ELIMINADO desde v2.1 — usar tags[] en su lugar
+#  5. Cada función nueva DEBE tener LogService v2.0 (mínimo .error en catch)
+#  6. El crop de 1px por cada lado de imagen es OBLIGATORIO en cada resubida
+#  7. Todo trabajo pasa por [ORCHESTRATOR] primero — sin excepciones
+#  8. Fix mínimo siempre: prohibido refactorizar mientras se debuggea
+#  9. Credenciales ausentes en TODOS los logs — sin excepciones
+# 10. Ningún agente puede saltar un estado del ciclo de vida de tarea
+#
+# ════════════════════════ REGLAS NUEVAS v4.2 ═══════════════════════════════
+#
+# 11. NAVEGACIÓN CANÓNICA (Sprint 8+) — REGLA DE HIERRO:
+#
+#     Tab.Navigator — 6 tabs en este orden exacto:
+#       Inicio → DashboardScreen
+#       Inventario → ProductsScreen
+#       Vendidos → SoldHistoryScreen
+#       Stats → AdvancedStatsScreen
+#       Config → SettingsScreen
+#       Importar → VintedImportScreen  ← NO es "Logs" — fue sustituido en Sprint 8
+#
+#     Stack.Screen (accesibles, NO tabs):
+#       ProductDetail → ProductDetailScreen
+#       SoldEditDetail → SoldEditDetailView
+#       Logs → LogsScreen  ← accesible SOLO desde Settings o header de Importar
+#
+#     NUNCA: poner LogsScreen como Tab. Siempre como Stack.Screen.
+#     NUNCA: poner VintedImportScreen como Stack.Screen únicamente.
+#     COMPROBACIÓN obligatoria en cada sprint: grep "Tab.Screen" App.jsx | wc -l → debe ser 6
+#
+# 12. REACT RULES OF HOOKS — REGLA DE HIERRO:
+#
+#     NUNCA colocar early return ANTES de hooks (useMemo, useState, useEffect).
+#     Patrón correcto:
+#       const [state] = useState(...)  // ← hooks PRIMERO
+#       const memo    = useMemo(...)   // ← hooks PRIMERO
+#       if (!data) return null;        // ← early return DESPUÉS
+#
+#     Violación = crash "Rendered more hooks than during the previous render"
+#
+# 13. CONTRATOS DE API — REGLA DE HIERRO:
+#
+#     Cuando se modifica el contrato de un servicio compartido, actualizar
+#     TODOS los consumidores en el MISMO sprint.
+#     Antes de entregar, ejecutar:
+#       grep -rn "getBusinessKPIs\|getCategoryStats\|getMonthlyHistory" screens/
+#     Todos los consumidores deben usar el contrato nuevo.
+#
+#     Guards SIEMPRE en accesos a campos numéricos:
+#       (kpis.totalRecaudacion ?? 0).toFixed(0)  ← correcto
+#       kpis.totalRecaudacion.toFixed(0)          ← puede crashear
+#
+# 14. KPIs CANÓNICOS (Sprint 9.1+):
+#
+#     ELIMINADOS: totalRevenue, totalProfit, revenueThisMonth
+#     NUEVOS: totalRecaudacion, recaudacionThisMonth, rotacion, avgPrecioVenta
+#
+#     NUNCA usar los campos eliminados. Causarán TypeError undefined.toFixed().
+#
+# 15. PERSISTENCIA DE DATOS (Sprint 10+):
+#
+#     CAPA 1 — MMKV: rápido, puede perderse al reinstalar APK
+#     CAPA 2 — FileSystem.documentDirectory/resellhub_auto_backup.json:
+#              backup automático con debounce 3s tras cada escritura.
+#              Sobrevive a actualizaciones de APK sin desinstalación.
+#     CAPA 3 — Share API: export manual a Drive/email (último recurso)
+#
+#     DatabaseService: _triggerBackup() en TODOS los métodos de escritura:
+#       saveConfig, saveDictionary, saveFullDictionary, saveAllProducts,
+#       importFullDatabase, clearDatabase
+#
+#     App.jsx arranque: BackupService.autoRestoreIfNeeded() ANTES de setIsReady(true)
+#
+# 16. DESIGN SYSTEM CANÓNICO (Light DS):
+#
+#     primary:'#FF6B35'  success:'#00D9A3'  warning:'#FFB800'  danger:'#E63946'
+#     blue:'#004E89'     text:'#1A1A2E'     bg:'#F8F9FA'       white:'#FFFFFF'
+#     border:'#EAEDF0'   gray900:'#1A1A2E'  gray700:'#5C6070'  gray500:'#A0A5B5'
+#
+#     NUNCA usar AMOLED (#121212, #0D0D0D) en pantallas de datos.
+#     Permitido en LoginScreen únicamente.
+#
+# 17. VintedImportScreen — MODOS DE IMPORTACIÓN:
+#
+#     MODO A  'html_sales_current'  → HTML "Mis pedidos"
+#     MODO B  'html_sales_history'  → HTML "Historial de transacciones"
+#     MODO C  'json_products'       → JSON del script de consola (escaparate)
+#     MODO D  'json_sales_current'  → JSON del script de ventas actuales
+#     MODO E  'json_sales_history'  → JSON del historial de ventas multi-año
+#
+#     VintedImportScreen = Tab principal "Importar".
+#     LogsScreen = Stack.Screen, accesible desde header de VintedImportScreen o Settings.
+#
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  MAPA DE FICHEROS Y PROPIETARIOS (actualizado Sprint 10)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# FICHEROS DE REFERENCIA (no modificar sin consenso)
+# ResellHub_Dashboard.html → [UI_SPECIALIST] | [PRODUCT_OWNER] | Ref visual
+# SYSTEM_DESIGN.md         → [LIBRARIAN]     | fuente de verdad arquitectura
+
+# SERVICIOS
+# services/DatabaseService.js        → [ARCHITECT]  | CRITICO: toda la lógica de datos
+# services/VintedParserService.js    → [DATA_SCIENTIST] | parsers HTML/JSON Vinted
+# services/BackupService.js          → [ARCHITECT]  | Sprint 10: backup persistente
+# services/LogService.js             → [DEVOPS]     | logging global
+
+# PANTALLAS — TABS (6 tabs canónicas)
+# screens/DashboardScreen.jsx        → [UI_SPECIALIST] | tab Inicio
+# screens/ProductsScreen.jsx         → [UI_SPECIALIST] | tab Inventario
+# screens/SoldHistoryScreen.jsx      → [UI_SPECIALIST] | tab Vendidos
+# screens/AdvancedStatsScreen.jsx    → [DATA_SCIENTIST]+[UI_SPECIALIST] | tab Stats
+# screens/SettingsScreen.jsx         → [ARCHITECT]+[UI_SPECIALIST] | tab Config
+# screens/VintedImportScreen.jsx     → [UI_SPECIALIST]+[DATA_SCIENTIST] | tab Importar
+
+# PANTALLAS — STACK SCREENS (no son tabs)
+# screens/ProductDetailScreen.jsx    → [UI_SPECIALIST] | stack
+# screens/SoldEditDetailView.jsx     → [UI_SPECIALIST] | stack
+# screens/LogsScreen.jsx             → [DEVOPS]        | stack — NO es tab
+
+# RAÍZ
+# App.jsx → [ARCHITECT] | CRITICO: config de navegación
+# src/screens/LoginScreen.js → [SECURITY_OFFICER] | pantalla de login
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  MMKV KEYS — TABLA MAESTRA (actualizada Sprint 10)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Key                    | Tipo       | Propietario    | Descripción
+# products               | JSON Array | [ARCHITECT]    | Array maestro de productos
+# app_user_config        | JSON Obj   | [ARCHITECT]    | Config global del usuario
+# app_pin                | String     | [SECURITY]     | PIN — SAGRADO
+# app_password           | String     | [SECURITY]     | Password — SAGRADO
+# session_authed_until   | Number ms  | [SECURITY]     | Expiry sesión — SAGRADO
+# custom_dictionary      | JSON       | [ARCHITECT]    | Dict legacy Cat→Tags
+# custom_dictionary_full | JSON       | [ARCHITECT]    | Dict Cat→Subcat→Tags
+# import_log             | JSON Array | [QA_ENGINEER]  | Últimas 50 importaciones
+# emergency_backup       | JSON       | [SECURITY]     | Backup emergencia — SAGRADO
+# schema_version         | String     | [MIGRATION]    | Versión schema — SAGRADO
+
+# FILESYSTEM (Sprint 10+):
+# <documentDirectory>/resellhub_auto_backup.json
+#   → backup auto de todos los datos MMKV críticos
+#   → se escribe con debounce 3s tras cada saveAllProducts/saveConfig/etc.
+#   → se restaura automáticamente en arranque si MMKV vacío
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  CHECKLIST PRE-ENTREGA (actualizado Sprint 10)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# [ORCHESTRATOR]:
+#   [ ] App.jsx tiene exactamente 6 Tab.Screen
+#   [ ] Tab 6 es VintedImportScreen (label "Importar", icon "upload-cloud")
+#   [ ] LogsScreen está como Stack.Screen name="Logs", NO como Tab
+#   [ ] Todos los hooks antes de early returns (Rules of Hooks)
+#   [ ] Guards (??0) en todos los .toFixed() sobre campos de kpis
+#   [ ] _triggerBackup() en DatabaseService para todos los métodos de escritura
+#   [ ] autoRestoreIfNeeded() en App.jsx useEffect antes de setIsReady(true)
+#   [ ] SYSTEM_DESIGN.md documenta el sprint entregado
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  CHANGELOG v4.1 → v4.2
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+#  - Regla 11 NUEVA: Navegación canónica — tab "Importar" obligatorio (no Logs)
+#  - Regla 12 NUEVA: React Rules of Hooks — hooks antes de early returns
+#  - Regla 13 NUEVA: Contratos de API — actualizar todos los consumidores
+#  - Regla 14 NUEVA: KPIs canónicos Sprint 9.1 (totalRecaudacion, etc.)
+#  - Regla 15 NUEVA: Persistencia datos Sprint 10 (doble capa MMKV+FileSystem)
+#  - Regla 16 NUEVA: Design System canónico Light DS documentado
+#  - Regla 17 NUEVA: VintedImportScreen modos A/B/C/D/E documentados
+#  - Mapa de ficheros actualizado con BackupService.js
+#  - MMKV Keys actualizadas con FileSystem backup (Sprint 10)
+#  - Checklist pre-entrega actualizado con verificaciones críticas
+#  - FUENTE DE VERDAD: renombrado @DESIGN_SYSTEM.md → @SYSTEM_DESIGN.md
+#
+# ════════════════════════════════════════════════════════════════════════
+#  FIN DEL FICHERO — continúa en @SYSTEM_DESIGN.md para implementación
+# ════════════════════════════════════════════════════════════════════════

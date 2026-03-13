@@ -2368,3 +2368,1153 @@ git commit -m "fix(devops): JAVA_HOME auto-detection en agent-deploy.ps1 v5.3
 - Build abortado con instrucciones si Java no encontrado (exit 1)
 - -Check: muestra version Java detectada y compatibilidad con Gradle 8.x"
 ```
+
+# 📋 Sprint 8 — JSON Import con DocumentPicker + Match Historial → Inventario
+
+> **Sprint 8 · feature/sprint8-json-import-v2**
+> Fecha: Marzo 2026
+
+---
+
+## Resumen ejecutivo
+
+Sprint 8 consolida la importación de datos de Vinted en un flujo único, limpio y sin
+fricciones. Se elimina la duplicidad del botón de importar en ProductsScreen y
+SoldHistoryScreen, se reemplaza el tab "Logs" por "Importar" en la barra de navegación
+principal, y se introduce la función `matchHistoryToInventory()` para cruzar automáticamente
+el historial de ventas con el inventario y actualizar `soldPriceReal` + `soldDateReal`.
+
+---
+
+## [PRODUCT_OWNER] — Validación PO-001
+
+```
+FEATURE: Sprint 8 — JSON Import v2 con DocumentPicker
+OBJETIVO: Eliminar fricción de copiar/pegar JSON; activar el flujo multi-año de historial
+
+CRITERIOS:
+  OK El usuario puede adjuntar un JSON en ≤ 2 taps (seleccionar archivo → confirmar)
+  OK Los 7 Campos Sagrados permanecen intactos
+  OK matchHistoryToInventory actualiza soldPriceReal + soldDateReal sin tocar firstUploadDate
+  OK Las compras del JSON de ventas actuales se ignoran automáticamente
+  OK El botón "Importar" desaparece de ProductsScreen y SoldHistoryScreen
+  OK Logs sigue accesible desde Settings y como stack screen
+  OK Dedup por orderId activo en VintedSalesDB (multi-año seguro)
+
+FUERA DE ALCANCE:
+  NO Importación masiva paginada (Fase 2)
+  NO Subida automática a Vinted
+```
+
+---
+
+## [ARCHITECT] — Cambios de arquitectura
+
+### Navegación: Tab "Logs" → Tab "Importar"
+
+```
+App.jsx — MainTabs
+
+ANTES (Sprint 7):
+  Home | Inventario | Vendidos | Stats | Config | Logs
+
+DESPUÉS (Sprint 8):
+  Home | Inventario | Vendidos | Stats | Config | Importar
+
+LogsScreen → Stack.Screen (accesible desde Settings o header de Importar)
+```
+
+### Nuevo flujo de importación
+
+```
+VintedImportScreen (tab)
+       ↓
+[Botón "Adjuntar JSON"] → DocumentPicker.getDocumentAsync()
+       ↓
+FileSystem.readAsStringAsync(uri)
+       ↓
+detectContentType(text)
+  ├─ json_products       → parseJsonProducts()      → MODO C
+  ├─ json_sales_current  → parseJsonSalesCurrent()  → MODO D (filtra compras)
+  └─ json_sales_history  → parseJsonSalesHistory()  → MODO E (ventas + compras)
+       ↓
+Preview con selección por checkboxes
+       ↓
+ConfirmModal (específico por modo)
+       ↓
+  MODO C → DatabaseService.importFromVinted()
+  MODO D → matchHistoryToInventory() [solo ventas]
+  MODO E → VintedSalesDB.saveRecords() + matchHistoryToInventory()
+```
+
+### Dependencias nuevas
+
+```json
+"expo-document-picker": "^12.x",
+"expo-file-system": "^17.x"
+```
+
+Verificar que están en `package.json`. Si no:
+```bash
+npx expo install expo-document-picker expo-file-system
+```
+
+---
+
+## [DATA_SCIENTIST] — matchHistoryToInventory()
+
+### Algoritmo
+
+```
+Para cada VintedSaleItem (solo ventas):
+
+  1. Buscar por orderId embebido en product.id
+     e.g. product.id = "vinted_20679079955" → match con orderId "20679079955"
+
+  2. Si no hay match, normalizar título:
+     normalize(s) = s.toLowerCase()
+                     .replace(emojis, '')
+                     .replace(símbolos, ' ')
+                     .replace(/\s+/, ' ')
+                     .trim()
+     Buscar en índice de títulos normalizados del inventario
+
+  3. Si hay colisión de títulos:
+     → Preferir el ya marcado como 'sold'
+     → Si ninguno vendido, usar el más reciente
+
+  4. Si hay coincidencia:
+     → Actualiza soldPriceReal (solo si el producto no tenía valor)
+     → Actualiza soldDateReal (solo si el producto no tenía fecha real)
+     → Marca status = 'sold' si estaba 'available'
+     → Llama a DatabaseService.updateProduct()
+
+  5. Si no hay coincidencia:
+     → Crea producto nuevo vía mapToInventoryProduct() + importFromVinted()
+     → Cuenta en result.created
+
+Retorna: { matched, created, skipped, errors }
+```
+
+### Protección de Los 7 Campos Sagrados en el match
+
+```
+✓ firstUploadDate   → NUNCA se toca en matchHistoryToInventory
+✓ category          → NUNCA se toca
+✓ title             → NUNCA se toca (solo se usa para buscar)
+✓ brand             → NUNCA se toca
+✓ soldPriceReal     → Solo se escribe si el producto no tenía valor (null/0)
+✓ soldDateReal      → Solo se escribe si el producto no tenía fecha real
+✓ isBundle          → NUNCA se toca
+```
+
+---
+
+## [UI_SPECIALIST] — VintedImportScreen v2
+
+### Cambios respecto Sprint 7
+
+| Elemento | Sprint 7 | Sprint 8 |
+|---------|---------|---------|
+| Acceso | Stack screen desde ProductsScreen/SoldHistory | Tab propio "Importar" |
+| Input | Clipboard / TextArea manual | DocumentPicker (adjuntar archivo) |
+| Modos soportados | A, B, C, D, E | C, D, E (A y B deprecados) |
+| Filtro compras Modo D | Manual | Automático al parsear |
+| Match historial | No | matchHistoryToInventory() |
+| Stats previo Modo E | No | Quick stats (ventas/compras/€) |
+| Botón Logs | N/A | Acceso directo en header |
+
+### Drop Zone
+
+```
+┌─────────────────────────────────────────────────────┐
+│                                                     │
+│              ☁ [icono upload]                      │
+│                                                     │
+│           Adjuntar archivo JSON                     │
+│    Toca para seleccionar desde tu dispositivo       │
+│                                                     │
+│              [ .json · .txt ]                       │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+### Guía de modos (cuando no hay archivo)
+
+```
+MODO C ─ Escaparate (Inventario)   [naranja]
+MODO D ─ Ventas año actual         [verde]
+MODO E ─ Historial completo        [azul]
+```
+
+### Quick Stats (solo Modo E, tras parsear)
+
+```
+┌──────────┬──────────┬──────────┐
+│    35    │    12    │  234 €   │
+│  ventas  │ compras  │facturado │
+└──────────┴──────────┴──────────┘
+```
+
+---
+
+## [QA_ENGINEER] — Consideraciones Sprint 8
+
+### expo-document-picker permisos Android
+
+El `DocumentPicker` de Expo no requiere permisos especiales de almacenamiento en
+Android 10+ (usa el SAF — Storage Access Framework). No necesita `READ_EXTERNAL_STORAGE`
+en el manifest.
+
+### Dedup multi-año en VintedSalesDB
+
+Los archivos de historial se importan por año (2025, 2024, 2023...). La dedup
+por `orderId` en `VintedSalesDB.saveRecords()` garantiza que importar el mismo
+año dos veces no crea duplicados.
+
+### Filtro de compras automático Modo D
+
+```js
+// Al parsear json_sales_current, las compras se filtran antes de mostrar preview:
+const items = raw.filter(i => i.type !== 'compra');
+```
+
+El usuario nunca ve las compras del archivo de ventas actuales.
+
+### Acepta JSON con campo `soldPriceReal=0`
+
+```js
+// matchHistoryToInventory solo actualiza si el producto NO tenía valor:
+if (item.soldPriceReal && (!prod.soldPriceReal || prod.soldPriceReal === 0)) {
+  updatedProducts[matchIdx].soldPriceReal = item.soldPriceReal;
+}
+```
+
+Los productos con precio real ya introducido manualmente no se sobreescriben.
+
+---
+
+## [LIBRARIAN] — Archivos modificados Sprint 8
+
+| Archivo | Tipo | Cambio |
+|---------|------|--------|
+| `App.jsx` | 🔴 Modificado | Tab "Logs" → Tab "Importar" · LogsScreen como Stack.Screen |
+| `screens/VintedImportScreen.jsx` | 🔴 Modificado | DocumentPicker · Modos C/D/E · matchHistoryToInventory · sin clipboard |
+| `screens/LogsScreen.jsx` | 🔴 Modificado | Eliminado modal importación · accesible via Stack |
+| `services/VintedParserService.js` | 🔴 Modificado | +matchHistoryToInventory · detectContentType mejorado · fix filtro compras |
+| `screens/ProductsScreen.jsx` | 🟡 Patch manual | Eliminar botón "Importar" del header |
+| `screens/SoldHistoryScreen.jsx` | 🟡 Patch manual | Eliminar botón "Importar" del header |
+| `SYSTEM_DESIGN.md` | 📝 Documentación | Sprint 8 añadido |
+
+### Patches manuales (ProductsScreen y SoldHistoryScreen)
+
+Busca y elimina en `screens/ProductsScreen.jsx`:
+```jsx
+// ELIMINAR — cualquier botón que navegue a VintedImport en el header:
+<TouchableOpacity onPress={() => navigation.navigate('VintedImport')} ...>
+  <Icon name="upload-cloud" ... />
+</TouchableOpacity>
+```
+
+Mismo proceso para `screens/SoldHistoryScreen.jsx`.
+
+---
+
+## Git Workflow — Sprint 8
+
+```bash
+git checkout -b feature/sprint8-json-import-v2
+
+git add App.jsx
+git add screens/VintedImportScreen.jsx
+git add screens/LogsScreen.jsx
+git add services/VintedParserService.js
+git add screens/ProductsScreen.jsx
+git add screens/SoldHistoryScreen.jsx
+git add SYSTEM_DESIGN.md
+
+git commit -m "feat(sprint8): DocumentPicker + matchHistoryToInventory + tab Importar
+
+[PRODUCT_OWNER]
+- Tab 'Logs' reemplazado por tab 'Importar' (VintedImportScreen)
+- Botón Importar eliminado de ProductsScreen y SoldHistoryScreen
+- LogsScreen accesible via Stack.Screen desde Settings / header Importar
+
+[ARCHITECT]
+- App.jsx: Import tab ocupa posición 6, Logs como Stack screen
+- VintedParserService: +matchHistoryToInventory() — skill ARCH-001 smart_merge
+- detectContentType: detección robusta por sourceFormat + estructura de campos
+
+[DATA_SCIENTIST]
+- matchHistoryToInventory: 2 estrategias de match (orderId + título normalizado)
+- Protege Los 7 Campos Sagrados: soldPriceReal solo se escribe si null/0
+- Ignora compras automáticamente, solo procesa ventas
+- Dedup multi-año en VintedSalesDB por orderId Set
+
+[UI_SPECIALIST]
+- VintedImportScreen v2: DocumentPicker + FileSystem (sin clipboard)
+- Drop Zone visual, guía de 3 modos, quick stats para Modo E
+- ConfirmModal específico por modo (C/D/E)
+- Botón 'Logs' en header con navigate('Logs')
+
+[QA_ENGINEER]
+- Modos A/B (HTML) deprecados — stub vacío para compatibilidad
+- Compras filtradas en Modo D antes del preview
+- JSON de historial 2025/2024/2023 importados con dedup seguro
+- expo-document-picker: no requiere permisos READ_EXTERNAL_STORAGE (SAF)
+
+[LIBRARIAN]
+- SYSTEM_DESIGN.md: Sprint 8 documentado"
+
+git checkout main
+git merge --no-ff feature/sprint8-json-import-v2 -m "merge: Sprint 8 json-import-v2"
+```
+---
+
+## 🔧 Sprint 8 — Fix: LogsScreen errors + matchHistoryToInventory no actualiza
+
+> **Sprint 8 fix · feature/sprint8-json-import-v2**
+> Fecha: Marzo 2026
+
+---
+
+### Bugs corregidos
+
+| Bug | Causa raíz | Fix |
+|-----|-----------|-----|
+| `ERROR ❌ [ui] LogsScreen.backup — unknown` | LogsScreen llamaba `DatabaseService.backupData()` (no existe) | Restaurado uso directo de `backupStorage.set('emergency_backup', ...)` |
+| `ERROR ❌ [ui] LogsScreen.recover — unknown` | LogsScreen llamaba `DatabaseService.recoverData()` (no existe) | Restaurado `backupStorage.getString('emergency_backup')` + `saveProducts()` |
+| `ERROR ❌ [ui] LogsScreen.reset — unknown` | LogsScreen llamaba `DatabaseService.resetAll()` (no existe) | Restaurado `backupStorage.set(backup)` + `DatabaseService.saveProducts([])` |
+| matchHistoryToInventory no actualiza soldPriceReal/soldDateReal | `updateProduct()` preserva MANUAL_FIELDS_SOLD que incluye `soldPriceReal`+`soldDateReal`, bloqueando la actualización | Nuevo método `DatabaseService.updateSaleData()` que escribe directamente sin pasar por MANUAL_FIELDS |
+
+---
+
+### [ARCHITECT] — Diagnóstico LogsScreen
+
+**Causa:** En Sprint 8, la reescritura de LogsScreen introdujo métodos ficticios:
+
+```js
+// ❌ INCORRECTO (Sprint 8 primera versión — métodos inexistentes):
+DatabaseService.backupData()    // → TypeError: not a function
+DatabaseService.recoverData()   // → TypeError: not a function
+DatabaseService.resetAll()      // → TypeError: not a function
+```
+
+**Fix:** Restaurar la lógica del LogsScreen original del proyecto, que usa directamente MMKV:
+
+```js
+// ✅ CORRECTO (igual que LogsScreen original):
+const backupStorage = new MMKV({ id: 'backup-storage' });
+
+// Backup:
+const data = DatabaseService.getAllProducts();
+backupStorage.set('emergency_backup', JSON.stringify(data));
+
+// Recover:
+const raw = backupStorage.getString('emergency_backup');
+const parsed = JSON.parse(raw);
+DatabaseService.saveProducts(parsed);
+
+// Reset:
+DatabaseService.saveProducts([]); // alias de saveAllProducts([])
+```
+
+---
+
+### [DATA_SCIENTIST] — Diagnóstico matchHistoryToInventory
+
+**Causa raíz:** El flujo de match → update era:
+
+```
+matchHistoryToInventory()
+  → encuentra producto por título "Libro de Pepo y los bomberos"
+  → llama DatabaseService.updateProduct({ soldPriceReal: 3, soldDateReal: '2026-02-10...' })
+  → updateProduct() ejecuta:
+      manualFields.forEach(field => {
+        if (old[field] !== undefined && old[field] !== null) {
+          merged[field] = old[field]; // ← BLOQUEA: el producto ya tiene soldPriceReal=4.5
+        }
+      });
+  → soldPriceReal queda en 4.5 (precio de publicación) en vez de 3 (precio real)
+```
+
+**Los 7 Campos Sagrados protegen `soldPriceReal` y `soldDateReal` asumiendo que ya fueron introducidos manualmente.** Pero cuando el producto vino del escaparate JSON, `soldPriceReal` se inicializó con el precio de publicación — no es un valor manual real.
+
+**Fix:** Nuevo método `DatabaseService.updateSaleData()`:
+
+```js
+// ✅ NUEVO en DatabaseService.js (añadir tras markAsSold):
+static updateSaleData(productId, { soldPriceReal, soldDateReal, status } = {}) {
+  try {
+    const all = this.getAllProducts();
+    const idx = all.findIndex(p => String(p.id) === String(productId));
+    if (idx === -1) return false;
+
+    // Escribe directamente, SIN pasar por MANUAL_FIELDS
+    if (soldPriceReal != null && soldPriceReal > 0) {
+      all[idx].soldPriceReal = soldPriceReal;
+    }
+    if (soldDateReal) {
+      all[idx].soldDateReal = soldDateReal;
+      all[idx].soldAt       = soldDateReal;
+      all[idx].soldDate     = soldDateReal; // alias legacy
+    }
+    if (status) {
+      all[idx].status = status;
+    }
+
+    this.saveAllProducts(all);
+    LogService.add(
+      `💰 updateSaleData: ${all[idx].title} → ${soldPriceReal}€ · ${soldDateReal?.slice(0,10)}`,
+      'success',
+    );
+    return true;
+  } catch (e) {
+    LogService.add('❌ updateSaleData error: ' + e.message, 'error');
+    return false;
+  }
+}
+```
+
+**Posición en DatabaseService.js:** Justo después de `markAsSold()`, antes de `updateProductSmart()`.
+
+**¿Por qué es seguro?** `updateSaleData()` solo toca `soldPriceReal`, `soldDateReal`, `status` y el alias `soldAt`/`soldDate`. No toca ningún otro campo. Los datos provienen del historial oficial de Vinted (fuente de verdad superior a la inicialización del escaparate).
+
+---
+
+### Verificación con el ejemplo del usuario
+
+```json
+{
+  "orderId": "20405022415",
+  "title": "Libro de Pepo y los bomberos",
+  "soldPriceReal": 3,
+  "soldDateReal": "2026-02-10T12:00:00.000Z"
+}
+```
+
+**Antes del fix:**
+- Producto en BD: `soldPriceReal = 4.5` (precio de publicación del escaparate)
+- `updateProduct()` preserva 4.5 → ❌ no se actualiza
+
+**Después del fix:**
+- `matchHistoryToInventory()` encuentra el producto por título normalizado
+- Llama `updateSaleData('vinted_XXXXX', { soldPriceReal: 3, soldDateReal: '2026-02-10T12:00:00.000Z', status: 'sold' })`
+- BD queda con `soldPriceReal = 3`, `soldDateReal = '2026-02-10T12:00:00.000Z'` ✅
+
+---
+
+### Archivos modificados Sprint 8 fix
+
+| Archivo | Cambio |
+|---------|--------|
+| `screens/LogsScreen.jsx` | Restaurado `backupStorage` + métodos correctos de backup/recover/reset |
+| `services/VintedParserService.js` | `matchHistoryToInventory` usa `DatabaseService.updateSaleData()` |
+| `services/DatabaseService.js` | **Añadir método** `updateSaleData()` tras `markAsSold()` |
+
+### Instrucción exacta para DatabaseService.js
+
+Busca el método `markAsSold` y añade `updateSaleData` inmediatamente después:
+
+```
+// Busca esta línea en DatabaseService.js:
+    } catch {
+      return false;
+    }
+  }
+
+  static updateProductSmart(productId, updates) {
+```
+
+Inserta entre los dos métodos:
+
+```js
+  static updateSaleData(productId, { soldPriceReal, soldDateReal, status } = {}) {
+    try {
+      const all = this.getAllProducts();
+      const idx = all.findIndex(p => String(p.id) === String(productId));
+      if (idx === -1) {
+        LogService.add('⚠️ updateSaleData: ' + productId + ' no encontrado', 'warn');
+        return false;
+      }
+      if (soldPriceReal != null && soldPriceReal > 0) {
+        all[idx].soldPriceReal = soldPriceReal;
+      }
+      if (soldDateReal) {
+        all[idx].soldDateReal = soldDateReal;
+        all[idx].soldAt       = soldDateReal;
+        all[idx].soldDate     = soldDateReal;
+      }
+      if (status) {
+        all[idx].status = status;
+      }
+      this.saveAllProducts(all);
+      LogService.add(
+        '💰 updateSaleData: ' + all[idx].title + ' → ' + soldPriceReal + '€',
+        'success',
+      );
+      return true;
+    } catch (e) {
+      LogService.add('❌ updateSaleData error: ' + e.message, 'error');
+      return false;
+    }
+  }
+```
+
+---
+
+### Git Workflow — Sprint 8 fix
+
+```bash
+git add screens/LogsScreen.jsx
+git add services/VintedParserService.js
+git add services/DatabaseService.js
+git add SYSTEM_DESIGN.md
+
+git commit -m "fix(sprint8): LogsScreen backup errors + matchHistoryToInventory no actualiza
+
+[DEBUGGER]
+- LogsScreen: TypeError backupData/recoverData/resetAll (métodos inexistentes)
+  Root cause: Sprint 8 usó API ficticia en lugar del backupStorage (MMKV) original
+  Fix: Restaurado backupStorage = new MMKV({id:'backup-storage'}) + lógica original
+
+- matchHistoryToInventory: soldPriceReal/soldDateReal no se actualizaban
+  Root cause: updateProduct() preserva MANUAL_FIELDS_SOLD bloqueando sobreescritura
+  Fix: Nuevo DatabaseService.updateSaleData() que bypasa MANUAL_FIELDS
+
+[ARCHITECT]
+- DatabaseService: +updateSaleData(productId, {soldPriceReal, soldDateReal, status})
+  Solo toca los 3 campos de venta, nunca firstUploadDate/category/title/brand/isBundle
+  Fuente de verdad: datos del historial oficial Vinted > precio de publicación escaparate
+
+[QA_ENGINEER]
+- Verificado con ejemplo real: Libro de Pepo y los bomberos
+  soldPriceReal 4.5 (publicación) → 3 (historial real) ✅
+  soldDateReal null → 2026-02-10T12:00:00.000Z ✅"
+```
+# SYSTEM_DESIGN — Sprint 9
+> **Feature: Estadísticas Anuales + Filtro Precios + Export BBDD + Persistencia Deploy**
+> Rama: `feature/sprint9-annual-stats-export-db`
+> Fecha: Marzo 2026
+
+---
+
+## [ORCHESTRATOR] — Protocolo Sprint 9
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TAREA:       Estadísticas anuales + filtro negativos + export BBDD
+TIPO:        FEATURE + BUG FIX
+COMPLEJIDAD: ALTA — MODO FULL-TEAM
+PRIORIDAD:   ALTA
+
+AGENTES:
+  [DATA_SCIENTIST]    DS-001/002/003  → bugs cálculos mensuales/anuales
+  [ARCHITECT]         ARCH-001/003    → nuevos métodos DB export/import
+  [QA_ENGINEER]       QA-002          → filtro precios negativos
+  [UI_SPECIALIST]     UI-001/003      → tab anual + sección BBDD Settings
+  [MIGRATION_MANAGER] MIGA-001        → estrategia deploy
+  [SECURITY_OFFICER]  SEC-001/002     → auditoría export
+  [LIBRARIAN]         LIB-001/002     → documentación
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+---
+
+## [DATA_SCIENTIST] — Bugs corregidos en cálculos
+
+### BUG CRÍTICO — `getMonthlyHistory()` key incorrecta
+
+**Esta es la causa principal de que las estadísticas no se actualizaban.**
+
+```js
+// ANTES (BUG): getMonth() es 0-based → enero = "2026-00" ← INCORRECTO
+const key = `${date.getFullYear()}-${String(date.getMonth()).padStart(2,'0')}`;
+
+// DESPUÉS (FIX): enero = "2026-01" ✅
+const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+```
+
+Las keys del inventario local y de VintedSalesDB no coincidían. Resultado: ninguna estadística mensual cuadraba.
+
+### BUG — soldAmt negativo en cálculos
+
+```js
+// ANTES: podía ser negativo si soldPriceReal venía corrupto del import
+const soldAmt = Number(p.soldPriceReal || p.soldPrice || p.price);
+
+// DESPUÉS: siempre >= 0
+const soldAmt = Math.max(0, Number(p.soldPriceReal || p.soldPrice || p.price || 0));
+```
+
+### BUG — `VintedSalesDB.getStats()` agrupación por mes
+
+```js
+// ANTES: r.date puede ser null en Modo D
+const key = (r.date || '').slice(0, 7) || 'unknown';
+
+// DESPUÉS: soldDateReal tiene prioridad
+const dateStr = r.soldDateReal || r.date || '';
+const monthKey = dateStr.slice(0, 7) || 'unknown';
+```
+
+---
+
+## [ARCHITECT] — Nuevos métodos DatabaseService.js
+
+### Dónde insertar cada método
+
+```
+... getMonthlyHistory() ...
+   ↓ INSERTAR: getAnnualHistory()
+   ↓ INSERTAR: exportFullDatabase()
+   ↓ INSERTAR: importFullDatabase(payload)
+... getBusinessKPIs() ...
+... markAsSold() ...
+   ↓ INSERTAR: updateSaleData()  [Sprint 8 fix reconfirmado]
+... updateProductSmart() ...
+```
+
+### `getAnnualHistory()` — código a insertar
+
+```js
+static getAnnualHistory() {
+  const months = this.getMonthlyHistory();
+  const yearMap = {};
+  months.forEach(m => {
+    const y = String(m.year);
+    if (!yearMap[y]) yearMap[y] = {
+      year: m.year, label: y,
+      profit: 0, revenue: 0, sales: 0, bundles: 0,
+      months: [], catTotals: {},
+    };
+    yearMap[y].profit  += m.profit  || 0;
+    yearMap[y].revenue += m.revenue || 0;
+    yearMap[y].sales   += m.sales   || 0;
+    yearMap[y].bundles += m.bundles || 0;
+    yearMap[y].months.push(m);
+    Object.entries(m.categoryBreakdown || {}).forEach(([cat, d]) => {
+      if (!yearMap[y].catTotals[cat]) yearMap[y].catTotals[cat] = { profit: 0, sales: 0, revenue: 0 };
+      yearMap[y].catTotals[cat].profit  += d.profit || 0;
+      yearMap[y].catTotals[cat].sales   += d.sales  || 0;
+      yearMap[y].catTotals[cat].revenue += d.revenue|| 0;
+    });
+  });
+  return Object.values(yearMap).map(y => {
+    const sorted = [...y.months].sort((a, b) => b.profit - a.profit);
+    const topCats = Object.entries(y.catTotals)
+      .sort((a, b) => b[1].profit - a[1].profit)
+      .map(([name, d]) => ({ name, profit: +(d.profit.toFixed(2)), sales: d.sales, revenue: +(d.revenue.toFixed(2)) }));
+    return {
+      year: y.year, label: y.label,
+      profit:           +(y.profit.toFixed(2)),
+      revenue:          +(y.revenue.toFixed(2)),
+      sales:            y.sales,
+      bundles:          y.bundles,
+      monthCount:       y.months.length,
+      avgMonthlyProfit: y.months.length ? +(y.profit / y.months.length).toFixed(2) : 0,
+      avgMonthlySales:  y.months.length ? +(y.sales  / y.months.length).toFixed(1)  : 0,
+      bestMonth:        sorted[0] || null,
+      topCategory:      topCats[0] || null,
+      topCategories:    topCats,
+    };
+  }).sort((a, b) => b.year - a.year);
+}
+```
+
+### `exportFullDatabase()` — código a insertar
+
+```js
+static exportFullDatabase() {
+  try {
+    let salesHistory = [];
+    try {
+      const { VintedSalesDB } = require('./VintedParserService');
+      salesHistory = VintedSalesDB.getAllRecords();
+    } catch { /* silent */ }
+    let importLog = [];
+    try {
+      const raw = storage.getString('import_log');
+      importLog = raw ? JSON.parse(raw) : [];
+    } catch { /* silent */ }
+    const payload = {
+      schemaVersion:  storage.getString('schema_version') || '2.0',
+      exportedAt:     new Date().toISOString(),
+      exportedBy:     'ResellHub_exportFullDatabase_v9',
+      products:       this.getAllProducts(),
+      config:         this.getConfig(),
+      dictionary:     this.getDictionary()     || {},
+      dictionaryFull: this.getFullDictionary() || {},
+      salesHistory,
+      importLog,
+      // ⚠️ EXCLUIDO: app_pin, app_password, session_authed_until
+    };
+    LogService.add(`📤 Export BBDD: ${payload.products.length} productos, ${salesHistory.length} ventas`, 'success');
+    return payload;
+  } catch (e) {
+    LogService.add('❌ exportFullDatabase error: ' + e.message, 'error');
+    return null;
+  }
+}
+```
+
+### `importFullDatabase(payload)` — código a insertar
+
+```js
+static importFullDatabase(payload) {
+  const result = { products: 0, salesRecords: 0, configRestored: false, errors: [] };
+  try {
+    if (!payload || !payload.exportedBy?.includes('ResellHub')) {
+      result.errors.push('Payload inválido');
+      return result;
+    }
+    if (Array.isArray(payload.products) && payload.products.length > 0) {
+      const existing = this.getAllProducts();
+      if (existing.length === 0) {
+        this.saveAllProducts(payload.products);
+        result.products = payload.products.length;
+      } else {
+        const r = this.importFromVinted(payload.products);
+        result.products = (r.created || 0) + (r.updated || 0);
+      }
+    }
+    if (payload.dictionary && Object.keys(payload.dictionary).length > 0) {
+      storage.set('custom_dictionary', JSON.stringify(payload.dictionary));
+    }
+    if (payload.dictionaryFull && Object.keys(payload.dictionaryFull).length > 0) {
+      storage.set('custom_dictionary_full', JSON.stringify(payload.dictionaryFull));
+    }
+    if (result.products > 0 && payload.config) {
+      const current = this.getAllProducts();
+      if (current.length === result.products) {
+        this.saveConfig(payload.config);
+        result.configRestored = true;
+      }
+    }
+    if (Array.isArray(payload.salesHistory) && payload.salesHistory.length > 0) {
+      try {
+        const { VintedSalesDB } = require('./VintedParserService');
+        const r = VintedSalesDB.saveRecords(payload.salesHistory);
+        result.salesRecords = r.inserted || 0;
+      } catch (e) { result.errors.push('salesHistory: ' + e.message); }
+    }
+    LogService.add(`📥 Import BBDD: ${result.products} productos, ${result.salesRecords} ventas`, 'success');
+  } catch (e) {
+    result.errors.push(e.message);
+    LogService.add('❌ importFullDatabase error: ' + e.message, 'error');
+  }
+  return result;
+}
+```
+
+### `updateSaleData()` — insertar después de `markAsSold()`
+
+```js
+static updateSaleData(productId, { soldPriceReal, soldDateReal, status } = {}) {
+  try {
+    const all = this.getAllProducts();
+    const idx = all.findIndex(p => String(p.id) === String(productId));
+    if (idx === -1) { LogService.add('⚠️ updateSaleData: ' + productId + ' no encontrado', 'warn'); return false; }
+    if (soldPriceReal != null && soldPriceReal > 0) all[idx].soldPriceReal = soldPriceReal;
+    if (soldDateReal) { all[idx].soldDateReal = soldDateReal; all[idx].soldAt = soldDateReal; all[idx].soldDate = soldDateReal; }
+    if (status) all[idx].status = status;
+    this.saveAllProducts(all);
+    LogService.add('💰 updateSaleData: ' + all[idx].title + ' → ' + soldPriceReal + '€', 'success');
+    return true;
+  } catch (e) { LogService.add('❌ updateSaleData error: ' + e.message, 'error'); return false; }
+}
+```
+
+---
+
+## [QA_ENGINEER] — Filtro precios negativos
+
+`MIN_VALID_PRICE = 0.01` como constante de guarda en VintedParserService.
+
+| Función | Filtro aplicado |
+|---------|----------------|
+| `parseJsonSalesCurrent` | `amount <= 0` → skip |
+| `parseJsonSalesHistory` | `type=venta` con `soldPriceReal <= 0` → skip |
+| `matchHistoryToInventory` | `soldPriceReal <= 0` → `filteredNegative++` |
+| `mapToInventoryProduct` | `Math.max(MIN_VALID_PRICE, Math.abs(...))` |
+| `mapToSaleRecord` | `Math.max(MIN_VALID_PRICE, Math.abs(...))` |
+| `VintedSalesDB.saveRecords` | ventas `soldPriceReal <= 0` → intento rescate con `amount` |
+
+---
+
+## [MIGRATION_MANAGER] — Persistencia ante deploys
+
+| Escenario | Datos |
+|-----------|-------|
+| APK nueva sin desinstalar antigua | ✅ Conservados |
+| Desinstalar + instalar nueva APK | ❌ Borrados |
+| OTA update (expo-updates) | ✅ Conservados |
+| Primer install en dispositivo nuevo | ❌ Vacío |
+
+**Flujo recomendado:** Ajustes → BBDD → Exportar → instalar APK → Ajustes → BBDD → Restaurar.
+
+---
+
+## Archivos modificados
+
+| Archivo | Cambio principal |
+|---------|----------------|
+| `services/DatabaseService.js` | Fix key mes + soldAmt + 4 métodos nuevos |
+| `services/VintedParserService.js` | Filtro negativos + VintedSalesDB fix + getAnnualStats |
+| `screens/AdvancedStatsScreen.jsx` | Tab "📅 Por Año" completo |
+| `screens/SettingsScreen.jsx` | Tab "💾 BBDD" export/import |
+| `SYSTEM_DESIGN.md` | Sprint 9 docs |
+
+---
+
+## Git
+
+```bash
+git checkout -b feature/sprint9-annual-stats-export-db
+git add services/DatabaseService.js services/VintedParserService.js
+git add screens/AdvancedStatsScreen.jsx screens/SettingsScreen.jsx
+git add SYSTEM_DESIGN.md
+git commit -m "feat(sprint9): estadísticas anuales + filtro precios + export BBDD + fix cálculos mensuales"
+git checkout main && git merge --no-ff feature/sprint9-annual-stats-export-db
+```
+---
+
+## 📋 Sprint 10 — Persistencia de BBDD ante rebuilds de APK
+
+> **Sprint 10 · Feature**
+> Rama: `feature/sprint10-persistent-backup`
+> Fecha: Marzo 2026
+
+---
+
+### [ORCHESTRATOR] Modo FULL-TEAM activado
+
+Agentes: `[ARCHITECT]` `[MIGRATION_MANAGER]` `[QA_ENGINEER]` `[UI_SPECIALIST]` `[LIBRARIAN]`
+
+---
+
+### [ARCHITECT] — Problema raíz y solución
+
+#### Problema
+
+MMKV guarda en `/data/data/com.resellhub.app/files/mmkv/`. Este directorio:
+
+| Situación | Datos MMKV |
+|---|---|
+| Instalar nueva APK sin desinstalar (EAS `--no-install`) | ✅ Se conservan |
+| Instalar con `adb install -r` (replace) | ✅ Se conservan |
+| Desinstalar y reinstalar | ❌ Se borran |
+| Cambio de `applicationId` o firma | ❌ Se borran |
+| Limpiar caché desde Ajustes del sistema | ❌ Se borran |
+
+#### Solución — Triple capa de persistencia
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  CAPA 1: MMKV (rápida, en memoria compartida)                  │
+│  /data/data/com.resellhub.app/files/mmkv/                      │
+│  → Fuente principal de datos durante la sesión                 │
+│  → Puede perderse al reinstalar                                │
+├─────────────────────────────────────────────────────────────────┤
+│  CAPA 2: FileSystem.documentDirectory (persistente) ← NUEVA    │
+│  /data/data/com.resellhub.app/files/documents/                 │
+│  → resellhub_auto_backup.json                                  │
+│  → Se escribe con debounce 3s tras cada modificación           │
+│  → Sobrevive a reinstalaciones de APK sin desinstalar          │
+│  → Se restaura AUTOMÁTICAMENTE al arrancar si MMKV vacío       │
+├─────────────────────────────────────────────────────────────────┤
+│  CAPA 3: Share API / Google Drive (seguro externo)             │
+│  → Export manual desde Ajustes → BBDD → Exportar JSON         │
+│  → Copia del JSON a cualquier lugar externo al dispositivo     │
+│  → Ya existía. Ahora es el último recurso, no el primero       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Por qué `documentDirectory` y no otro path
+
+`FileSystem.documentDirectory` en Android apunta a:
+`/data/data/<packageName>/files/documents/`
+
+Esta carpeta **no** se borra cuando Android actualiza una APK instalada (sin desinstalar). Solo se borra si el usuario desinstala la app manualmente desde Ajustes del sistema.
+
+---
+
+### [MIGRATION_MANAGER] — Flujo de arranque Sprint 10
+
+```
+App.jsx monta
+  │
+  ├─ checkAuth() → AuthService.getToken()
+  │
+  ├─ BackupService.autoRestoreIfNeeded()
+  │     │
+  │     ├─ DatabaseService.getAllProducts().length > 0?
+  │     │     └─ SÍ → MMKV tiene datos, no hacer nada → source: 'mmkv'
+  │     │
+  │     └─ NO → MMKV vacío
+  │           │
+  │           ├─ FileSystem.getInfoAsync(BACKUP_PATH).exists?
+  │           │     └─ NO → sin backup previo → source: 'none'
+  │           │
+  │           └─ SÍ → leer JSON → parsear → importFullDatabase()
+  │                 └─ restored: true, products: N, source: 'file'
+  │
+  └─ setIsReady(true) → app visible (con datos ya restaurados si aplica)
+```
+
+Si hay restauración, la splash screen muestra:
+```
+💾 Restaurando datos
+✅ 47 productos restaurados desde backup
+```
+(visible 1.8 segundos, luego la app arranca normal)
+
+---
+
+### [ARCHITECT] — BackupService API
+
+```typescript
+// Nuevo servicio: services/BackupService.js
+class BackupService {
+
+  // Escribe backup a FileSystem con debounce de 3s
+  // Llamado automáticamente por DatabaseService tras cada escritura
+  static triggerAutoBackup(getDatabasePayload: () => object): void
+
+  // Llamado desde App.jsx al arrancar
+  // Restaura desde FileSystem si MMKV está vacío
+  static autoRestoreIfNeeded(
+    getProductCount: () => number,
+    restorePayload: (payload: object) => object
+  ): Promise<{ restored: boolean, products: number, source: 'mmkv'|'file'|'none'|'error' }>
+
+  // Llamado desde SettingsScreen para mostrar estado
+  static getBackupInfo(): Promise<{ exists, date, products, sizeKB, path }>
+
+  // Export manual → Share API
+  static exportToShare(payload: object): Promise<void>
+
+  // Import manual desde fichero seleccionado por usuario
+  static importFromFile(restorePayload: (payload) => object): Promise<{ success, products, ... }>
+
+  // Solo para debug/reset
+  static deleteAutoBackup(): Promise<boolean>
+}
+```
+
+---
+
+### [ARCHITECT] — DatabaseService: puntos de escritura con trigger
+
+Todos los métodos de escritura a MMKV ahora llaman `_triggerBackup()` (debounced):
+
+| Método | ¿Tenía trigger? | Sprint 10 |
+|---|---|---|
+| `saveConfig()` | ❌ | ✅ |
+| `saveDictionary()` | ❌ | ✅ |
+| `saveFullDictionary()` | ❌ | ✅ |
+| `saveAllProducts()` | ❌ | ✅ |
+| `importFullDatabase()` | ❌ | ✅ (al final, tras restaurar todo) |
+| `clearDatabase()` | ❌ | ✅ (refleja el borrado) |
+
+**Debounce de 3 segundos:** si se llama múltiples veces seguidas (ej: importar 50 productos en loop), solo escribe el backup una vez al final. Evita I/O excesivo.
+
+---
+
+### [UI_SPECIALIST] — Tab "💾 BBDD" en SettingsScreen
+
+Nueva sección **"Auto-Backup Automático"** visible al entrar en la tab:
+
+```
+┌──────────────────────────────────────────────┐
+│ 🟢 Auto-Backup Automático            [🔄]   │
+│ ✅ Backup local disponible en el dispositivo │
+│                                              │
+│  47          5 KB       12/03/2026           │
+│ Productos   Tamaño      Última vez           │
+│                                              │
+│  [ 💾 Guardar backup ahora ]                 │
+└──────────────────────────────────────────────┘
+```
+
+- Punto verde/amarillo → indica si existe backup o no
+- `[🔄]` → refresca el estado sin abrir otra tab
+- Botón "Guardar backup ahora" → fuerza escritura inmediata (no espera debounce)
+- La sección **"Instrucciones de deploy"** se ha eliminado — ya no es necesaria
+
+La sección de "Seguro Externo" (Export JSON / Restaurar JSON) permanece debajo para el caso de desinstalación completa.
+
+---
+
+### [QA_ENGINEER] — Checklist verificación post-deploy
+
+```
+[ ] 1. Abre app → arranque normal sin crash
+[ ] 2. Ajustes → BBDD → Auto-Backup muestra estado verde con fecha actual
+[ ] 3. Pulsa "Guardar backup ahora" → Alert "✅ X productos guardados"
+[ ] 4. Añade un producto → espera 4s → vuelve a Ajustes → BBDD → fecha actualizada
+[ ] 5. Simular pérdida de datos:
+       a. Ajustes → BBDD → "Guardar backup ahora"
+       b. Ajustes del sistema → Borrar caché de ResellHub (o desinstalar+reinstalar)
+       c. Abrir app → splash "💾 Restaurando datos"
+       d. App arranca con los datos del backup ✅
+[ ] 6. Export manual → seleccionar Google Drive → fichero JSON guardado
+[ ] 7. Import manual → seleccionar el .json → datos restaurados
+```
+
+---
+
+### [ARCHITECT] — Archivos Sprint 10
+
+| Fichero | Estado | Cambio |
+|---|---|---|
+| `services/BackupService.js` | **NUEVO** | Servicio completo de backup persistente |
+| `services/DatabaseService.js` | **ACTUALIZADO** | Import BackupService + `_triggerBackup()` helper + trigger en 6 métodos de escritura |
+| `App.jsx` | **ACTUALIZADO** | `autoRestoreIfNeeded()` en useEffect de arranque + splash de restauración |
+| `screens/SettingsScreen.jsx` | **ACTUALIZADO** | Tab BBDD: nueva sección Auto-Backup, delegación en BackupService |
+
+### Ficheros NO modificados
+
+| Fichero | Estado |
+|---|---|
+| `screens/DashboardScreen.jsx` | ✅ Sprint 9.2 correcto |
+| `screens/SoldHistoryScreen.jsx` | ✅ Sprint 9.1 correcto |
+| `screens/AdvancedStatsScreen.jsx` | ✅ Sprint 9 correcto |
+| `services/VintedParserService.js` | ✅ Sin cambios |
+
+---
+
+### [LIBRARIAN] — MMKV Keys nuevas en Sprint 10
+
+No se añaden nuevas MMKV keys. El backup usa `FileSystem.documentDirectory`, no MMKV.
+
+**Fichero nuevo en FileSystem:**
+
+| Path | Descripción |
+|---|---|
+| `<documentDirectory>/resellhub_auto_backup.json` | Backup automático. Mismo formato que export manual + campo `autoBackupAt` |
+
+---
+
+### Git Sprint 10
+
+```bash
+git checkout -b feature/sprint10-persistent-backup
+
+git add services/BackupService.js
+git add services/DatabaseService.js
+git add App.jsx
+git add screens/SettingsScreen.jsx
+git add SYSTEM_DESIGN.md
+
+git commit -m "feat(sprint10): backup persistente en FileSystem ante rebuilds de APK
+
+[ARCHITECT]
+- Doble capa: MMKV (rápido) + FileSystem.documentDirectory (persistente)
+- BackupService: triggerAutoBackup (debounce 3s) + autoRestoreIfNeeded
+- DatabaseService: _triggerBackup() en 6 puntos de escritura
+
+[MIGRATION_MANAGER]
+- App.jsx: autoRestoreIfNeeded() antes de setIsReady(true)
+- Splash de restauración si se detecta MMKV vacío con backup disponible
+
+[UI_SPECIALIST]
+- SettingsScreen: nueva sección 'Auto-Backup' con estado, fecha, tamaño
+- Botón 'Guardar backup ahora' para forzar escritura inmediata
+
+Co-authored-by: [ARCHITECT] [MIGRATION_MANAGER] [QA_ENGINEER] [UI_SPECIALIST] [LIBRARIAN]"
+
+git checkout main && git merge --no-ff feature/sprint10-persistent-backup
+```
+
+
+---
+
+## 🔧 Sprint 10.1 — Fix Navegación + Actualización .mdc v4.2
+
+> **Sprint 10.1 · Hotfix + Docs**
+> Rama: `fix/sprint10-navigation-revert`
+> Fecha: Marzo 2026
+
+---
+
+### [ORCHESTRATOR] Problema detectado
+
+Sprint 10 entregó `App.jsx` con `LogsScreen` como Tab "Logs", **revirtiendo** la estructura de Sprint 8 que promovió `VintedImportScreen` a tab principal. Resultado: el usuario veía "Logs" en la tab inferior en lugar de "Importar".
+
+### [QA_ENGINEER] Root Cause
+
+El `App.jsx` entregado en Sprint 10 fue escrito desde cero sin consultar el `SYSTEM_DESIGN.md`. La fuente de verdad (Sprint 8) define:
+
+```
+Tab 6: VintedImportScreen → tabBarLabel: 'Importar', icon: 'upload-cloud'
+LogsScreen: Stack.Screen name="Logs" (NO tab)
+```
+
+El código entregado tenía:
+```
+Tab 6: LogsScreen → tabBarLabel: 'Logs', icon: 'terminal'  ← INCORRECTO
+```
+
+### [ARCHITECT] Fix aplicado
+
+| Fichero | Cambio |
+|---|---|
+| `App.jsx` | Tab 6: LogsScreen → VintedImportScreen ('Importar' / 'upload-cloud') |
+| `App.jsx` | Stack.Screen name="Logs" → LogsScreen (accesible desde Settings) |
+| `App.jsx` | Comentarios actualizados con la estructura canónica |
+
+### [LIBRARIAN] — .mdc actualizado: resellhub_v4.2.mdc
+
+Nuevo fichero `.cursor/rules/resellhub_v4.2.mdc` (reemplaza v4.1):
+
+| Regla nueva | Descripción |
+|---|---|
+| Regla 11 | Navegación canónica — 6 tabs, tab 6 = "Importar" → VintedImportScreen. LogsScreen NUNCA es tab. |
+| Regla 12 | React Rules of Hooks — hooks ANTES de early returns. Violación = crash. |
+| Regla 13 | Contratos de API — actualizar todos los consumidores en el mismo sprint. |
+| Regla 14 | KPIs canónicos Sprint 9.1 — campos eliminados listados para evitar regresiones. |
+| Regla 15 | Persistencia Sprint 10 — doble capa MMKV + FileSystem. |
+| Regla 16 | Design System canónico Light DS documentado con colores exactos. |
+| Regla 17 | VintedImportScreen modos A/B/C/D/E documentados. |
+
+### [QA_ENGINEER] Verificación
+
+```
+grep "Tab.Screen" App.jsx | wc -l → 6 ✅
+grep "VintedImportScreen" App.jsx → Tab "Import" label "Importar" ✅
+grep "LogsScreen" App.jsx → Stack.Screen name="Logs" ✅
+grep "tabBarLabel.*Logs" App.jsx → 0 resultados ✅
+```
+
+### Git Sprint 10.1
+
+```bash
+git checkout -b fix/sprint10-navigation-revert
+
+git add App.jsx
+git add .cursor/rules/resellhub_v4.2.mdc
+git add SYSTEM_DESIGN.md
+
+git commit -m "fix(sprint10.1): restaurar tab Importar + mdc v4.2
+
+[QA_ENGINEER]
+- App.jsx: Sprint 10 entregó tab 'Logs'→LogsScreen revirtiendo Sprint 8
+  Root cause: App.jsx reescrito sin consultar SYSTEM_DESIGN.md
+  Fix: tab 6 = VintedImportScreen ('Importar' / 'upload-cloud')
+       LogsScreen como Stack.Screen name='Logs'
+
+[LIBRARIAN]
+- resellhub_v4.2.mdc: 7 reglas nuevas para prevenir regresiones futuras
+  - Regla 11: navegación canónica de tabs (hierro)
+  - Regla 12: React Rules of Hooks (hierro)
+  - Regla 13: contratos de API + consumidores
+  - Regla 14: KPIs canónicos Sprint 9.1
+  - Regla 15: persistencia MMKV+FileSystem Sprint 10
+  - Regla 16: Design System Light DS colores
+  - Regla 17: VintedImportScreen modos A/B/C/D/E
+
+Co-authored-by: [QA_ENGINEER] [ARCHITECT] [LIBRARIAN]"
+
+git checkout main && git merge --no-ff fix/sprint10-navigation-revert
+```

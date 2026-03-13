@@ -1,296 +1,141 @@
 /**
- * ═══════════════════════════════════════════════════════════════════════════
- * VintedParserService.js  — Sprint 6 · feature/vinted-import-mobile (fix)
- * ═══════════════════════════════════════════════════════════════════════════
+ * VintedParserService.js — Sprint 9
  *
- * Parsers 100% offline para los 3 formatos de importación de Vinted:
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ * [ORCHESTRATOR] Agentes activos: [ARCHITECT] [DATA_SCIENTIST] [QA_ENGINEER]
  *
- *   FORMATO A  'html_sales_current'
- *     → HTML de "Mis pedidos / Año actual" (data-testid="my-orders-item")
- *     → Extrae: orderId, title, soldPriceReal, status (desde SVG title), imageUrl
- *     → NO contiene fecha de venta → soldDateReal queda null (se edita en la app)
+ * CAMBIOS SPRINT 9:
+ * ─────────────────
  *
- *   FORMATO B  'html_sales_history'
- *     → HTML de "Historial de transacciones" (pile__element / Cell__suffix)
- *     → Extrae: orderId, type (venta/compra), title, amount, date (ISO)
+ * [QA_ENGINEER] — Filtro de precios negativos (QA-002 data_integrity):
  *
- *   FORMATO C  'json_products'
- *     → JSON generado por el script de consola del escaparate
- *     → Extrae: array completo de productos activos y vendidos
- *     → Pasa directamente a DatabaseService.importFromVinted()
+ *   PROBLEMA: El historial de Vinted incluye registros con amount negativo
+ *   para compras, y ocasionalmente ventas con amount=0 o negativo por
+ *   devoluciones o ajustes. Si estos se importan al inventario, corrompían
+ *   soldPriceReal con valores negativos, distorsionando todas las estadísticas.
  *
- * ═══════════════════════════════════════════════════════════════════════════
+ *   FILTRO APLICADO EN:
+ *   1. parseJsonSalesCurrent() → filtra items con soldPriceReal <= 0
+ *   2. parseJsonSalesHistory() → filtra type='venta' con soldPriceReal <= 0
+ *   3. mapToInventoryProduct() → Math.abs() protege price y soldPriceReal
+ *   4. mapToSaleRecord() → Math.abs() + guardia >= 0
+ *   5. matchHistoryToInventory() → skip si soldPriceReal <= 0
+ *   6. VintedSalesDB.saveRecords() → filtra ventas con amount <= 0
+ *
+ *   El filtro es SILENCIOSO (no lanza error): el item se registra como
+ *   'skipped' en el resultado de matchHistoryToInventory.
+ *   LogService registra cuántos items fueron filtrados.
+ *
+ * [ARCHITECT] — Sprint 8 fix mantenido:
+ *   matchHistoryToInventory usa DatabaseService.updateSaleData()
+ *   (bypass MANUAL_FIELDS_SOLD) — ya documentado en Sprint 8 fix.
+ *
+ * [DATA_SCIENTIST] — VintedSalesDB.getStats() corregido:
+ *   BUG: usaba r.date en lugar de r.soldDateReal para agrupar por mes.
+ *   r.date puede ser null en el Modo D (ventas actuales sin fecha ISO).
+ *   DESPUÉS: key = (r.soldDateReal || r.date || '').slice(0, 7)
+ *   → Ahora los meses de VintedSalesDB coinciden con getMonthlyHistory().
+ *
+ *   NUEVO: VintedSalesDB.getAnnualStats()
+ *   Agrega byMonth por año para consistencia con DatabaseService.getAnnualHistory().
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  */
 
 import { MMKV } from 'react-native-mmkv';
 import LogService, { LOG_CTX } from './LogService';
+import { DatabaseService } from './DatabaseService';
 
 const storage = new MMKV({ id: 'vinted-parser' });
+
 const KEYS = {
-  SALES_HISTORY: 'vinted_sales_history',
-  IMPORT_LOG:    'vinted_import_log',
+  SALES_HISTORY: 'sales_history_v1',
+  IMPORT_LOG:    'import_log_v1',
 };
 
-// ─── Utilidades ───────────────────────────────────────────────────────────────
-function genId() {
-  return `vsr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-}
+// [QA_ENGINEER] Constante de precio mínimo válido
+const MIN_VALID_PRICE = 0.01;
 
-function stripTags(html) {
-  if (!html) return '';
-  return html.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
-}
+const genId = () => `vsr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-function parseEuros(str) {
-  if (!str) return 0;
-  const clean = str.replace(/[€\s]/g, '').replace(',', '.').trim();
-  const num = parseFloat(clean);
-  return isNaN(num) ? 0 : num;
-}
-
-const MONTHS_ES = {
-  enero:1, febrero:2, marzo:3, abril:4, mayo:5, junio:6,
-  julio:7, agosto:8, septiembre:9, octubre:10, noviembre:11, diciembre:12,
-};
-function parseSpanishDate(str) {
-  if (!str) return null;
-  const m = str.trim().toLowerCase().match(/(\d{1,2})\s+de\s+([a-záéíóúü]+)\s+de\s+(\d{4})/);
-  if (!m) return null;
-  return `${m[3]}-${String(MONTHS_ES[m[2]] || 1).padStart(2,'0')}-${m[1].padStart(2,'0')}T12:00:00.000Z`;
-}
-
-// ─── 1. Detección de tipo ─────────────────────────────────────────────────────
+// ─── 1. Detector de tipo de contenido ────────────────────────────────────────
 export function detectContentType(text) {
   if (!text || typeof text !== 'string') return 'unknown';
   const t = text.trim();
 
-  // JSON: detectar subtipo por sourceFormat o por campos presentes
+  if (t.startsWith('http')) {
+    if (t.includes('/inbox/'))   return 'url_inbox';
+    if (t.includes('vinted.es') || t.includes('vinted.com')) return 'url_product';
+  }
+
   if (t.startsWith('[') || t.startsWith('{')) {
     try {
       const parsed = JSON.parse(t);
-      const arr = Array.isArray(parsed) ? parsed : [parsed];
-      if (arr.length > 0) {
-        const first = arr[0];
-        // Formato D: JSON de scriptVentasActuales (json_sales_current)
-        if (first.sourceFormat === 'json_sales_current' ||
-           (first.orderId && first.type === 'venta' && !first.date && first.imageUrl !== undefined)) {
-          return 'json_sales_current';
-        }
-        // Formato E: JSON de scriptHistorialVentas (json_sales_history)
-        if (first.sourceFormat === 'json_sales_history' ||
-           (first.orderId && (first.type === 'venta' || first.type === 'compra') && first.date !== undefined && first.imageUrl === undefined)) {
-          return 'json_sales_history';
-        }
-        // Formato C: JSON de productos del escaparate
-        if (first.id !== undefined || (first.title && !first.orderId)) {
-          return 'json_products';
-        }
-        // Genérico con orderId pero sin sourceFormat conocido
-        if (first.orderId) return 'json_sales_history';
+      const arr    = Array.isArray(parsed) ? parsed : [parsed];
+      if (arr.length === 0) return 'unknown';
+      const first  = arr[0];
+
+      if (first.sourceFormat === 'json_sales_current') return 'json_sales_current';
+      if (first.sourceFormat === 'json_sales_history') return 'json_sales_history';
+      if (first.id && (first.price !== undefined || first.images)) return 'json_products';
+
+      if (first.orderId) {
+        const hasDate = arr.some(r => r.date && typeof r.date === 'string' && r.date.includes('T'));
+        return hasDate ? 'json_sales_history' : 'json_sales_current';
       }
-    } catch { /* no es JSON válido */ }
+
+      // [MIGRATION_MANAGER] Detectar export completo de BBDD
+      if (first.exportedBy?.includes('ResellHub') && Array.isArray(first.products)) {
+        return 'json_full_export';
+      }
+    } catch { /* no es JSON */ }
   }
 
-  // URL de producto Vinted
-  if (/^https?:\/\/(www\.)?vinted\.(es|fr|com|de|pl|be|nl|it|pt|at|cz|sk|hu|ro|lt|lv|ee)\/items?\//i.test(t))
-    return 'url_product';
-
-  // URL de pedido
-  if (/^https?:\/\/(www\.)?vinted\.[a-z]+\/inbox\//i.test(t))
-    return 'url_inbox';
-
-  // Formato A: HTML historial año actual (data-testid="my-orders-item")
-  if (t.includes('my-orders-item') || t.includes('data-testid="my-orders-item'))
-    return 'html_sales_current';
-
-  // Formato B: HTML historial general (pile__element o Cell__title + Compra/Venta)
-  if (t.includes('pile__element') ||
-     (t.includes('Cell__title') && (t.includes('Compra') || t.includes('Venta'))))
-    return 'html_sales_history';
-
-  // HTML genérico de Vinted
-  if (t.includes('web_ui__Cell') || t.includes('vinted.net/t/'))
+  if (t.includes('<!DOCTYPE html') || t.includes('<html')) {
+    if (t.includes('my-orders'))  return 'html_sales_current';
+    if (t.includes('balance'))    return 'html_sales_history';
     return 'html_generic';
+  }
 
   return 'unknown';
 }
 
-// ─── 2. Parser Formato A: "Mis pedidos / Año actual" ─────────────────────────
-/**
- * El estado real viene del SVG <title>Estado de la transacción: Completada</title>
- * El precio viene en Text__subtitle (primer h3 con valor numérico)
- * La fecha de venta NO está disponible en este formato → soldDateReal = null
- */
-export function parseHtmlSalesCurrent(html) {
-  const results = [];
-  if (!html) return results;
-
-  // Cada item está separado por un href=/inbox/N
-  const itemRegex = /href="\/inbox\/(\d+)"[^>]*>([\s\S]*?)(?=href="\/inbox\/\d+"|$)/g;
-  let match;
-
-  while ((match = itemRegex.exec(html)) !== null) {
-    const orderId = match[1];
-    const block   = match[2];
-
-    // Título: en data-testid="my-orders-item--title"
-    const titleMatch = block.match(/data-testid="my-orders-item--title"[^>]*>([\s\S]*?)<\/div>/) ||
-                       block.match(/Cell__title[^>]*>([\s\S]*?)<\/div>/);
-    const title = titleMatch ? stripTags(titleMatch[1]) : 'Artículo desconocido';
-
-    // Precio: primera h3 con Text__subtitle que tenga valor numérico
-    const priceBlocks = [...block.matchAll(/Text__subtitle[^>]*>([\s\S]*?)<\/h3>/g)];
-    let soldPriceReal = 0;
-    for (const pb of priceBlocks) {
-      const v = parseEuros(stripTags(pb[1]));
-      if (v > 0) { soldPriceReal = v; break; }
-    }
-
-    // Estado: desde SVG <title>Estado de la transacción: X</title>
-    const svgStatus = block.match(/<title>Estado de la transacci[oó]n:\s*([^<]+)<\/title>/i);
-    // Fallback: texto "Pedido finalizado"
-    const pedidoStatus = block.match(/Pedido\s+(finalizado|en proceso|cancelado|devuelto)/i);
-    let status = 'desconocido';
-    if (svgStatus) {
-      const raw = svgStatus[1].trim().toLowerCase();
-      if (raw.includes('complet') || raw.includes('finaliz')) status = 'completada';
-      else if (raw.includes('proceso')) status = 'en_proceso';
-      else if (raw.includes('cancel')) status = 'cancelada';
-      else status = svgStatus[1].trim();
-    } else if (pedidoStatus) {
-      const raw = pedidoStatus[1].toLowerCase();
-      status = raw.includes('finaliz') ? 'completada' : raw.includes('proceso') ? 'en_proceso' : 'cancelada';
-    }
-
-    // Imagen
-    const imgMatch = block.match(/src="(https:\/\/images\d*\.vinted\.net[^"]+)"/);
-    const imageUrl = imgMatch ? imgMatch[1] : null;
-
-    // Nota: soldDateReal NO está disponible en Formato A
-    // El usuario deberá confirmarla en el modal de edición
-    results.push({
-      orderId,
-      title,
-      soldPriceReal,
-      amount: soldPriceReal,          // alias para compatibilidad de UI
-      type:         'venta',
-      status,
-      date:         null,             // ← No disponible en Formato A
-      soldDateReal: null,             // ← El usuario lo completa en la app
-      imageUrl,
-      sourceFormat: 'html_current',
-    });
+// ─── 2. HTML stubs (compatibilidad) ──────────────────────────────────────────
+export function parseVintedContent(text) {
+  const type = detectContentType(text);
+  switch (type) {
+    case 'json_sales_current': return { type, items: parseJsonSalesCurrent(text), products: null };
+    case 'json_sales_history': return { type, items: parseJsonSalesHistory(text), products: null };
+    case 'json_products':      return { type, items: null, products: parseJsonProducts(text) };
+    default:                   return { type, items: [], products: null };
   }
-
-  return results;
 }
 
-// ─── 3. Parser Formato B: "Historial de transacciones" ───────────────────────
-/**
- * Estructura real del HTML:
- *   <a href="/inbox/N">
- *     <div class="Cell__content">
- *       <div class="Cell__title">Compra|Venta</div>
- *       <div class="Cell__body">Título artículo</div>
- *     </div>
- *     <div class="Cell__suffix">
- *       <div>
- *         <h2 class="...Text__warning">-24,85 €</h2>
- *         24 de febrero de 2026
- *       </div>
- *     </div>
- *   </a>
- */
-export function parseHtmlSalesHistory(html) {
-  const results = [];
-  if (!html) return results;
-
-  // Split por cada href de inbox para obtener bloques individuales
-  const itemRegex = /href="\/inbox\/(\d+)"[^>]*>([\s\S]*?)(?=href="\/inbox\/\d+"|<\/li>|$)/g;
-  let match;
-
-  while ((match = itemRegex.exec(html)) !== null) {
-    const orderId = match[1];
-    const block   = match[2];
-
-    // Tipo (Compra / Venta) — en Cell__heading > Cell__title
-    const typeMatch = block.match(/Cell__title[^>]*>([\s\S]*?)<\/div>/);
-    const typeRaw   = typeMatch ? stripTags(typeMatch[1]).toLowerCase() : '';
-    const type      = typeRaw.includes('venta') ? 'venta' : typeRaw.includes('compra') ? 'compra' : 'unknown';
-
-    // Título del artículo — en Cell__body
-    const bodyMatch = block.match(/Cell__body[^>]*>([\s\S]*?)<\/div>/);
-    const title     = bodyMatch ? stripTags(bodyMatch[1]) : 'Artículo desconocido';
-
-    // Sufijo: contiene el importe (h2) + la fecha (texto plano después del h2)
-    const suffixMatch = block.match(/Cell__suffix[^>]*>([\s\S]*?)(?:<\/div>\s*<\/div>\s*<\/a>|$)/);
-    let amount = 0;
-    let date   = null;
-
-    if (suffixMatch) {
-      const suffixContent = suffixMatch[1];
-
-      // Importe desde cualquier h2
-      const h2Match = suffixContent.match(/<h2[^>]*>([\s\S]*?)<\/h2>/);
-      if (h2Match) {
-        const rawAmt = stripTags(h2Match[1]);
-        const parsed = parseEuros(rawAmt);
-        // Normalizar: ventas positivas, compras negativas
-        amount = type === 'venta' ? Math.abs(parsed) : -Math.abs(parsed);
-      }
-
-      // Fecha: texto que queda después de eliminar el h2 y sus tags
-      const afterH2 = suffixContent.replace(/<h2[\s\S]*?<\/h2>/, '');
-      const dateText = stripTags(afterH2);
-      date = parseSpanishDate(dateText);
-    }
-
-    results.push({
-      orderId,
-      title,
-      amount,
-      soldPriceReal: type === 'venta' ? Math.abs(amount) : null,
-      type,
-      status:       type === 'venta' ? 'completada' : 'pagado',
-      date,
-      soldDateReal: type === 'venta' ? date : null,
-      imageUrl:     null,             // Formato B no incluye imágenes
-      sourceFormat: 'html_history',
-    });
-  }
-
-  return results;
-}
-
-// ─── 4. Parser Formato C: JSON del script de consola ─────────────────────────
-/**
- * El script produce un array JSON con:
- *   { id, title, brand, price, description, images, status, views, favorites, soldDate, createdAt }
- * Lo pasamos directamente a DatabaseService.importFromVinted() que ya conoce este schema.
- * Solo validamos y normalizamos campos críticos.
- */
+// ─── 3. Parser JSON escaparate (Modo C) ───────────────────────────────────────
 export function parseJsonProducts(text) {
   try {
     const raw = typeof text === 'string' ? JSON.parse(text) : text;
     const arr = Array.isArray(raw) ? raw : [raw];
-
     return arr
       .filter(p => p && (p.id || p.title))
       .map(p => ({
         ...p,
-        id:              p.id          || `vinted_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
-        title:           (p.title      || 'Sin título').trim(),
-        brand:           (p.brand      || 'Genérico').trim(),
-        price:           parseFloat(p.price) || 0,
-        description:     (p.description || p.title || '').trim(),
-        images:          Array.isArray(p.images) ? p.images : (p.images ? [p.images] : []),
-        status:          p.status === 'sold' ? 'sold' : 'available',
-        views:           parseInt(p.views)     || 0,
-        favorites:       parseInt(p.favorites) || 0,
-        soldDate:        p.soldDate     || null,
-        soldDateReal:    p.soldDateReal || p.soldDate || null,
-        soldPriceReal:   p.soldPriceReal || p.price  || null,
-        createdAt:       p.createdAt    || new Date().toISOString(),
+        id:            p.id || `vinted_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        title:         (p.title      || 'Sin título').trim(),
+        brand:         (p.brand      || 'Genérico').trim(),
+        // [QA_ENGINEER] precio nunca negativo en escaparate
+        price:         Math.max(0, parseFloat(p.price) || 0),
+        description:   (p.description || p.title || '').trim(),
+        images:        Array.isArray(p.images) ? p.images : (p.images ? [p.images] : []),
+        status:        p.status === 'sold' ? 'sold' : 'available',
+        views:         parseInt(p.views)     || 0,
+        favorites:     parseInt(p.favorites) || 0,
+        soldDate:      p.soldDate     || null,
+        soldDateReal:  p.soldDateReal || p.soldDate || null,
+        // [QA_ENGINEER] soldPriceReal null si no viene o es <= 0
+        soldPriceReal: (p.soldPriceReal != null && parseFloat(p.soldPriceReal) > 0)
+          ? parseFloat(p.soldPriceReal)
+          : null,
+        createdAt:     p.createdAt    || new Date().toISOString(),
       }));
   } catch (e) {
     LogService.error('VintedParserService.parseJsonProducts', LOG_CTX.IMPORT, e);
@@ -298,104 +143,241 @@ export function parseJsonProducts(text) {
   }
 }
 
-// ─── 4b. Parser Formato D: JSON de scriptVentasActuales ──────────────────────
-/**
- * Normaliza el JSON generado por scriptVentasActuales.js
- * sourceFormat: 'json_sales_current'
- * Campos: orderId, title, amount, type, status, date(null), imageUrl
- */
+// ─── 4. Parser JSON ventas actuales (Modo D) ──────────────────────────────────
 export function parseJsonSalesCurrent(text) {
   try {
     const raw = typeof text === 'string' ? JSON.parse(text) : text;
     const arr = Array.isArray(raw) ? raw : [raw];
-    return arr
-      .filter(r => r && r.orderId)
-      .map(r => ({
-        orderId:      String(r.orderId),
-        title:        (r.title   || 'Artículo desconocido').trim(),
-        amount:       parseFloat(r.amount) || 0,
-        soldPriceReal:parseFloat(r.amount) || 0,
-        type:         r.type  || 'venta',
-        status:       r.status|| 'completada',
-        date:         r.date  || null,       // null → usuario introduce fecha en app
-        soldDateReal: r.soldDateReal || null,
-        imageUrl:     r.imageUrl    || null,
-        sourceFormat: 'json_sales_current',
-      }));
+
+    let filteredNegative = 0;
+    const result = arr
+      .filter(r => {
+        if (!r || !r.orderId) return false;
+        // [QA_ENGINEER] Filtrar compras
+        if ((r.type || '').toLowerCase() === 'compra') return false;
+        // [QA_ENGINEER] Filtrar precios negativos o cero
+        const amt = parseFloat(r.amount || 0);
+        if (amt <= 0) { filteredNegative++; return false; }
+        return true;
+      })
+      .map(r => {
+        const amt = parseFloat(r.amount || 0);
+        const soldPrice = Math.max(MIN_VALID_PRICE, parseFloat(r.soldPriceReal || 0) || amt);
+        return {
+          orderId:       String(r.orderId),
+          title:         (r.title || 'Artículo desconocido').trim(),
+          amount:        amt,
+          soldPriceReal: soldPrice,
+          type:          r.type  || 'venta',
+          status:        r.status || 'completada',
+          date:          r.date  || null,
+          soldDateReal:  r.soldDateReal || null,
+          imageUrl:      r.imageUrl    || null,
+          sourceFormat:  'json_sales_current',
+        };
+      });
+
+    if (filteredNegative > 0) {
+      LogService.add(
+        `⚠️ parseJsonSalesCurrent: ${filteredNegative} items con precio ≤ 0 descartados`,
+        'warn',
+      );
+    }
+    return result;
   } catch (e) {
     LogService.error('VintedParserService.parseJsonSalesCurrent', LOG_CTX.IMPORT, e);
     return [];
   }
 }
 
-// ─── 4c. Parser Formato E: JSON de scriptHistorialVentas ──────────────────────
-/**
- * Normaliza el JSON generado por scriptHistorialVentas.js
- * sourceFormat: 'json_sales_history'
- * Campos: orderId, title, amount, type, date(ISO), soldPriceReal, soldDateReal
- */
+// ─── 5. Parser JSON historial completo (Modo E) ───────────────────────────────
 export function parseJsonSalesHistory(text) {
   try {
     const raw = typeof text === 'string' ? JSON.parse(text) : text;
     const arr = Array.isArray(raw) ? raw : [raw];
-    return arr
-      .filter(r => r && r.orderId)
+
+    let filteredNegative = 0;
+    const result = arr
+      .filter(r => {
+        if (!r || !r.orderId) return false;
+        const typ = (r.type || '').toLowerCase();
+        // [QA_ENGINEER] Filtrar ventas con precio negativo o cero
+        if (typ === 'venta') {
+          const amt = parseFloat(r.amount || 0);
+          const spr = parseFloat(r.soldPriceReal || 0);
+          if (amt <= 0 && spr <= 0) { filteredNegative++; return false; }
+        }
+        return true;
+      })
       .map(r => {
-        const amt = parseFloat(r.amount) || 0;
-        const typ = r.type || 'desconocido';
+        const amt  = parseFloat(r.amount || 0);
+        const typ  = (r.type || 'desconocido').toLowerCase();
+
+        // [QA_ENGINEER] soldPriceReal siempre >= MIN_VALID_PRICE para ventas
+        const rawSoldPrice = parseFloat(r.soldPriceReal || 0) || Math.abs(amt);
+        const soldPriceReal = typ === 'venta'
+          ? Math.max(MIN_VALID_PRICE, rawSoldPrice)
+          : null;
+
+        const soldDateReal = r.soldDateReal || (typ === 'venta' ? r.date : null);
+
         return {
           orderId:      String(r.orderId),
           title:        (r.title || 'Artículo desconocido').trim(),
+          // [QA_ENGINEER] amount: positivo para ventas, negativo para compras
           amount:       typ === 'venta' ? Math.abs(amt) : -Math.abs(amt),
-          soldPriceReal:typ === 'venta' ? Math.abs(amt) : null,
+          soldPriceReal,
           type:         typ,
           status:       r.status || (typ === 'venta' ? 'completada' : 'pagado'),
           date:         r.date   || null,
-          soldDateReal: r.soldDateReal || (typ === 'venta' ? r.date : null),
+          soldDateReal,
           imageUrl:     null,
           sourceFormat: 'json_sales_history',
         };
       });
+
+    if (filteredNegative > 0) {
+      LogService.add(
+        `⚠️ parseJsonSalesHistory: ${filteredNegative} ventas con precio ≤ 0 descartadas`,
+        'warn',
+      );
+    }
+    return result;
   } catch (e) {
     LogService.error('VintedParserService.parseJsonSalesHistory', LOG_CTX.IMPORT, e);
     return [];
   }
 }
 
-// ─── 5. Dispatcher principal ──────────────────────────────────────────────────
-export function parseVintedContent(text) {
-  const type = detectContentType(text);
-  switch (type) {
-    case 'html_sales_current':  return { type, items: parseHtmlSalesCurrent(text),   products: null };
-    case 'html_sales_history':  return { type, items: parseHtmlSalesHistory(text),   products: null };
-    case 'json_sales_current':  return { type, items: parseJsonSalesCurrent(text),   products: null };
-    case 'json_sales_history':  return { type, items: parseJsonSalesHistory(text),   products: null };
-    case 'json_products':       return { type, items: null, products: parseJsonProducts(text) };
-    case 'html_generic': {
-      const a = parseHtmlSalesCurrent(text);
-      const b = parseHtmlSalesHistory(text);
-      return { type, items: [...a, ...b], products: null };
-    }
-    default: return { type, items: [], products: null };
+// ─── 6. matchHistoryToInventory — Sprint 8 fix + Sprint 9 filtro ─────────────
+/**
+ * [ARCHITECT] + [DATA_SCIENTIST] + [QA_ENGINEER]
+ *
+ * Cruza VintedSaleItems (ventas) con el inventario local.
+ * Sprint 8: usa DatabaseService.updateSaleData() (bypass MANUAL_FIELDS).
+ * Sprint 9: filtra explícitamente soldPriceReal <= 0 antes de actualizar.
+ */
+export function matchHistoryToInventory(saleItems) {
+  const result = { matched: 0, created: 0, skipped: 0, errors: 0, filteredNegative: 0 };
+
+  try {
+    const allProducts = DatabaseService.getAllProducts();
+
+    const normalize = (s) => (s || '')
+      .toLowerCase()
+      .replace(/\p{Emoji}/gu, '')
+      .replace(/[^\w\sáéíóúüñ]/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const titleIndex = new Map();
+    allProducts.forEach((p, idx) => {
+      const key = normalize(p.title);
+      if (key.length < 3) return;
+      if (!titleIndex.has(key)) titleIndex.set(key, []);
+      titleIndex.get(key).push(idx);
+    });
+
+    const orderIdIndex = new Map();
+    allProducts.forEach((p, idx) => {
+      const m = String(p.id).match(/(\d{8,})/);
+      if (m) orderIdIndex.set(m[1], idx);
+    });
+
+    const updatedSet = new Set();
+
+    saleItems.forEach(item => {
+      // [QA_ENGINEER] Skip compras
+      if (!item.orderId || item.type === 'compra') {
+        result.skipped++;
+        return;
+      }
+
+      // [QA_ENGINEER] FILTRO CLAVE: no importar precios negativos o cero
+      if (!item.soldPriceReal || item.soldPriceReal <= 0) {
+        result.filteredNegative++;
+        LogService.add(
+          `⛔ matchHistory: "${item.title}" descartado — soldPriceReal inválido (${item.soldPriceReal})`,
+          'warn',
+        );
+        return;
+      }
+
+      // [QA_ENGINEER] Skip si no tiene datos útiles
+      if (!item.soldPriceReal && !item.soldDateReal) {
+        result.skipped++;
+        return;
+      }
+
+      try {
+        let matchIdx = -1;
+
+        // Prioridad 1: orderId embebido en product.id
+        if (orderIdIndex.has(item.orderId)) {
+          matchIdx = orderIdIndex.get(item.orderId);
+        }
+
+        // Prioridad 2: título normalizado
+        if (matchIdx === -1) {
+          const key     = normalize(item.title);
+          const indices = titleIndex.get(key) || [];
+          if (indices.length === 1) {
+            matchIdx = indices[0];
+          } else if (indices.length > 1) {
+            const soldIdx = indices.find(i => allProducts[i]?.status === 'sold');
+            matchIdx = soldIdx !== undefined ? soldIdx : indices[indices.length - 1];
+          }
+        }
+
+        if (matchIdx === -1) {
+          const newProd = mapToInventoryProduct(item);
+          DatabaseService.importFromVinted([newProd]);
+          result.created++;
+          return;
+        }
+
+        if (!updatedSet.has(matchIdx)) {
+          const prod = allProducts[matchIdx];
+          // [ARCHITECT] updateSaleData bypasa MANUAL_FIELDS_SOLD
+          DatabaseService.updateSaleData(prod.id, {
+            soldPriceReal: item.soldPriceReal,
+            soldDateReal:  item.soldDateReal || (!prod.soldDateReal ? item.date : undefined),
+            status: 'sold',
+          });
+          updatedSet.add(matchIdx);
+          result.matched++;
+        } else {
+          result.skipped++;
+        }
+      } catch (innerErr) {
+        LogService.error('matchHistoryToInventory item', LOG_CTX.IMPORT, innerErr);
+        result.errors++;
+      }
+    });
+
+    LogService.add(
+      `✅ matchHistory: ${result.matched} matches · ${result.created} creados · ${result.skipped} skip · ${result.filteredNegative} filtrados(precio≤0) · ${result.errors} err`,
+      'success',
+    );
+  } catch (e) {
+    LogService.error('matchHistoryToInventory', LOG_CTX.IMPORT, e);
+    result.errors++;
   }
+
+  return result;
 }
 
-// alias retrocompatible (Sprint 5)
-export function parseVintedHtml(html) {
-  const r = parseVintedContent(html);
-  return r.items || [];
-}
+// ─── 7. Mappers ──────────────────────────────────────────────────────────────
 
-// ─── 6. Mappers ───────────────────────────────────────────────────────────────
-
-/** VintedSaleItem → InternalProduct (para importFromVinted) */
 export function mapToInventoryProduct(item) {
   const now = new Date().toISOString();
+  // [QA_ENGINEER] Precio siempre positivo
+  const safePrice = Math.max(MIN_VALID_PRICE, Math.abs(item.soldPriceReal || item.amount || 0));
   return {
     id:              `vinted_${item.orderId}`,
     title:           item.title,
     brand:           '',
-    price:           Math.abs(item.soldPriceReal || item.amount || 0),
+    price:           safePrice,
     description:     '',
     images:          item.imageUrl ? [item.imageUrl] : [],
     status:          'sold',
@@ -403,7 +385,7 @@ export function mapToInventoryProduct(item) {
     favorites:       0,
     soldDate:        item.soldDateReal || item.date || now,
     soldDateReal:    item.soldDateReal || item.date || null,
-    soldPriceReal:   item.soldPriceReal || Math.abs(item.amount || 0),
+    soldPriceReal:   safePrice,
     createdAt:       item.soldDateReal  || item.date || now,
     firstUploadDate: item.soldDateReal  || item.date || now,
     category:        'Otros',
@@ -416,49 +398,52 @@ export function mapToInventoryProduct(item) {
   };
 }
 
-/** VintedSaleItem → SaleRecord (para VintedSalesDB) */
 export function mapToSaleRecord(item) {
   const now = new Date().toISOString();
+  // [QA_ENGINEER] Precio siempre positivo en el record
+  const safePrice = Math.max(MIN_VALID_PRICE, Math.abs(item.soldPriceReal || item.amount || 0));
   return {
-    id:           genId(),
-    orderId:      item.orderId,
-    title:        item.title,
-    amount:       item.amount,
-    soldPriceReal:item.soldPriceReal || Math.abs(item.amount || 0),
-    soldDateReal: item.soldDateReal  || item.date || null,
-    type:         item.type,
-    date:         item.date || now,
-    imageUrl:     item.imageUrl,
-    status:       item.status,
-    importedAt:   now,
-    sourceFormat: item.sourceFormat,
-    // Placeholders fase 2:
-    // monthYear:       (item.date || now).slice(0, 7),
-    // category:        null,
-    // profit:          null,
-    // linkedProductId: null,
+    id:            genId(),
+    orderId:       item.orderId,
+    title:         item.title,
+    amount:        item.amount,
+    soldPriceReal: safePrice,
+    soldDateReal:  item.soldDateReal  || item.date || null,
+    type:          item.type,
+    date:          item.date || now,
+    imageUrl:      item.imageUrl,
+    status:        item.status,
+    importedAt:    now,
+    sourceFormat:  item.sourceFormat,
   };
 }
 
-// ─── 7. VintedSalesDB — Historial económico (MMKV) ────────────────────────────
+// ─── 8. VintedSalesDB — Historial económico (MMKV) ────────────────────────────
 export const VintedSalesDB = {
   saveRecords(records) {
     try {
       const raw      = storage.getString(KEYS.SALES_HISTORY);
       const existing = raw ? JSON.parse(raw) : [];
       const existIds = new Set(existing.map(r => r.orderId));
-      let inserted = 0, duplicates = 0;
+      let inserted = 0, duplicates = 0, filteredNeg = 0;
       const merged = [...existing];
       records.forEach(r => {
+        // [QA_ENGINEER] No guardar registros con precio inválido (ventas)
+        if (r.type === 'venta' && (!r.soldPriceReal || r.soldPriceReal <= 0)) {
+          // Intentar rescatar con amount
+          if (!r.amount || r.amount <= 0) { filteredNeg++; return; }
+          r.soldPriceReal = Math.abs(r.amount);
+        }
         if (existIds.has(r.orderId)) { duplicates++; }
         else { merged.push(r); existIds.add(r.orderId); inserted++; }
       });
       storage.set(KEYS.SALES_HISTORY, JSON.stringify(merged));
-      LogService.success(`VintedSalesDB: +${inserted} (${duplicates} dup)`, LOG_CTX.IMPORT);
-      return { inserted, duplicates };
+      const msg = `💰 VintedSalesDB: +${inserted} (${duplicates} dup${filteredNeg > 0 ? `, ${filteredNeg} filtrados` : ''})`;
+      LogService.add(msg, 'success');
+      return { inserted, duplicates, filteredNeg };
     } catch (e) {
       LogService.error('VintedSalesDB.saveRecords', LOG_CTX.IMPORT, e);
-      return { inserted: 0, duplicates: 0 };
+      return { inserted: 0, duplicates: 0, filteredNeg: 0 };
     }
   },
 
@@ -467,19 +452,57 @@ export const VintedSalesDB = {
     catch { return []; }
   },
 
+  /**
+   * [DATA_SCIENTIST] getStats() corregido:
+   * BUG FIX: usaba r.date en lugar de r.soldDateReal para agrupar por mes.
+   * r.date puede ser null en Modo D. Ahora: soldDateReal || date.
+   * NUEVO: también agrupa por año (byYear).
+   */
   getStats() {
-    const all    = this.getAllRecords();
-    const ventas = all.filter(r => r.type === 'venta');
-    const compras= all.filter(r => r.type === 'compra');
-    const totalV = ventas.reduce( (s,r) => s + (r.amount  || 0), 0);
-    const totalC = compras.reduce((s,r) => s + Math.abs(r.amount || 0), 0);
+    const all     = this.getAllRecords();
+    const ventas  = all.filter(r => r.type === 'venta');
+    const compras = all.filter(r => r.type === 'compra');
+
+    // [QA_ENGINEER] Usar soldPriceReal para ventas, no amount (que puede ser negativo)
+    const totalV = ventas.reduce((s, r)  => s + Math.max(0, r.soldPriceReal || r.amount || 0), 0);
+    const totalC = compras.reduce((s, r) => s + Math.abs(r.amount || 0), 0);
+
     const byMonth = {};
+    const byYear  = {};
+
     all.forEach(r => {
-      const key = (r.date || '').slice(0, 7) || 'unknown';
-      if (!byMonth[key]) byMonth[key] = { ventas: 0, compras: 0, count: 0 };
-      if (r.type === 'venta')  { byMonth[key].ventas  += r.amount  || 0; byMonth[key].count++; }
-      if (r.type === 'compra') { byMonth[key].compras += Math.abs(r.amount || 0); byMonth[key].count++; }
+      // [DATA_SCIENTIST] FIX: usar soldDateReal primero para agrupar
+      const dateStr = r.soldDateReal || r.date || '';
+      const monthKey = dateStr.slice(0, 7) || 'unknown'; // "2026-02"
+      const yearKey  = dateStr.slice(0, 4) || 'unknown'; // "2026"
+
+      // Por mes
+      if (!byMonth[monthKey]) byMonth[monthKey] = { ventas: 0, compras: 0, count: 0, revenue: 0 };
+      if (r.type === 'venta') {
+        const v = Math.max(0, r.soldPriceReal || r.amount || 0);
+        byMonth[monthKey].ventas  += v;
+        byMonth[monthKey].revenue += v;
+        byMonth[monthKey].count++;
+      }
+      if (r.type === 'compra') {
+        byMonth[monthKey].compras += Math.abs(r.amount || 0);
+        byMonth[monthKey].count++;
+      }
+
+      // Por año
+      if (!byYear[yearKey]) byYear[yearKey] = { ventas: 0, compras: 0, count: 0, revenue: 0 };
+      if (r.type === 'venta') {
+        const v = Math.max(0, r.soldPriceReal || r.amount || 0);
+        byYear[yearKey].ventas  += v;
+        byYear[yearKey].revenue += v;
+        byYear[yearKey].count++;
+      }
+      if (r.type === 'compra') {
+        byYear[yearKey].compras += Math.abs(r.amount || 0);
+        byYear[yearKey].count++;
+      }
     });
+
     return {
       totalRecords:   all.length,
       totalVentas:    ventas.length,
@@ -488,16 +511,36 @@ export const VintedSalesDB = {
       gastos:         +totalC.toFixed(2),
       balance:        +(totalV - totalC).toFixed(2),
       byMonth,
+      byYear,
     };
+  },
+
+  /**
+   * [DATA_SCIENTIST] NUEVO: getAnnualStats()
+   * Retorna array ordenado de años para usar en AdvancedStatsScreen.
+   */
+  getAnnualStats() {
+    const stats = this.getStats();
+    return Object.entries(stats.byYear)
+      .filter(([y]) => y !== 'unknown' && y.length === 4)
+      .map(([year, d]) => ({
+        year:           parseInt(year),
+        label:          year,
+        ingresos:       +(d.ventas.toFixed(2)),
+        gastos:         +(d.compras.toFixed(2)),
+        balance:        +((d.ventas - d.compras).toFixed(2)),
+        totalVentas:    d.count,
+      }))
+      .sort((a, b) => b.year - a.year);
   },
 
   clear() {
     storage.delete(KEYS.SALES_HISTORY);
-    LogService.warn('VintedSalesDB: historial borrado', LOG_CTX.IMPORT);
+    LogService.add('⚠️ VintedSalesDB: historial borrado', 'warn');
   },
 };
 
-// ─── 8. Log de importaciones ──────────────────────────────────────────────────
+// ─── 9. Log de importaciones ──────────────────────────────────────────────────
 export function logImportEvent(type, count, details = {}) {
   try {
     const raw  = storage.getString(KEYS.IMPORT_LOG);
