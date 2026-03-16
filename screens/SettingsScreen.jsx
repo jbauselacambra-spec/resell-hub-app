@@ -101,6 +101,178 @@ const SaveBtn = ({ onPress }) => (
   </TouchableOpacity>
 );
 
+
+function CatCardExpanded({ cat, data, onDelete, onUpdateTags, onAddSubcategory, onDeleteSubcategory }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const [newSubName, setNewSubName] = React.useState('');
+  const [newTagText, setNewTagText] = React.useState('');
+
+  const subcats = Object.keys(data?.subcategories || {});
+  const tags    = data?.tags || [];
+
+  const addTag = () => {
+    const t = newTagText.trim();
+    if (!t || tags.includes(t)) return;
+    onUpdateTags([...tags, t]);
+    setNewTagText('');
+  };
+
+  const removeTag = (tag) => onUpdateTags(tags.filter(t => t !== tag));
+
+  const addSub = () => {
+    if (!newSubName.trim()) return;
+    if (subcats.includes(newSubName.trim())) return;
+    onAddSubcategory(newSubName.trim());
+    setNewSubName('');
+  };
+
+  return (
+    <View style={styles.catCardDB}>
+      {/* Header: nombre + expand + delete */}
+      <TouchableOpacity
+        style={styles.catCardHeader}
+        onPress={() => setExpanded(e => !e)}
+        activeOpacity={0.7}
+      >
+        <Icon
+          name={expanded ? 'chevron-down' : 'chevron-right'}
+          size={14}
+          color={C.blue}
+          style={{ marginRight: 6 }}
+        />
+        <Text style={[styles.catCardName, { flex: 1 }]}>{cat}</Text>
+        {subcats.length > 0 && (
+          <View style={{
+            backgroundColor: C.blueBg || '#EAF2FB',
+            borderRadius: 10,
+            paddingHorizontal: 7,
+            paddingVertical: 2,
+            marginRight: 6,
+          }}>
+            <Text style={{ fontSize: 10, fontWeight: '800', color: C.blue }}>
+              {subcats.length} subs
+            </Text>
+          </View>
+        )}
+        <TouchableOpacity
+          onPress={onDelete}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Icon name="trash-2" size={14} color={C.danger} />
+        </TouchableOpacity>
+      </TouchableOpacity>
+
+      {/* Tags de la categoría */}
+      {tags.length > 0 && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 4, marginTop: 4 }}>
+          {tags.map(tag => (
+            <TouchableOpacity
+              key={tag}
+              onPress={() => removeTag(tag)}
+              style={{
+                backgroundColor: C.surface2 || '#F0F2F5',
+                borderRadius: 10,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <Text style={{ fontSize: 10, color: C.textMed || '#5C6070' }}>{tag}</Text>
+              <Icon name="x" size={9} color={C.textLow || '#A0A5B5'} />
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {/* Sección expandible */}
+      {expanded && (
+        <View style={{ marginTop: 8 }}>
+
+          {/* Añadir tag */}
+          <View style={styles.addCatRow}>
+            <TextInput
+              style={[styles.addCatInput, { flex: 1, fontSize: 12, paddingVertical: 6 }]}
+              placeholder="Añadir tag..."
+              placeholderTextColor={C.gray500}
+              value={newTagText}
+              onChangeText={setNewTagText}
+              onSubmitEditing={addTag}
+            />
+            <TouchableOpacity
+              style={[styles.addCatBtn, { backgroundColor: C.blue || '#004E89' }]}
+              onPress={addTag}
+              activeOpacity={0.7}
+            >
+              <Icon name="tag" size={13} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Subcategorías */}
+          <Text style={{
+            fontSize: 9,
+            fontWeight: '900',
+            color: C.textLow || '#A0A5B5',
+            letterSpacing: 1.2,
+            marginTop: 12,
+            marginBottom: 6,
+          }}>
+            SUBCATEGORÍAS
+          </Text>
+
+          {subcats.length === 0 && (
+            <Text style={{ fontSize: 11, color: C.textLow || '#A0A5B5', marginBottom: 8 }}>
+              Sin subcategorías — añade la primera abajo
+            </Text>
+          )}
+
+          {subcats.map(sub => (
+            <View key={sub} style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: C.surface2 || '#F0F2F5',
+              borderRadius: 10,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              marginBottom: 6,
+            }}>
+              <Icon name="corner-down-right" size={12} color={C.blue} style={{ marginRight: 8 }} />
+              <Text style={{ flex: 1, fontSize: 13, fontWeight: '700', color: C.text || '#1A1A2E' }}>
+                {sub}
+              </Text>
+              <TouchableOpacity onPress={() => onDeleteSubcategory(sub)}>
+                <Icon name="x" size={13} color={C.danger} />
+              </TouchableOpacity>
+            </View>
+          ))}
+
+          {/* Input nueva subcategoría */}
+          <View style={styles.addCatRow}>
+            <TextInput
+              style={[styles.addCatInput, { flex: 1, fontSize: 12, paddingVertical: 6 }]}
+              placeholder="Nueva subcategoría..."
+              placeholderTextColor={C.gray500}
+              value={newSubName}
+              onChangeText={setNewSubName}
+              onSubmitEditing={addSub}
+            />
+            <TouchableOpacity
+              style={styles.addCatBtn}
+              onPress={addSub}
+              activeOpacity={0.7}
+            >
+              <Icon name="plus" size={14} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+
+        </View>
+      )}
+    </View>
+  );
+}
+
+
 // ─── Pantalla principal ───────────────────────────────────────────────────────
 export default function SettingsScreen({ navigation }) {
   const [activeTab, setActiveTab] = useState('thresholds');
@@ -533,77 +705,94 @@ export default function SettingsScreen({ navigation }) {
   };
 
   // ─── RENDER: Tab Categorías ──────────────────────────────────────────────
-  const renderCategories = () => {
-    const catNames = Object.keys(dictionary);
-    const handleSaveDictionary = () => {
-  // 1. Construir formato plano legacy { [cat]: string[] }
-  const legacy = {};
-  for (const [cat, val] of Object.entries(dictionary)) {
-    legacy[cat] = Array.isArray(val.tags) ? val.tags : [];
-  }
- 
-  // 2. Guardar AMBOS formatos usando DatabaseService (instancia MMKV correcta)
-  const okFull   = DatabaseService.saveFullDictionary(dictionary); // custom_dictionary_full
-  const okLegacy = DatabaseService.saveDictionary(legacy);         // custom_dictionary
- 
-  if (okFull && okLegacy) {
-    LogService.add(`📚 Diccionario guardado: ${catNames.length} categorías`, 'success');
-    Alert.alert(
-      '✅ Categorías guardadas',
-      `${catNames.length} categorías actualizadas correctamente.`,
-    );
-  } else {
-    Alert.alert(
-      '⚠️ Error al guardar',
-      'No se pudieron guardar todas las categorías. Revisa los Logs.',
-    );
-  }
-};
+ // ─── RENDER: Tab Categorías ──────────────────────────────────────────────
+const renderCategories = () => {
+  const catNames = Object.keys(dictionary);
 
-    return (
-      <View>
-        <SectionTitle>Diccionario de Categorías</SectionTitle>
-
-        {catNames.map(cat => (
-          <View key={cat} style={styles.catCardDB}>
-            <View style={styles.catCardHeader}>
-              <Text style={styles.catCardName}>{cat}</Text>
-              <TouchableOpacity onPress={() => {
-                const d = { ...dictionary };
-                delete d[cat];
-                setDictionary(d);
-              }} activeOpacity={0.7}>
-                <Icon name="trash-2" size={14} color={C.danger} />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.catCardTags}>
-              {(dictionary[cat]?.tags || []).join(', ') || 'Sin etiquetas'}
-            </Text>
-          </View>
-        ))}
-
-        <View style={styles.addCatRow}>
-          <TextInput
-            style={styles.addCatInput}
-            placeholder="Nueva categoría..."
-            placeholderTextColor={C.gray500}
-            value={newCatName}
-            onChangeText={setNewCatName}
-          />
-          <TouchableOpacity style={styles.addCatBtn}
-            onPress={() => {
-              if (!newCatName.trim()) return;
-              setDictionary(d => ({ ...d, [newCatName.trim()]: { tags: [], subcategories: {} } }));
-              setNewCatName('');
-            }} activeOpacity={0.7}>
-            <Icon name="plus" size={16} color="#FFF" />
-          </TouchableOpacity>
-        </View>
-
-        <SaveBtn onPress={handleSaveDictionary} />
-      </View>
-    );
+  const handleSaveDictionary = () => {
+    const legacy = {};
+    for (const [cat, val] of Object.entries(dictionary)) {
+      legacy[cat] = Array.isArray(val.tags) ? val.tags : [];
+    }
+    const okFull   = DatabaseService.saveFullDictionary(dictionary);
+    const okLegacy = DatabaseService.saveDictionary(legacy);
+    if (okFull && okLegacy) {
+      LogService.add(`📚 Diccionario guardado: ${catNames.length} categorías`, 'success');
+      Alert.alert('✅ Categorías guardadas', `${catNames.length} categorías actualizadas correctamente.`);
+    } else {
+      Alert.alert('⚠️ Error al guardar', 'No se pudieron guardar todas las categorías. Revisa los Logs.');
+    }
   };
+
+  return (
+    <View>
+      <SectionTitle>Diccionario de Categorías</SectionTitle>
+
+      {catNames.map(cat => (
+        <CatCardExpanded
+          key={cat}
+          cat={cat}
+          data={dictionary[cat]}
+          onDelete={() => {
+            const d = { ...dictionary };
+            delete d[cat];
+            setDictionary(d);
+          }}
+          onUpdateTags={(tags) => {
+            setDictionary(d => ({ ...d, [cat]: { ...d[cat], tags } }));
+          }}
+          onAddSubcategory={(subName) => {
+            if (!subName.trim()) return;
+            setDictionary(d => ({
+              ...d,
+              [cat]: {
+                ...d[cat],
+                subcategories: {
+                  ...(d[cat]?.subcategories || {}),
+                  [subName.trim()]: { tags: [] },
+                },
+              },
+            }));
+          }}
+          onDeleteSubcategory={(subName) => {
+            setDictionary(d => {
+              const subs = { ...(d[cat]?.subcategories || {}) };
+              delete subs[subName];
+              return { ...d, [cat]: { ...d[cat], subcategories: subs } };
+            });
+          }}
+        />
+      ))}
+
+      {/* Añadir nueva categoría */}
+      <View style={styles.addCatRow}>
+        <TextInput
+          style={styles.addCatInput}
+          placeholder="Nueva categoría..."
+          placeholderTextColor={C.gray500}
+          value={newCatName}
+          onChangeText={setNewCatName}
+        />
+        <TouchableOpacity
+          style={styles.addCatBtn}
+          onPress={() => {
+            if (!newCatName.trim()) return;
+            setDictionary(d => ({
+              ...d,
+              [newCatName.trim()]: { tags: [], subcategories: {} },
+            }));
+            setNewCatName('');
+          }}
+          activeOpacity={0.7}
+        >
+          <Icon name="plus" size={16} color="#FFF" />
+        </TouchableOpacity>
+      </View>
+
+      <SaveBtn onPress={handleSaveDictionary} />
+    </View>
+  );
+};
 
   // ─── RENDER: Tab Import ──────────────────────────────────────────────────
   const renderImport = () => (
