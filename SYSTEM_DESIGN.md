@@ -3518,3 +3518,98 @@ Co-authored-by: [QA_ENGINEER] [ARCHITECT] [LIBRARIAN]"
 
 git checkout main && git merge --no-ff fix/sprint10-navigation-revert
 ```
+
+## 📋 Sprint 11 — Migración a Claude Projects + CLAUDE.md
+
+> **Sprint 11 · Infraestructura de Agentes**
+> Rama: `feature/sprint11-claude-projects-migration`
+> Fecha: Marzo 2026
+
+---
+
+### [ORCHESTRATOR] — Análisis
+
+```
+TAREA:        Migrar sistema multiagente de Cursor a Claude Projects
+TIPO:         DOCS + INFRAESTRUCTURA
+COMPLEJIDAD:  MEDIA
+MODO:         PAIR — [AI_ARCHITECT] + [LIBRARIAN]
+PRIORIDAD:    ALTA
+```
+
+---
+
+### [AI_ARCHITECT] — Cambio de metodología
+
+A partir de este sprint el sistema multiagente opera desde **Claude Projects** (claude.ai)
+en lugar de Cursor IDE exclusivamente. Ambos sistemas son compatibles y complementarios:
+
+| Herramienta | Uso |
+|-------------|-----|
+| **Claude Projects** | Conversaciones de análisis, planificación de sprints, documentación, generación de ficheros |
+| **Cursor IDE** | Edición directa de código con `resellhub_v4.2.mdc` activo |
+| **Claude Code** | CLI para tareas automatizadas y agentic coding |
+
+### Nuevo fichero: `CLAUDE.md`
+
+Creado en la raíz del proyecto. Es el equivalente de `resellhub_v4.2.mdc` para Claude Projects.
+Contiene: protocolo [ORCHESTRATOR], las 7 reglas de hierro, mapa de ficheros, estado Sprint 10.1,
+directorio de agentes, changelog completo y checklist pre-entrega.
+
+### Nueva skill: `SYS-003-claude_projects_integration`
+
+Añadida a `.claude/skills/`. Define:
+- Protocolo de lectura al iniciar sesión
+- Diferencias Cursor vs Claude Projects
+- Cómo referenciar ficheros del project knowledge
+- Auto-diagnóstico de contexto
+
+### [LIBRARIAN] — Ficheros generados/modificados
+
+| Fichero | Tipo | Cambio |
+|---------|------|--------|
+| `CLAUDE.md` | **NUEVO** | Fichero de entrada para Claude Projects/Code |
+| `.claude/skills/SYS-003-claude_projects_integration.md` | **NUEVO** | Skill de integración Claude |
+| `skills.json` | **PATCH** | Añadir SYS-003 al catálogo del AI_ARCHITECT |
+| `SYSTEM_DESIGN.md` | Actualizado | Sprint 11 añadido |
+
+### Parche skills.json — añadir bajo `AI_ARCHITECT.skills`:
+
+```json
+{
+  "id": "SYS-003",
+  "name": "claude_projects_integration",
+  "description": "Protocolo de operación de Claude en Projects/Code. Define orden de lectura de ficheros, activación de agentes y diferencias con Cursor IDE.",
+  "trigger": "Primera petición de cada sesión en Claude Projects o Claude Code",
+  "output": "Cabecera [ORCHESTRATOR] + agentes activados + confirmación de contexto leído"
+}
+```
+
+### Git Workflow — Sprint 11
+
+```bash
+git checkout -b feature/sprint11-claude-projects-migration
+
+git add CLAUDE.md
+git add .claude/skills/SYS-003-claude_projects_integration.md
+git add skills.json
+git add SYSTEM_DESIGN.md
+
+git commit -m "feat(sprint11): CLAUDE.md + SYS-003 skill + migración a Claude Projects
+
+[AI_ARCHITECT]
+- CLAUDE.md: fichero de entrada canónico para Claude Projects/Code
+  Contiene: protocolo ORCHESTRATOR, 7 reglas de hierro, estado Sprint 10.1,
+  directorio agentes, changelog sprints 1-10, checklist pre-entrega
+- SYS-003-claude_projects_integration.md: skill nueva en .claude/skills/
+  Define protocolo lectura, diferencias Cursor vs Projects, auto-diagnóstico
+- skills.json: SYS-003 añadida al catálogo AI_ARCHITECT
+
+[LIBRARIAN]
+- SYSTEM_DESIGN.md: Sprint 11 documentado
+- Compatibilidad total: Cursor (.mdc) y Claude Projects (CLAUDE.md) coexisten
+
+Co-authored-by: [AI_ARCHITECT] [LIBRARIAN]"
+
+git checkout main && git merge --no-ff feature/sprint11-claude-projects-migration
+```
