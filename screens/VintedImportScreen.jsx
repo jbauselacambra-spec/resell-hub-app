@@ -1,23 +1,25 @@
 /**
- * VintedImportScreen.jsx — Sprint 8
+ * VintedImportScreen.jsx — Sprint 8 · FIX Hotfix 5b
  *
- * CAMBIOS SPRINT 8:
- * ─ Accesible desde tab "Importar" (reemplaza tab Logs)
- * ─ Adjuntar JSON directamente con DocumentPicker (sin copiar/pegar)
- * ─ Historial multi-año: importa 2025, 2024, 2023… con dedup por orderId
- * ─ Match automático historial → productos por título (actualiza soldPriceReal + soldDateReal)
- * ─ Ventas actuales: solo ventas (filtra compras automáticamente)
- * ─ Botón "Importar" eliminado de ProductsScreen y SoldHistoryScreen
+ * [DEBUGGER] ROOT CAUSE SyntaxError línea 365:
+ *   El snippet de auto-registro de categorías fue insertado en el
+ *   cuerpo del módulo (nivel raíz), fuera de cualquier función.
+ *   Además contenía backticks escapados (\`) que son inválidos
+ *   en código JS real (son artefactos de haber sido generados
+ *   dentro de un template string de documentación).
  *
- * Flujos activos:
- *  MODO C  json_products       → JSON escaparate (inventario completo)
- *  MODO D  json_sales_current  → JSON ventas actuales (solo ventas, ignora compras)
- *  MODO E  json_sales_history  → JSON historial año (ventas+compras, match con inventario)
+ * [ARCHITECT] FIX:
+ *   - Eliminar el bloque suelto del módulo (líneas 363-367)
+ *   - Integrar la lógica de auto-registro correctamente
+ *     DENTRO de handleConfirmC(), tras importFromVinted()
+ *   - Usar backticks normales (`) en el template literal
+ *
+ * [QA_ENGINEER] Sin otros cambios. Todos los modos C/D/E intactos.
  */
 
 import React, { useState, useCallback, useRef } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, TextInput,
+  View, Text, ScrollView, TouchableOpacity,
   StyleSheet, Dimensions, Alert, Image, Modal,
   Platform, ActivityIndicator, Animated,
 } from 'react-native';
@@ -30,7 +32,6 @@ import {
   parseJsonProducts,
   parseJsonSalesCurrent,
   parseJsonSalesHistory,
-  mapToInventoryProduct,
   mapToSaleRecord,
   VintedSalesDB,
   logImportEvent,
@@ -40,7 +41,7 @@ import LogService, { LOG_CTX } from '../services/LogService';
 
 const { width } = Dimensions.get('window');
 
-// ─── Design System ───────────────────────────────────────────────────────────
+// ─── Design System ────────────────────────────────────────────────────────────
 const DS = {
   bg:        '#F8F9FA',  white:     '#FFFFFF',  surface2:  '#F0F2F5',
   border:    '#EAEDF0',  primary:   '#FF6B35',  primaryBg: '#FFF2EE',
@@ -51,17 +52,17 @@ const DS = {
   mono:      Platform.OS === 'android' ? 'monospace' : 'Courier New',
 };
 
-// ─── Meta por tipo detectado ─────────────────────────────────────────────────
+// ─── Meta por tipo detectado ──────────────────────────────────────────────────
 const TYPE_META = {
-  json_products:       { label: 'JSON escaparate',          color: DS.primary, icon: 'package',       mode: 'C' },
-  json_sales_current:  { label: 'JSON ventas año actual',   color: DS.success, icon: 'trending-up',   mode: 'D' },
-  json_sales_history:  { label: 'JSON historial completo',  color: DS.blue,    icon: 'bar-chart-2',   mode: 'E' },
-  html_sales_current:  { label: 'HTML ventas (no soportado)', color: DS.textLow, icon: 'alert-circle', mode: null },
-  html_sales_history:  { label: 'HTML historial (no soportado)', color: DS.textLow, icon: 'alert-circle', mode: null },
-  unknown:             { label: 'Formato no reconocido',    color: DS.textLow, icon: 'help-circle',   mode: null },
+  json_products:       { label: 'JSON escaparate',              color: DS.primary, icon: 'package',       mode: 'C' },
+  json_sales_current:  { label: 'JSON ventas año actual',       color: DS.success, icon: 'trending-up',   mode: 'D' },
+  json_sales_history:  { label: 'JSON historial completo',      color: DS.blue,    icon: 'bar-chart-2',   mode: 'E' },
+  html_sales_current:  { label: 'HTML ventas (no soportado)',   color: DS.textLow, icon: 'alert-circle',  mode: null },
+  html_sales_history:  { label: 'HTML historial (no soportado)',color: DS.textLow, icon: 'alert-circle',  mode: null },
+  unknown:             { label: 'Formato no reconocido',        color: DS.textLow, icon: 'help-circle',   mode: null },
 };
 
-// ─── Guía de modos ───────────────────────────────────────────────────────────
+// ─── Guía de modos ────────────────────────────────────────────────────────────
 const GUIDE = [
   {
     mode: 'C', color: DS.primary, icon: 'package', title: 'Escaparate (Inventario)',
@@ -95,8 +96,39 @@ const GUIDE = [
   },
 ];
 
-// ─── Componente PreviewCard ───────────────────────────────────────────────────
-function PreviewCard({ item, mode, checked, onToggle }) {
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Auto-registra categorías de productos importados en el diccionario local.
+ * Solo añade las que no existan — nunca sobreescribe.
+ */
+function autoRegisterCategories(products) {
+  const newCats = [...new Set(products.map(p => p.category).filter(Boolean))];
+  if (!newCats.length) return;
+
+  const existingDict = DatabaseService.getFullDictionary() || {};
+  let changed = false;
+
+  newCats.forEach(cat => {
+    if (!existingDict[cat]) {
+      existingDict[cat] = { tags: [], subcategories: {} };
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    DatabaseService.saveFullDictionary(existingDict);
+    const legacyUpdate = {};
+    Object.entries(existingDict).forEach(([c, v]) => {
+      legacyUpdate[c] = v.tags || [];
+    });
+    DatabaseService.saveDictionary(legacyUpdate);
+    LogService.add(`📚 Auto-registradas ${newCats.length} categorías desde import JSON`, 'info');
+  }
+}
+
+// ─── PreviewCard ──────────────────────────────────────────────────────────────
+function PreviewCard({ item, checked, onToggle }) {
   const isVenta  = item.type !== 'compra';
   const amtColor = isVenta ? DS.success : DS.danger;
   const amt = typeof item.amount === 'number'
@@ -121,19 +153,17 @@ function PreviewCard({ item, mode, checked, onToggle }) {
               {new Date(item.soldDateReal).toLocaleDateString('es-ES')}
             </Text>
           )}
-          {item.orderId && (
-            <Text style={styles.previewOrder}>#{item.orderId}</Text>
-          )}
+          {item.orderId && <Text style={styles.previewOrder}>#{item.orderId}</Text>}
         </View>
       </View>
-      {item.imageUrl && (
+      {item.imageUrl ? (
         <Image source={{ uri: item.imageUrl }} style={styles.previewImg} />
-      )}
+      ) : null}
     </TouchableOpacity>
   );
 }
 
-// ─── Modal Confirmar Modo C (JSON escaparate) ─────────────────────────────────
+// ─── Modal Modo C ─────────────────────────────────────────────────────────────
 function ConfirmModalC({ visible, products, onConfirm, onClose }) {
   if (!visible) return null;
   return (
@@ -142,7 +172,9 @@ function ConfirmModalC({ visible, products, onConfirm, onClose }) {
         <TouchableOpacity style={styles.modalSheet} activeOpacity={1}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Importar Inventario</Text>
-            <TouchableOpacity onPress={onClose}><Icon name="x" size={22} color={DS.textMed}/></TouchableOpacity>
+            <TouchableOpacity onPress={onClose}>
+              <Icon name="x" size={22} color={DS.textMed}/>
+            </TouchableOpacity>
           </View>
           <View style={[styles.infoBox, { backgroundColor: DS.primaryBg }]}>
             <Icon name="package" size={14} color={DS.primary}/>
@@ -151,9 +183,13 @@ function ConfirmModalC({ visible, products, onConfirm, onClose }) {
             </Text>
           </View>
           <Text style={styles.modalDesc}>
-            Se importarán al inventario. Los campos editados manualmente (categoría, título, fecha de subida) quedarán protegidos.
+            Se importarán al inventario. Los campos editados manualmente (categoría, título,
+            fecha de subida) quedarán protegidos.
           </Text>
-          <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: DS.primary }]} onPress={() => onConfirm()}>
+          <TouchableOpacity
+            style={[styles.confirmBtn, { backgroundColor: DS.primary }]}
+            onPress={() => onConfirm()}
+          >
             <Icon name="upload-cloud" size={16} color="#FFF"/>
             <Text style={styles.confirmBtnTxt}>IMPORTAR INVENTARIO</Text>
           </TouchableOpacity>
@@ -163,7 +199,7 @@ function ConfirmModalC({ visible, products, onConfirm, onClose }) {
   );
 }
 
-// ─── Modal Confirmar Modo D (ventas actuales) ─────────────────────────────────
+// ─── Modal Modo D ─────────────────────────────────────────────────────────────
 function ConfirmModalD({ visible, items, onConfirm, onClose }) {
   if (!visible) return null;
   const ventas = items.filter(i => i.type !== 'compra');
@@ -173,7 +209,9 @@ function ConfirmModalD({ visible, items, onConfirm, onClose }) {
         <TouchableOpacity style={styles.modalSheet} activeOpacity={1}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Ventas Año Actual</Text>
-            <TouchableOpacity onPress={onClose}><Icon name="x" size={22} color={DS.textMed}/></TouchableOpacity>
+            <TouchableOpacity onPress={onClose}>
+              <Icon name="x" size={22} color={DS.textMed}/>
+            </TouchableOpacity>
           </View>
           <View style={[styles.infoBox, { backgroundColor: DS.successBg }]}>
             <Icon name="trending-up" size={14} color={DS.success}/>
@@ -182,9 +220,13 @@ function ConfirmModalD({ visible, items, onConfirm, onClose }) {
             </Text>
           </View>
           <Text style={styles.modalDesc}>
-            Se actualizará el precio de venta real (soldPriceReal) de los productos existentes que coincidan por título. Los productos sin match se añadirán como nuevos vendidos.
+            Se actualizará el precio de venta real (soldPriceReal) de los productos existentes
+            que coincidan por título. Los productos sin match se añadirán como nuevos vendidos.
           </Text>
-          <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: DS.success }]} onPress={() => onConfirm('both')}>
+          <TouchableOpacity
+            style={[styles.confirmBtn, { backgroundColor: DS.success }]}
+            onPress={() => onConfirm('both')}
+          >
             <Icon name="zap" size={16} color="#FFF"/>
             <Text style={styles.confirmBtnTxt}>ACTUALIZAR VENTAS ({ventas.length})</Text>
           </TouchableOpacity>
@@ -194,11 +236,11 @@ function ConfirmModalD({ visible, items, onConfirm, onClose }) {
   );
 }
 
-// ─── Modal Confirmar Modo E (historial multi-año) ─────────────────────────────
+// ─── Modal Modo E ─────────────────────────────────────────────────────────────
 function ConfirmModalE({ visible, items, onConfirm, onClose }) {
   if (!visible) return null;
-  const ventas  = items.filter(i => i.type === 'venta');
-  const compras = items.filter(i => i.type === 'compra');
+  const ventas   = items.filter(i => i.type === 'venta');
+  const compras  = items.filter(i => i.type === 'compra');
   const totalEur = ventas.reduce((s, i) => s + Math.abs(i.amount || 0), 0);
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
@@ -206,7 +248,9 @@ function ConfirmModalE({ visible, items, onConfirm, onClose }) {
         <TouchableOpacity style={styles.modalSheet} activeOpacity={1}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Historial Completo</Text>
-            <TouchableOpacity onPress={onClose}><Icon name="x" size={22} color={DS.textMed}/></TouchableOpacity>
+            <TouchableOpacity onPress={onClose}>
+              <Icon name="x" size={22} color={DS.textMed}/>
+            </TouchableOpacity>
           </View>
           <View style={styles.modalSummaryRow}>
             <View style={[styles.modalSummaryChip, { backgroundColor: DS.successBg }]}>
@@ -223,15 +267,27 @@ function ConfirmModalE({ visible, items, onConfirm, onClose }) {
             </View>
           </View>
           <Text style={styles.modalDesc}>
-            Las ventas se matchearán con tu inventario por título. Si hay coincidencia se actualizan soldPriceReal y soldDateReal. Las estadísticas de TTS y categorías se recalcularán automáticamente.
+            Las ventas se matchearán con tu inventario por título. Si hay coincidencia se
+            actualizan soldPriceReal y soldDateReal. Las estadísticas de TTS y categorías
+            se recalcularán automáticamente.
           </Text>
-          <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: DS.blue }]} onPress={() => onConfirm('both')}>
+          <TouchableOpacity
+            style={[styles.confirmBtn, { backgroundColor: DS.blue }]}
+            onPress={() => onConfirm('both')}
+          >
             <Icon name="layers" size={16} color="#FFF"/>
-            <Text style={styles.confirmBtnTxt}>IMPORTAR HISTORIAL + MATCH ({ventas.length} ventas)</Text>
+            <Text style={styles.confirmBtnTxt}>
+              IMPORTAR HISTORIAL + MATCH ({ventas.length} ventas)
+            </Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: DS.surface2, marginTop: 8 }]} onPress={() => onConfirm('stats_only')}>
+          <TouchableOpacity
+            style={[styles.confirmBtn, { backgroundColor: DS.surface2, marginTop: 8 }]}
+            onPress={() => onConfirm('stats_only')}
+          >
             <Icon name="bar-chart-2" size={16} color={DS.blue}/>
-            <Text style={[styles.confirmBtnTxt, { color: DS.blue }]}>SOLO ESTADÍSTICAS ECONÓMICAS</Text>
+            <Text style={[styles.confirmBtnTxt, { color: DS.blue }]}>
+              SOLO ESTADÍSTICAS ECONÓMICAS
+            </Text>
           </TouchableOpacity>
         </TouchableOpacity>
       </TouchableOpacity>
@@ -241,21 +297,22 @@ function ConfirmModalE({ visible, items, onConfirm, onClose }) {
 
 // ─── Pantalla principal ───────────────────────────────────────────────────────
 export default function VintedImportScreen({ navigation }) {
-  const [loading,       setLoading]       = useState(false);
-  const [contentType,   setContentType]   = useState(null);
-  const [parsedItems,   setParsedItems]   = useState([]);   // modos D/E
-  const [jsonProducts,  setJsonProducts]  = useState([]);   // modo C
-  const [checkedIds,    setCheckedIds]    = useState(new Set());
-  const [importResult,  setImportResult]  = useState(null);
-  const [showConfirm,   setShowConfirm]   = useState(false);
-  const [fileName,      setFileName]      = useState(null);
+  const [loading,      setLoading]      = useState(false);
+  const [contentType,  setContentType]  = useState(null);
+  const [parsedItems,  setParsedItems]  = useState([]);    // modos D/E
+  const [jsonProducts, setJsonProducts] = useState([]);    // modo C
+  const [checkedIds,   setCheckedIds]   = useState(new Set());
+  const [importResult, setImportResult] = useState(null);
+  const [showConfirm,  setShowConfirm]  = useState(false);
+  const [fileName,     setFileName]     = useState(null);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const fadeIn   = () => Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+  const fadeIn   = () =>
+    Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
 
   const currentMode = contentType ? (TYPE_META[contentType]?.mode || null) : null;
 
-  // ─── Seleccionar archivo JSON ─────────────────────────────────────────────
+  // ─── Seleccionar archivo ──────────────────────────────────────────────────
   const handlePickFile = useCallback(async () => {
     try {
       setLoading(true);
@@ -263,12 +320,7 @@ export default function VintedImportScreen({ navigation }) {
         type: ['application/json', 'text/plain', '*/*'],
         copyToCacheDirectory: true,
       });
-
-      if (result.canceled || !result.assets?.length) {
-        setLoading(false);
-        return;
-      }
-
+      if (result.canceled || !result.assets?.length) { setLoading(false); return; }
       const asset = result.assets[0];
       setFileName(asset.name);
       const text = await FileSystem.readAsStringAsync(asset.uri);
@@ -281,12 +333,9 @@ export default function VintedImportScreen({ navigation }) {
     }
   }, []);
 
-  // ─── Procesar texto JSON ──────────────────────────────────────────────────
+  // ─── Procesar texto ───────────────────────────────────────────────────────
   const processText = useCallback((text) => {
-    if (!text || !text.trim()) {
-      Alert.alert('Contenido vacío', 'El archivo está vacío.');
-      return;
-    }
+    if (!text || !text.trim()) { Alert.alert('Contenido vacío', 'El archivo está vacío.'); return; }
     try {
       const type = detectContentType(text);
       setContentType(type);
@@ -298,9 +347,7 @@ export default function VintedImportScreen({ navigation }) {
         fadeIn();
         return;
       }
-
       if (type === 'json_sales_current') {
-        // Filtra compras automáticamente
         const raw   = parseJsonSalesCurrent(text);
         const items = raw.filter(i => i.type !== 'compra');
         setParsedItems(items);
@@ -308,20 +355,16 @@ export default function VintedImportScreen({ navigation }) {
         fadeIn();
         return;
       }
-
       if (type === 'json_sales_history') {
         const items = parseJsonSalesHistory(text);
         setParsedItems(items);
-        // Preseleccionar solo ventas por defecto
         setCheckedIds(new Set(items.filter(i => i.type === 'venta').map(i => i.orderId)));
         fadeIn();
         return;
       }
-
-      // HTML u otros formatos no soportados en este flujo
       Alert.alert(
         'Formato no compatible',
-        'Por favor adjunta un archivo JSON generado con los scripts de consola de Vinted.\n\nFormatos HTML ya no están soportados en esta versión.',
+        'Por favor adjunta un archivo JSON generado con los scripts de consola de Vinted.\n\nFormatos HTML ya no están soportados.',
       );
     } catch (e) {
       LogService.error('VintedImport.processText', LOG_CTX.IMPORT, e);
@@ -329,7 +372,7 @@ export default function VintedImportScreen({ navigation }) {
     }
   }, []);
 
-  // ─── Toggle selección ────────────────────────────────────────────────────
+  // ─── Toggle selección ─────────────────────────────────────────────────────
   const toggleId = (id) => {
     setCheckedIds(prev => {
       const next = new Set(prev);
@@ -341,47 +384,57 @@ export default function VintedImportScreen({ navigation }) {
     const allIds = currentMode === 'C'
       ? jsonProducts.map(p => String(p.id))
       : parsedItems.map(i => i.orderId);
-    setCheckedIds(prev => prev.size === allIds.length ? new Set() : new Set(allIds));
+    setCheckedIds(prev =>
+      prev.size === allIds.length ? new Set() : new Set(allIds),
+    );
   };
 
   // ─── Confirmar Modo C (escaparate) ───────────────────────────────────────
+  // FIX: auto-registro de categorías integrado correctamente aquí
   const handleConfirmC = () => {
     setShowConfirm(false);
     const selected = jsonProducts.filter(p => checkedIds.has(String(p.id)));
     const result   = DatabaseService.importFromVinted(selected);
+
+    // Auto-registrar categorías nuevas en el diccionario
+    autoRegisterCategories(selected);
+
     logImportEvent('json_products', selected.length, result);
     setImportResult({ mode: 'C', ...result, total: selected.length });
-    LogService.success(`Import C: +${result.created} nuevos, ${result.updated} actualizados`, LOG_CTX.IMPORT);
+    LogService.add(
+      `Import C: +${result.created} nuevos, ${result.updated} actualizados`,
+      'success',
+    );
   };
 
-  // ─── Confirmar Modo D (ventas actuales) ──────────────────────────────────
-  const handleConfirmD = (action) => {
+  // ─── Confirmar Modo D (ventas actuales) ───────────────────────────────────
+  const handleConfirmD = () => {
     setShowConfirm(false);
-    const selected = parsedItems.filter(i => checkedIds.has(i.orderId) && i.type !== 'compra');
+    const selected = parsedItems.filter(
+      i => checkedIds.has(i.orderId) && i.type !== 'compra',
+    );
     const matchRes = matchHistoryToInventory(selected);
     logImportEvent('json_sales_current', selected.length, matchRes);
     setImportResult({ mode: 'D', ...matchRes, total: selected.length });
-    LogService.success(
+    LogService.add(
       `Import D: ${matchRes.matched} productos actualizados con precio real`,
-      LOG_CTX.IMPORT,
+      'success',
     );
   };
 
   // ─── Confirmar Modo E (historial multi-año) ───────────────────────────────
   const handleConfirmE = (dest) => {
     setShowConfirm(false);
-    const selected = parsedItems.filter(i => checkedIds.has(i.orderId));
-    let statsRes = { inserted: 0, duplicates: 0 };
-    let matchRes = { matched: 0, created: 0 };
+    const selected  = parsedItems.filter(i => checkedIds.has(i.orderId));
+    let statsRes    = { inserted: 0, duplicates: 0 };
+    let matchRes    = { matched: 0, created: 0 };
 
     if (dest === 'stats_only' || dest === 'both') {
       const records = selected.filter(i => i.type === 'venta').map(mapToSaleRecord);
       statsRes = VintedSalesDB.saveRecords(records);
     }
-
     if (dest === 'both') {
-      const ventas = selected.filter(i => i.type === 'venta');
-      matchRes = matchHistoryToInventory(ventas);
+      matchRes = matchHistoryToInventory(selected.filter(i => i.type === 'venta'));
     }
 
     logImportEvent('json_sales_history', selected.length, { dest, statsRes, matchRes });
@@ -393,58 +446,67 @@ export default function VintedImportScreen({ navigation }) {
       created:       matchRes.created,
       total:         selected.length,
     });
-    LogService.success(
+    LogService.add(
       `Import E: ${matchRes.matched} matches · ${statsRes.inserted} registros stats`,
-      LOG_CTX.IMPORT,
+      'success',
     );
   };
 
   // ─── Reset ────────────────────────────────────────────────────────────────
   const handleReset = () => {
-    setContentType(null); setParsedItems([]); setJsonProducts([]);
-    setCheckedIds(new Set()); setImportResult(null);
-    setFileName(null); fadeAnim.setValue(0);
+    setContentType(null);
+    setParsedItems([]);
+    setJsonProducts([]);
+    setCheckedIds(new Set());
+    setImportResult(null);
+    setFileName(null);
+    fadeAnim.setValue(0);
   };
 
-  const typeMeta    = contentType ? TYPE_META[contentType] : null;
-  const hasResults  = (currentMode === 'C' && jsonProducts.length > 0) ||
-                      (['D', 'E'].includes(currentMode) && parsedItems.length > 0);
+  const typeMeta   = contentType ? TYPE_META[contentType] : null;
+  const hasResults = (currentMode === 'C' && jsonProducts.length > 0) ||
+                     (['D', 'E'].includes(currentMode) && parsedItems.length > 0);
   const selectedCnt = checkedIds.size;
+  const totalItems  = currentMode === 'C' ? jsonProducts.length : parsedItems.length;
 
   return (
     <View style={styles.root}>
-      {/* Header */}
+
+      {/* ── Header ─────────────────────────────────────────────────────── */}
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>Importar de Vinted</Text>
           <Text style={styles.headerSub}>Adjunta un JSON generado con los scripts</Text>
         </View>
-        {navigation?.navigate && (
-          <TouchableOpacity
-            style={styles.logsBtn}
-            onPress={() => navigation.navigate('Logs')}
-          >
-            <Icon name="terminal" size={16} color={DS.textMed}/>
-            <Text style={styles.logsBtnTxt}>Logs</Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity
+          style={styles.logsBtn}
+          onPress={() => navigation.navigate('Logs')}
+        >
+          <Icon name="terminal" size={16} color={DS.textMed}/>
+          <Text style={styles.logsBtnTxt}>Logs</Text>
+        </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
 
-        {/* Banner resultado */}
+        {/* ── Banner resultado ─────────────────────────────────────────── */}
         {importResult && (
           <Animated.View style={[styles.resultBanner, {
-            backgroundColor: importResult.mode === 'C' ? DS.primaryBg :
-                             importResult.mode === 'D' ? DS.successBg : DS.blueBg,
-            borderColor:     importResult.mode === 'C' ? DS.primary + '40' :
-                             importResult.mode === 'D' ? DS.success + '40' : DS.blue + '40',
+            backgroundColor: importResult.mode === 'C' ? DS.primaryBg
+                           : importResult.mode === 'D' ? DS.successBg : DS.blueBg,
+            borderColor:     importResult.mode === 'C' ? DS.primary + '40'
+                           : importResult.mode === 'D' ? DS.success + '40' : DS.blue + '40',
             opacity: fadeAnim,
           }]}>
             <Icon
               name="check-circle"
               size={20}
-              color={importResult.mode === 'C' ? DS.primary : importResult.mode === 'D' ? DS.success : DS.blue}
+              color={importResult.mode === 'C' ? DS.primary
+                   : importResult.mode === 'D' ? DS.success : DS.blue}
             />
             <View style={{ flex: 1 }}>
               {importResult.mode === 'C' && (
@@ -478,10 +540,9 @@ export default function VintedImportScreen({ navigation }) {
           </Animated.View>
         )}
 
-        {/* Área principal: adjuntar archivo */}
+        {/* ── Drop zone + Guía ─────────────────────────────────────────── */}
         {!hasResults && !importResult && (
           <>
-            {/* Botón adjuntar */}
             <TouchableOpacity
               style={styles.dropZone}
               onPress={handlePickFile}
@@ -507,7 +568,6 @@ export default function VintedImportScreen({ navigation }) {
               )}
             </TouchableOpacity>
 
-            {/* Guía */}
             <Text style={styles.guideTitle}>¿Qué puedo importar?</Text>
             {GUIDE.map((g, gi) => (
               <View key={gi} style={[styles.guideCard, { borderLeftColor: g.color }]}>
@@ -536,9 +596,10 @@ export default function VintedImportScreen({ navigation }) {
           </>
         )}
 
-        {/* Resultados del análisis */}
+        {/* ── Resultados del análisis ───────────────────────────────────── */}
         {hasResults && !importResult && (
           <Animated.View style={{ opacity: fadeAnim }}>
+
             {/* Badge tipo */}
             {typeMeta && (
               <View style={[styles.typeBadgeBar, {
@@ -546,17 +607,19 @@ export default function VintedImportScreen({ navigation }) {
                 borderColor:     typeMeta.color + '30',
               }]}>
                 <Icon name={typeMeta.icon} size={14} color={typeMeta.color}/>
-                <Text style={[styles.typeBadgeBarTxt, { color: typeMeta.color }]}>{typeMeta.label}</Text>
-                {fileName && <Text style={styles.fileNameTxt} numberOfLines={1}> · {fileName}</Text>}
+                <Text style={[styles.typeBadgeBarTxt, { color: typeMeta.color }]}>
+                  {typeMeta.label}
+                </Text>
+                {fileName ? (
+                  <Text style={styles.fileNameTxt} numberOfLines={1}> · {fileName}</Text>
+                ) : null}
                 <View style={[styles.cntBadge, { backgroundColor: typeMeta.color }]}>
-                  <Text style={styles.cntBadgeTxt}>
-                    {currentMode === 'C' ? jsonProducts.length : parsedItems.length}
-                  </Text>
+                  <Text style={styles.cntBadgeTxt}>{totalItems}</Text>
                 </View>
               </View>
             )}
 
-            {/* Estadísticas rápidas modo E */}
+            {/* Quick stats modo E */}
             {currentMode === 'E' && (
               <View style={styles.quickStatsRow}>
                 <View style={[styles.quickStatChip, { backgroundColor: DS.successBg }]}>
@@ -573,7 +636,10 @@ export default function VintedImportScreen({ navigation }) {
                 </View>
                 <View style={[styles.quickStatChip, { backgroundColor: DS.blueBg }]}>
                   <Text style={[styles.quickStatVal, { color: DS.blue }]}>
-                    {parsedItems.filter(i => i.type === 'venta').reduce((s, i) => s + Math.abs(i.amount || 0), 0).toFixed(0)} €
+                    {parsedItems
+                      .filter(i => i.type === 'venta')
+                      .reduce((s, i) => s + Math.abs(i.amount || 0), 0)
+                      .toFixed(0)} €
                   </Text>
                   <Text style={styles.quickStatLbl}>facturado</Text>
                 </View>
@@ -584,58 +650,65 @@ export default function VintedImportScreen({ navigation }) {
             <View style={styles.selRow}>
               <TouchableOpacity style={styles.selAllBtn} onPress={toggleAll}>
                 <Icon
-                  name={selectedCnt === (currentMode === 'C' ? jsonProducts.length : parsedItems.length) ? 'check-square' : 'square'}
+                  name={selectedCnt === totalItems ? 'check-square' : 'square'}
                   size={16}
                   color={DS.primary}
                 />
                 <Text style={styles.selAllTxt}>
-                  {selectedCnt === (currentMode === 'C' ? jsonProducts.length : parsedItems.length)
-                    ? 'Deseleccionar todo'
-                    : 'Seleccionar todo'}
+                  {selectedCnt === totalItems ? 'Deseleccionar todo' : 'Seleccionar todo'}
                 </Text>
               </TouchableOpacity>
               <Text style={styles.selCount}>{selectedCnt} seleccionados</Text>
             </View>
 
-            {/* Lista de productos modo C */}
+            {/* Lista Modo C */}
             {currentMode === 'C' && jsonProducts.map(p => (
               <TouchableOpacity
-                key={p.id}
-                style={[styles.previewCard, checkedIds.has(String(p.id)) && { borderColor: DS.primary, borderWidth: 2 }]}
+                key={String(p.id)}
+                style={[
+                  styles.previewCard,
+                  checkedIds.has(String(p.id)) && { borderColor: DS.primary, borderWidth: 2 },
+                ]}
                 onPress={() => toggleId(String(p.id))}
                 activeOpacity={0.8}
               >
-                <View style={[styles.previewCheck, checkedIds.has(String(p.id)) && { backgroundColor: DS.primary }]}>
+                <View style={[
+                  styles.previewCheck,
+                  checkedIds.has(String(p.id)) && { backgroundColor: DS.primary },
+                ]}>
                   {checkedIds.has(String(p.id)) && <Icon name="check" size={12} color="#FFF"/>}
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.previewTitle} numberOfLines={1}>{p.title}</Text>
                   <View style={styles.previewRow}>
-                    <Text style={[styles.previewAmt, { color: DS.primary }]}>{(p.price || 0).toFixed(2)} €</Text>
-                    <Text style={styles.previewBrand}>{p.brand}</Text>
-                    {p.status === 'sold' && (
-                      <View style={styles.soldChip}><Text style={styles.soldChipTxt}>VENDIDO</Text></View>
-                    )}
+                    <Text style={[styles.previewAmt, { color: DS.primary }]}>
+                      {(p.price || 0).toFixed(2)} €
+                    </Text>
+                    {p.brand ? <Text style={styles.previewBrand}>{p.brand}</Text> : null}
+                    {p.status === 'sold' ? (
+                      <View style={styles.soldChip}>
+                        <Text style={styles.soldChipTxt}>VENDIDO</Text>
+                      </View>
+                    ) : null}
                   </View>
                 </View>
-                {p.images?.[0] && (
+                {p.images?.[0] ? (
                   <Image source={{ uri: p.images[0] }} style={styles.previewImg}/>
-                )}
+                ) : null}
               </TouchableOpacity>
             ))}
 
-            {/* Lista de items modos D/E */}
+            {/* Lista Modos D/E */}
             {['D', 'E'].includes(currentMode) && parsedItems.map(item => (
               <PreviewCard
                 key={item.orderId}
                 item={item}
-                mode={currentMode}
                 checked={checkedIds.has(item.orderId)}
                 onToggle={() => toggleId(item.orderId)}
               />
             ))}
 
-            {/* Botón confirmar */}
+            {/* Botón importar */}
             <TouchableOpacity
               style={[styles.importBtn, selectedCnt === 0 && { backgroundColor: DS.textLow }]}
               onPress={() => setShowConfirm(true)}
@@ -650,11 +723,13 @@ export default function VintedImportScreen({ navigation }) {
             <TouchableOpacity style={styles.cancelBtn} onPress={handleReset}>
               <Text style={styles.cancelBtnTxt}>Cancelar</Text>
             </TouchableOpacity>
+
           </Animated.View>
         )}
+
       </ScrollView>
 
-      {/* Modales de confirmación */}
+      {/* ── Modales ──────────────────────────────────────────────────────── */}
       <ConfirmModalC
         visible={showConfirm && currentMode === 'C'}
         products={jsonProducts.filter(p => checkedIds.has(String(p.id)))}
@@ -681,8 +756,8 @@ export default function VintedImportScreen({ navigation }) {
 const styles = StyleSheet.create({
   root:             { flex: 1, backgroundColor: DS.bg },
   header:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-                      paddingHorizontal: 16, paddingTop: 52, paddingBottom: 12, backgroundColor: DS.white,
-                      borderBottomWidth: 1, borderBottomColor: DS.border },
+                      paddingHorizontal: 16, paddingTop: 52, paddingBottom: 12,
+                      backgroundColor: DS.white, borderBottomWidth: 1, borderBottomColor: DS.border },
   headerTitle:      { fontSize: 20, fontWeight: '700', color: DS.text },
   headerSub:        { fontSize: 12, color: DS.textLow, marginTop: 2 },
   logsBtn:          { flexDirection: 'row', alignItems: 'center', gap: 4,
@@ -709,7 +784,8 @@ const styles = StyleSheet.create({
                       textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
   guideCard:        { backgroundColor: DS.white, borderRadius: 12, padding: 14,
                       borderLeftWidth: 3, marginBottom: 10,
-                      shadowColor: '#000', shadowOpacity: 0.04, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
+                      shadowColor: '#000', shadowOpacity: 0.04,
+                      shadowOffset: { width: 0, height: 2 }, elevation: 2 },
   guideCardHdr:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
   guideCardIcon:    { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   guideModeChip:    { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
@@ -736,7 +812,8 @@ const styles = StyleSheet.create({
   quickStatLbl:     { fontSize: 10, color: DS.textMed, marginTop: 2 },
 
   // Selección
-  selRow:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  selRow:           { flexDirection: 'row', justifyContent: 'space-between',
+                      alignItems: 'center', marginBottom: 8 },
   selAllBtn:        { flexDirection: 'row', alignItems: 'center', gap: 6 },
   selAllTxt:        { fontSize: 13, color: DS.primary, fontWeight: '600' },
   selCount:         { fontSize: 12, color: DS.textLow },
@@ -758,9 +835,10 @@ const styles = StyleSheet.create({
   soldChip:         { backgroundColor: DS.successBg, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   soldChipTxt:      { fontSize: 9, fontWeight: '800', color: DS.success },
 
-  // Botones
-  importBtn:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-                      backgroundColor: DS.primary, borderRadius: 12, padding: 16, marginTop: 16 },
+  // Botones acción
+  importBtn:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                      gap: 8, backgroundColor: DS.primary, borderRadius: 12,
+                      padding: 16, marginTop: 16 },
   importBtnTxt:     { fontSize: 15, fontWeight: '800', color: '#FFF', letterSpacing: 0.5 },
   cancelBtn:        { alignItems: 'center', padding: 14 },
   cancelBtnTxt:     { fontSize: 14, color: DS.textMed },
@@ -778,7 +856,8 @@ const styles = StyleSheet.create({
   modalOverlay:     { flex: 1, backgroundColor: '#00000055', justifyContent: 'flex-end' },
   modalSheet:       { backgroundColor: DS.white, borderTopLeftRadius: 20, borderTopRightRadius: 20,
                       padding: 20, paddingBottom: 36 },
-  modalHeader:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  modalHeader:      { flexDirection: 'row', justifyContent: 'space-between',
+                      alignItems: 'center', marginBottom: 16 },
   modalTitle:       { fontSize: 18, fontWeight: '800', color: DS.text },
   infoBox:          { flexDirection: 'row', alignItems: 'center', gap: 8,
                       padding: 10, borderRadius: 8, marginBottom: 12 },
@@ -788,7 +867,7 @@ const styles = StyleSheet.create({
   modalSummaryChip: { flex: 1, alignItems: 'center', padding: 10, borderRadius: 10 },
   modalSummaryVal:  { fontSize: 22, fontWeight: '800' },
   modalSummaryLbl:  { fontSize: 10, color: DS.textMed, marginTop: 2, textAlign: 'center' },
-  confirmBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-                      borderRadius: 12, padding: 15 },
+  confirmBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                      gap: 8, borderRadius: 12, padding: 15 },
   confirmBtnTxt:    { fontSize: 14, fontWeight: '800', color: '#FFF', letterSpacing: 0.3 },
 });

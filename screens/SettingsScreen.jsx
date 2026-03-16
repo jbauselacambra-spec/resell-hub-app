@@ -536,21 +536,29 @@ export default function SettingsScreen({ navigation }) {
   const renderCategories = () => {
     const catNames = Object.keys(dictionary);
     const handleSaveDictionary = () => {
-      const legacy = {};
-      for (const [cat, val] of Object.entries(dictionary)) { legacy[cat] = val.tags || []; }
-      DatabaseService.saveDictionary?.(legacy) || DatabaseService.saveConfig?.({ ...config, customDictionary: dictionary });
-      if (DatabaseService.saveDictionary) {
-        DatabaseService.saveDictionary(legacy);
-      }
-      // Guardar full dictionary
-      try {
-        const { MMKV } = require('react-native-mmkv');
-        const s = new MMKV();
-        s.set('custom_dictionary_full', JSON.stringify(dictionary));
-        s.set('custom_dictionary', JSON.stringify(legacy));
-      } catch { /* silent */ }
-      Alert.alert('✅ Categorías guardadas', `${catNames.length} categorías actualizadas.`);
-    };
+  // 1. Construir formato plano legacy { [cat]: string[] }
+  const legacy = {};
+  for (const [cat, val] of Object.entries(dictionary)) {
+    legacy[cat] = Array.isArray(val.tags) ? val.tags : [];
+  }
+ 
+  // 2. Guardar AMBOS formatos usando DatabaseService (instancia MMKV correcta)
+  const okFull   = DatabaseService.saveFullDictionary(dictionary); // custom_dictionary_full
+  const okLegacy = DatabaseService.saveDictionary(legacy);         // custom_dictionary
+ 
+  if (okFull && okLegacy) {
+    LogService.add(`📚 Diccionario guardado: ${catNames.length} categorías`, 'success');
+    Alert.alert(
+      '✅ Categorías guardadas',
+      `${catNames.length} categorías actualizadas correctamente.`,
+    );
+  } else {
+    Alert.alert(
+      '⚠️ Error al guardar',
+      'No se pudieron guardar todas las categorías. Revisa los Logs.',
+    );
+  }
+};
 
     return (
       <View>
