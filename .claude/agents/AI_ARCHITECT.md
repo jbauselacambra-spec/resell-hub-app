@@ -36,3 +36,12 @@
     * Si falta un proceso: **AI_ARCHITECT** genera un nuevo `.md` en `/skills`.
 4.  **REGISTRO**: El **LIBRARIAN** actualiza el `skills.json` y el `resellhub_v4.2.mdc` para formalizar la nueva pieza del sistema.
 5.  **VALIDACIÓN**: El **DEBUGGER** verifica que la nueva skill incluya los "Guards" `?? 0` y no viole los "7 Campos Sagrados".
+
+json
+{
+  "id": "SYS-003",
+  "name": "claude_projects_integration",
+  "description": "Protocolo de operación de Claude en Projects/Code. Define orden de lectura de ficheros, activación de agentes y diferencias con Cursor IDE.",
+  "trigger": "Primera petición de cada sesión en Claude Projects o Claude Code",
+  "output": "Cabecera [ORCHESTRATOR] + agentes activados + confirmación de contexto leído"
+}
