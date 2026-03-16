@@ -1,76 +1,42 @@
 /**
- * BackupService.js — Sprint 10
+ * BackupService.js — Sprint 10 · FIX BUG-A (Hotfix 5)
  *
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- * [ORCHESTRATOR] Sprint 10 — Persistencia ante rebuilds de APK
+ * [DEBUGGER] ROOT CAUSE BUG-A:
+ *   exportToShare() usaba Share.share({ message: json }) en Android.
+ *   Android 13+ limita el tamaño del campo "message" en intents.
+ *   Con 258 productos (~200KB JSON) el intent se trunca o falla
+ *   silenciosamente: el log dice "✅ exportado" pero el usuario no
+ *   ve ningún selector de apps (Drive, Gmail, WhatsApp...).
  *
- * [ARCHITECT] PROBLEMA RAÍZ:
- *   MMKV guarda los datos en el almacenamiento interno de la app
- *   (/data/data/com.resellhub/files). Este directorio se borra cuando:
- *     1. Se desinstala la app
- *     2. Se instala una build nueva con diferente applicationId o firma
- *     3. Se limpia la caché de la app desde Ajustes del sistema
- *   En desarrollo (eas build / expo run:android) con reinstalación
- *   forzada, los datos de MMKV se pierden.
+ * [ARCHITECT] FIX:
+ *   1. Escribir el JSON en FileSystem.cacheDirectory (fichero temporal)
+ *   2. Usar expo-sharing / Sharing.shareAsync(uri) → comparte el FICHERO
+ *      real, no el texto → Drive/Gmail lo reciben como adjunto .json
+ *   3. Fallback: si expo-sharing no está disponible → Share.share(text)
+ *      (compatibilidad con entornos sin expo-sharing)
+ *   4. Validación post-escritura: getInfoAsync() antes de compartir
  *
- * [ARCHITECT] SOLUCIÓN — Doble capa de persistencia:
- *
- *   CAPA 1 — MMKV (rápida, en memoria compartida):
- *     Fuente principal de datos durante la sesión activa.
- *     Se puede perder entre rebuilds.
- *
- *   CAPA 2 — FileSystem.documentDirectory (persistente):
- *     Directorio: /data/data/com.resellhub/files/documents/
- *     En Android, esta carpeta NO se borra al actualizar la APK
- *     siempre que no se desinstale manualmente.
- *     Fichero: resellhub_auto_backup.json
- *     Se escribe automáticamente tras cada modificación de datos.
- *
- *   CAPA 3 — Export manual (Share API / correo / Google Drive):
- *     El usuario puede exportar a cualquier lugar externo.
- *     Ya existía — ahora mejorado con indicador de estado.
- *
- * [MIGRATION_MANAGER] AUTO-RESTORE al arrancar:
- *   En App.jsx se llama BackupService.autoRestoreIfNeeded() al inicio.
- *   Lógica:
- *     1. Comprobar si MMKV tiene productos (normal = OK)
- *     2. Si MMKV vacío → buscar resellhub_auto_backup.json en documentDirectory
- *     3. Si existe y es válido → restaurar automáticamente
- *     4. Log de la operación (con timestamp y nº productos restaurados)
- *
- * [QA_ENGINEER] CONTRATOS:
- *   BackupService.triggerAutoBackup()  → void (no bloquea UI, fire-and-forget)
- *   BackupService.autoRestoreIfNeeded() → Promise<{ restored, products, source }>
- *   BackupService.getBackupInfo()       → { exists, date, products, sizeKB }
- *   BackupService.exportToShare()       → Promise<void> (Share API)
- *   BackupService.importFromFile()      → Promise<{ success, products, errors }>
- *
- * [LIBRARIAN] MÓDULOS USADOS:
- *   expo-file-system (ya instalado en package.json ~18.0.0)
- *   react-native Share (built-in RN)
- *   expo-document-picker (carga lazy — ya usado en SettingsScreen)
+ * [QA_ENGINEER] CONTRATOS MANTENIDOS:
+ *   BackupService.exportToShare(payload) → Promise<void>
+ *   BackupService.importFromFile(fn)     → Promise<{success,...}>
+ *   BackupService.triggerAutoBackup(fn)  → void (fire-and-forget)
+ *   BackupService.autoRestoreIfNeeded(fn1,fn2) → Promise<{restored,...}>
+ *   BackupService.getBackupInfo()        → Promise<{exists,date,...}>
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  */
 
 import * as FileSystem from 'expo-file-system';
-import { Share, Platform } from 'react-native';
+import { Share, Platform, Alert } from 'react-native';
 import LogService from './LogService';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
-
-// documentDirectory sobrevive a actualizaciones de APK en Android
-// (se borra solo si el usuario desinstala manualmente la app)
-const BACKUP_DIR      = FileSystem.documentDirectory;
-const BACKUP_FILENAME = 'resellhub_auto_backup.json';
-const BACKUP_PATH     = `${BACKUP_DIR}${BACKUP_FILENAME}`;
-
-// Versión del schema de backup — para migraciones futuras
+const BACKUP_DIR           = FileSystem.documentDirectory;
+const BACKUP_FILENAME      = 'resellhub_auto_backup.json';
+const BACKUP_PATH          = `${BACKUP_DIR}${BACKUP_FILENAME}`;
 const BACKUP_SCHEMA_VERSION = '10.0';
-
-// Tiempo mínimo entre backups automáticos (ms) — evita escrituras excesivas
 const AUTO_BACKUP_DEBOUNCE_MS = 3000;
 
-// ─── Debounce interno ─────────────────────────────────────────────────────────
 let _debounceTimer = null;
 
 // ─── BackupService ────────────────────────────────────────────────────────────
@@ -79,166 +45,160 @@ export class BackupService {
   /**
    * [ARCHITECT] Escribe el backup automático en documentDirectory.
    * Se llama con debounce desde DatabaseService tras cada escritura.
-   * Es fire-and-forget: no bloquea la UI ni lanza excepciones al caller.
-   *
-   * @param {Function} getDatabasePayload — función que retorna el payload
-   *   (se pasa como callback para evitar circular dependency con DatabaseService)
+   * Fire-and-forget: no bloquea la UI.
    */
   static triggerAutoBackup(getDatabasePayload) {
-    // Debounce: si se llama varias veces seguidas, solo escribe una vez
     if (_debounceTimer) clearTimeout(_debounceTimer);
     _debounceTimer = setTimeout(async () => {
       try {
         const payload = getDatabasePayload();
         if (!payload) return;
-        const enriched = {
+        const data = JSON.stringify({
           ...payload,
-          backupSchemaVersion: BACKUP_SCHEMA_VERSION,
-          autoBackupAt: new Date().toISOString(),
-          exportedBy: 'ResellHub_autoBackup_v10',
-        };
-        await FileSystem.writeAsStringAsync(
-          BACKUP_PATH,
-          JSON.stringify(enriched),
-          { encoding: FileSystem.EncodingType.UTF8 },
-        );
+          schemaVersion: BACKUP_SCHEMA_VERSION,
+          autoBackupAt:  new Date().toISOString(),
+          exportedBy:    'ResellHub_exportFullDatabase_v9',
+        });
+        await FileSystem.writeAsStringAsync(BACKUP_PATH, data, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+        // Validación post-escritura
+        const info = await FileSystem.getInfoAsync(BACKUP_PATH);
+        if (!info.exists || info.size === 0) {
+          LogService.add('⚠️ Auto-backup: fichero vacío tras escritura', 'warn');
+          return;
+        }
         LogService.add(
-          `💾 Auto-backup: ${payload.products?.length || 0} productos → ${BACKUP_FILENAME}`,
-          'info',
+          `💾 Auto-backup: ${payload.products?.length || 0} productos (${Math.round(info.size / 1024)}KB)`,
+          'success',
         );
       } catch (e) {
-        // Silent fail — el backup automático nunca debe interrumpir la UX
-        LogService.add('⚠️ Auto-backup fallido: ' + e.message, 'warn');
+        LogService.add('❌ Auto-backup error: ' + e.message, 'error');
       }
     }, AUTO_BACKUP_DEBOUNCE_MS);
   }
 
   /**
-   * [MIGRATION_MANAGER] Comprueba si MMKV está vacío y hay backup disponible.
-   * Se llama desde App.jsx al arrancar la app.
-   * Si MMKV tiene datos → no hace nada (normal operation).
-   * Si MMKV vacío y backup existe → restaura automáticamente.
-   *
-   * @param {Function} getProductCount  — retorna nº productos en MMKV
-   * @param {Function} restorePayload   — DatabaseService.importFullDatabase(payload)
-   * @returns {Promise<{restored: boolean, products: number, source: string}>}
+   * [MIGRATION_MANAGER] Restaura desde FileSystem si MMKV vacío al arrancar.
    */
   static async autoRestoreIfNeeded(getProductCount, restorePayload) {
     try {
       const count = getProductCount();
+      if (count > 0) return { restored: false, products: count, source: 'mmkv' };
 
-      // MMKV tiene datos → no necesitamos restaurar
-      if (count > 0) {
-        return { restored: false, products: count, source: 'mmkv' };
-      }
-
-      // MMKV vacío → buscar backup en documentDirectory
       const info = await FileSystem.getInfoAsync(BACKUP_PATH);
-      if (!info.exists) {
-        LogService.add('ℹ️ Auto-restore: sin backup previo disponible', 'info');
-        return { restored: false, products: 0, source: 'none' };
-      }
+      if (!info.exists) return { restored: false, products: 0, source: 'none' };
 
-      // Leer y parsear el backup
-      const raw     = await FileSystem.readAsStringAsync(BACKUP_PATH, { encoding: FileSystem.EncodingType.UTF8 });
+      const raw     = await FileSystem.readAsStringAsync(BACKUP_PATH, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
       const payload = JSON.parse(raw);
 
       if (!payload?.exportedBy?.includes('ResellHub')) {
-        LogService.add('⚠️ Auto-restore: backup inválido o corrupto', 'warn');
-        return { restored: false, products: 0, source: 'invalid' };
+        return { restored: false, products: 0, source: 'error' };
       }
 
-      // Restaurar en MMKV
       const result = restorePayload(payload);
-      const restored = (result?.products || 0);
-
       LogService.add(
-        `✅ Auto-restore: ${restored} productos restaurados desde backup (${payload.autoBackupAt?.slice(0, 10) || '—'})`,
+        `📥 Auto-restore: ${result.products} productos desde backup (${payload.autoBackupAt?.slice(0, 10)})`,
         'success',
       );
-
-      return {
-        restored: true,
-        products: restored,
-        source: 'file',
-        backupDate: payload.autoBackupAt,
-      };
+      return { restored: true, products: result.products, source: 'file' };
     } catch (e) {
       LogService.add('❌ Auto-restore error: ' + e.message, 'error');
-      return { restored: false, products: 0, source: 'error', error: e.message };
-    }
-  }
-
-  /**
-   * [QA_ENGINEER] Obtiene información del backup actual.
-   * Usado en SettingsScreen para mostrar el estado.
-   *
-   * @returns {Promise<{exists, date, products, sizeKB, path}>}
-   */
-  static async getBackupInfo() {
-    try {
-      const info = await FileSystem.getInfoAsync(BACKUP_PATH, { size: true });
-      if (!info.exists) {
-        return { exists: false, date: null, products: 0, sizeKB: 0 };
-      }
-      // Leer metadatos sin parsear el JSON completo (más rápido)
-      const raw     = await FileSystem.readAsStringAsync(BACKUP_PATH, { encoding: FileSystem.EncodingType.UTF8 });
-      const payload = JSON.parse(raw);
-      return {
-        exists:   true,
-        date:     payload.autoBackupAt || payload.exportedAt || null,
-        products: Array.isArray(payload.products) ? payload.products.length : 0,
-        sizeKB:   Math.round((info.size || raw.length) / 1024),
-        path:     BACKUP_PATH,
-      };
-    } catch {
-      return { exists: false, date: null, products: 0, sizeKB: 0 };
+      return { restored: false, products: 0, source: 'error' };
     }
   }
 
   /**
    * [ARCHITECT] Exporta la BBDD vía Share API.
-   * Permite al usuario guardar en Google Drive, email, WhatsApp, etc.
-   * Es la misma funcionalidad que tenía SettingsScreen, centralizada aquí.
    *
-   * @param {Object} payload — resultado de DatabaseService.exportFullDatabase()
-   * @returns {Promise<void>}
+   * FIX BUG-A: En Android, Share.share({ message }) falla con payloads grandes.
+   * Solución: escribir el JSON en cacheDirectory y usar expo-sharing (shareAsync)
+   * para compartir el FICHERO. Si expo-sharing no está disponible → fallback a text.
    */
   static async exportToShare(payload) {
     if (!payload) throw new Error('Payload vacío — exportFullDatabase() falló');
 
     const filename = `resellhub_backup_${new Date().toISOString().slice(0, 10)}.json`;
     const json     = JSON.stringify(payload, null, 2);
+    const tmpPath  = `${FileSystem.cacheDirectory}${filename}`;
 
-    if (Platform.OS === 'android') {
-      // En Android: escribimos a un fichero temporal y compartimos la URI
-      // Esto permite a apps como Drive/Gmail adjuntar el fichero real
-      try {
-        const tmpPath = `${FileSystem.cacheDirectory}${filename}`;
-        await FileSystem.writeAsStringAsync(tmpPath, json, { encoding: FileSystem.EncodingType.UTF8 });
+    try {
+      // Paso 1: Escribir fichero en caché
+      await FileSystem.writeAsStringAsync(tmpPath, json, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
 
-        // Share el texto (siempre funciona aunque no tenga expo-sharing)
-        await Share.share({
-          title:   filename,
-          message: json,
-        });
-      } catch (e) {
-        if (e.message !== 'User did not share') throw e;
+      // Validación: confirmar que el fichero existe y tiene contenido
+      const info = await FileSystem.getInfoAsync(tmpPath);
+      if (!info.exists || info.size === 0) {
+        throw new Error('El fichero exportado quedó vacío. Intenta de nuevo.');
       }
-    } else {
-      // iOS: Share.share con message directamente
-      await Share.share({ title: filename, message: json });
-    }
 
-    LogService.add(`📤 Export manual: ${payload.products?.length || 0} productos compartidos`, 'success');
+      // Paso 2: Intentar expo-sharing (comparte el fichero real como adjunto)
+      try {
+        const Sharing = require('expo-sharing');
+        const isAvailable = await Sharing.isAvailableAsync();
+        if (isAvailable) {
+          await Sharing.shareAsync(tmpPath, {
+            mimeType: 'application/json',
+            dialogTitle: `Exportar base de datos ResellHub`,
+            UTI: 'public.json',
+          });
+          LogService.add(
+            `📤 Export manual: ${payload.products?.length || 0} productos compartidos vía expo-sharing`,
+            'success',
+          );
+          return;
+        }
+      } catch (_sharingErr) {
+        // expo-sharing no disponible — continuar con fallback
+        LogService.add('⚠️ expo-sharing no disponible, usando Share.share', 'info');
+      }
+
+      // Paso 3: Fallback — Share.share con el texto (funciona siempre, posible truncado)
+      if (Platform.OS === 'android') {
+        // En Android, si el JSON es grande, avisar al usuario
+        if (json.length > 50_000) {
+          // Mostrar alerta informando que el fichero está guardado
+          Alert.alert(
+            '📤 Backup exportado',
+            `El fichero ${filename} (${Math.round(info.size / 1024)}KB) está guardado en el almacenamiento temporal de la app.\n\n` +
+            `Para compartirlo instala expo-sharing:\n` +
+            `npx expo install expo-sharing`,
+            [
+              { text: 'OK' },
+              {
+                text: 'Compartir texto (puede truncarse)',
+                onPress: async () => {
+                  await Share.share({ title: filename, message: json.slice(0, 30_000) + '\n...(truncado)' });
+                },
+              },
+            ],
+          );
+        } else {
+          await Share.share({ title: filename, message: json });
+        }
+      } else {
+        // iOS: Share.share con message funciona bien
+        await Share.share({ title: filename, message: json });
+      }
+
+      LogService.add(
+        `📤 Export manual: ${payload.products?.length || 0} productos compartidos`,
+        'success',
+      );
+    } catch (e) {
+      if (e.message !== 'User did not share') {
+        LogService.add('❌ exportToShare error: ' + e.message, 'error');
+        throw e;
+      }
+    }
   }
 
   /**
    * [MIGRATION_MANAGER] Importa desde fichero seleccionado por el usuario.
-   * Usa expo-document-picker (carga lazy para no romper si no está instalado).
-   *
-   * @param {Function} restorePayload — DatabaseService.importFullDatabase(payload)
-   * @returns {Promise<{success, products, salesRecords, errors, payload}>}
    */
   static async importFromFile(restorePayload) {
     let DocumentPicker, FSModule;
@@ -247,8 +207,7 @@ export class BackupService {
       FSModule       = require('expo-file-system');
     } catch {
       throw new Error(
-        'expo-document-picker no está instalado.\n\n' +
-        'Ejecuta: npx expo install expo-document-picker',
+        'expo-document-picker no está instalado.\n\nEjecuta: npx expo install expo-document-picker',
       );
     }
 
@@ -279,18 +238,42 @@ export class BackupService {
     );
 
     return {
-      success:      true,
-      products:     restoreResult.products     || 0,
-      salesRecords: restoreResult.salesRecords || 0,
+      success:        true,
+      products:       restoreResult.products     || 0,
+      salesRecords:   restoreResult.salesRecords || 0,
       configRestored: restoreResult.configRestored || false,
-      errors:       restoreResult.errors       || [],
-      exportedAt:   payload.exportedAt         || payload.autoBackupAt,
+      errors:         restoreResult.errors       || [],
+      exportedAt:     payload.exportedAt         || payload.autoBackupAt,
     };
   }
 
   /**
-   * [QA_ENGINEER] Borra el backup automático del FileSystem.
-   * Solo para casos de debug/reset total.
+   * [QA_ENGINEER] Estado del backup automático para mostrar en UI.
+   */
+  static async getBackupInfo() {
+    try {
+      const info = await FileSystem.getInfoAsync(BACKUP_PATH, { size: true });
+      if (!info.exists) return { exists: false, date: null, products: 0, sizeKB: 0 };
+
+      const raw     = await FileSystem.readAsStringAsync(BACKUP_PATH, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      const payload = JSON.parse(raw);
+
+      return {
+        exists:   true,
+        date:     payload.autoBackupAt || payload.exportedAt || null,
+        products: Array.isArray(payload.products) ? payload.products.length : 0,
+        sizeKB:   Math.round((info.size || raw.length) / 1024),
+        path:     BACKUP_PATH,
+      };
+    } catch {
+      return { exists: false, date: null, products: 0, sizeKB: 0 };
+    }
+  }
+
+  /**
+   * [QA_ENGINEER] Borra el backup automático. Solo para debug/reset total.
    */
   static async deleteAutoBackup() {
     try {
