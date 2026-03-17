@@ -3831,3 +3831,56 @@ Co-authored-by: [DEBUGGER] [ARCHITECT] [QA_ENGINEER] [LIBRARIAN]"
 
 git checkout main && git merge --no-ff fix/hotfix5-export-images-categories
 ```
+---
+
+## [QA_ENGINEER] — Validación del ecosistema completo
+
+Con estos fixes, el pipeline queda así:
+```
+JSON historial (tus archivos)
+  │
+  ▼
+parseJsonSalesHistory()
+  → "Pack sudaderas, Talla 92" · amount=12 · soldDateReal=2024-11-15
+  │
+  ▼
+matchHistoryToInventory()
+  → busca por orderId "13839318998" en inventario
+  │  ├─ MATCH: updateSaleData() → soldPriceReal=12, soldDateReal=2024-11-15
+  │  │         _enrichedItems: {category: 'Ropa Niño', subcategory: 'Sudaderas'}
+  │  └─ NO MATCH: mapToInventoryProduct()
+  │               → inferCategoryFromTitle("Pack sudaderas") → {Ropa Niño, Sudaderas}
+  │               → firstUploadDate: null (no contamina TTS)
+  ▼
+mapToSaleRecord() con items enriquecidos
+  → { orderId, soldPriceReal: 12, soldDateReal, category: 'Ropa Niño', subcategory: 'Sudaderas' }
+  │
+  ▼
+VintedSalesDB.saveRecords()
+  → byMonth['2024-11'].ventas += 12
+  → byYear['2024'].ventas += 12
+  │
+  ▼
+getMonthlyHistory() en DatabaseService
+  → categoryBreakdown['Ropa Niño'].profit += X
+  → topCategory[0] = { name: 'Ropa Niño', profit: X }
+  │
+  ▼
+AdvancedStatsScreen — Tab "Por Año"
+  → 2024: 13 ventas · €X ingresos · top: Ropa Niño ✅
+  → 2026: 14 ventas · €X ingresos · top: Juguetes  ✅
+
+calcTTS(producto sin firstUploadDate)
+  → product.firstUploadDate = null → return null  ✅ (no contamina avgTTS)
+```
+
+**Checklist post-deploy:**
+```
+[ ] Importar resellhub_historial_1773130687202.json (Noviembre 2024)
+[ ] Logs → "✅ matchHistory: X matches · Y creados" visible ✅
+[ ] Vendidos → "Pack sudaderas" → categoría "Ropa Niño" visible ✅
+[ ] Stats → Tab "Por Año" → 2024 aparece con datos ✅
+[ ] Stats → Tab "Por Mes" → Nov 2024: ventas visibles ✅
+[ ] Dashboard → TOP SUB no vacío (si hay matches con inventario) ✅
+[ ] calcTTS: productos de historial sin firstUploadDate → TTS null (no 0) ✅
+[ ] Importar segundo JSON (Enero 2026) → dedup activo (sin duplicados) ✅
