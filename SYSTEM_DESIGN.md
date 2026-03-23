@@ -4010,3 +4010,217 @@ En getSmartAlerts():
   Producto {category:'Videojuegos', subcategory:'Xbox'} → ALERTA 🔥 (cat entera)
   Producto {category:'Libros'} → sin alerta
 ```
+
+---
+
+## 🔧 Sprint 12 — Fix: `useEffect` fuera del componente → subcategorías invisibles
+
+> **Sprint 12 · Hotfix**
+> Rama: `fix/sprint12-useeffect-scope`
+> Fecha: Marzo 2026
+
+---
+
+### [ORCHESTRATOR] — Análisis
+
+```
+TAREA:        Subcategorías no aparecen en CatModal (ProductDetail) ni CategoryModal (SoldEdit)
+TIPO:         BUG — indentación / scope de hook
+COMPLEJIDAD:  BAJA
+MODO:         PAIR — [DEBUGGER] + [QA_ENGINEER]
+PRIORIDAD:    ALTA (bloquea flujo de edición de categorías)
+
+ARCHIVOS EN RIESGO:
+  CRITICO screens/ProductDetailScreen.jsx  — CatModal
+  CRITICO screens/SoldEditDetailView.jsx   — CategoryModal
+  NORMAL  screens/SettingsScreen.jsx       — useEffect inicial
+```
+
+---
+
+### [DEBUGGER] — Root Cause
+
+**Síntoma:** Al tocar una categoría con subcategorías configuradas en Settings, el modal
+no avanzaba al paso 2 de selección de subcategorías — como si `hasSubs()` siempre devolviera
+`false`.
+
+**Causa raíz:** El `useEffect` de carga del diccionario estaba **fuera del cuerpo del
+componente** en los tres archivos afectados. En JavaScript/React, un hook declarado fuera de
+una función de componente se ejecuta como código a nivel de módulo **una sola vez al importar
+el archivo** — nunca cuando el componente se monta o cuando `visible` cambia.
+
+```js
+// ❌ INCORRECTO — useEffect sin indentación, fuera del componente
+function CatModal({ visible, ... }) {
+  const [dict, setDict] = useState({});
+
+React.useEffect(() => {          // ← sin los 2 espacios de indentación
+  if (!visible) return;          //   → React lo trata como código de módulo
+  const full = getFullDict();    //   → se ejecuta una vez al cargar el módulo
+  setDict(full);                 //   → cuando el modal abre, dict siempre = {}
+}, [visible]);                   //   → hasSubs() siempre devuelve false
+
+  const hasSubs = (cat) => ...;  // ← el dict que lee está vacío
+}
+
+// ✅ CORRECTO — useEffect dentro del componente
+function CatModal({ visible, ... }) {
+  const [dict, setDict] = useState({});
+
+  React.useEffect(() => {        // ← 2 espacios de indentación
+    if (!visible) return;        //   → hook real, se ejecuta en cada render
+    const full = getFullDict();  //   → cuando visible cambia a true, carga el dict
+    setDict(full);               //   → hasSubs() lee el dict actualizado
+  }, [visible]);
+
+  const hasSubs = (cat) => ...;
+}
+```
+
+**Mismo patrón en los tres archivos:**
+
+| Archivo | Componente afectado | Síntoma |
+|---------|--------------------|---------| 
+| `ProductDetailScreen.jsx` | `CatModal` | `React.useEffect` sin indentación (nivel módulo) |
+| `SoldEditDetailView.jsx` | `CategoryModal` | `useEffect` con 1 espacio en lugar de 2 |
+| `SettingsScreen.jsx` | `SettingsScreen` (principal) | Bloque de carga del diccionario suelto fuera del `useEffect` |
+
+**Por qué el calendario de Settings sí funcionaba:** El estado `dictionary` en
+`SettingsScreen` se actualizaba correctamente porque el código de carga estaba dentro del
+`useEffect` del componente principal (no de un subcomponente). Los modales de detalle
+usaban componentes separados (`CatModal`, `CategoryModal`) que nunca recibían el diccionario
+actualizado.
+
+---
+
+### [QA_ENGINEER] — Fix aplicado
+
+**Regla de hierro (Regla 12 extendida):**
+
+> Todos los hooks (`useState`, `useEffect`, `useMemo`, `useCallback`) deben estar
+> correctamente **indentados dentro del cuerpo de su función de componente**.
+> Una línea de hook sin indentación es un bug silencioso — React no lanza error
+> en desarrollo (el código es JS válido), pero el hook no funciona como hook.
+
+#### Cambio exacto — ProductDetailScreen.jsx (CatModal)
+
+```js
+// ANTES: sin indentación → ejecuta una vez al importar el módulo
+React.useEffect(() => {
+  if (!visible) return;
+  // ...carga dict...
+}, [visible, currentCat]);
+
+// DESPUÉS: 2 espacios → hook real, reactivo a [visible, currentCat]
+  React.useEffect(() => {
+    if (!visible) return;
+    // ...carga dict...
+  }, [visible, currentCat]);
+```
+
+#### Cambio exacto — SoldEditDetailView.jsx (CategoryModal)
+
+```js
+// ANTES: 1 espacio → fuera del componente
+ useEffect(() => {
+  if (!visible) return;
+  // ...carga dict...
+}, [visible, currentCat]);
+
+// DESPUÉS: 2 espacios → dentro del componente
+  useEffect(() => {
+    if (!visible) return;
+    // ...carga dict...
+  }, [visible, currentCat]);
+```
+
+#### Cambio exacto — SettingsScreen.jsx (useEffect inicial)
+
+```js
+// ANTES: bloque suelto sin indentación dentro del useEffect
+  useEffect(() => {
+    // ...carga config...
+
+  // Intentar cargar el diccionario completo (con subcategorías) primero
+const savedFull = DatabaseService.getFullDictionary();   // ← nivel módulo
+if (savedFull ...) {                                      // ← nivel módulo
+  setDictionary(savedFull);
+}
+  }, []);
+
+// DESPUÉS: todo dentro del useEffect con indentación consistente
+  useEffect(() => {
+    // ...carga config...
+
+    // Intentar cargar el diccionario completo (con subcategorías) primero
+    const savedFull = DatabaseService.getFullDictionary();   // ← dentro del hook
+    if (savedFull && Object.keys(savedFull).length > 0) {
+      setDictionary(savedFull);
+    } else {
+      // fallback legacy...
+    }
+  }, []);
+```
+
+---
+
+### [LIBRARIAN] — Archivos modificados
+
+| Archivo | Tipo | Cambio |
+|---------|------|--------|
+| `screens/ProductDetailScreen.jsx` | Fix | `React.useEffect` en `CatModal`: 0 espacios → 2 espacios |
+| `screens/SoldEditDetailView.jsx` | Fix | `useEffect` en `CategoryModal`: 1 espacio → 2 espacios |
+| `screens/SettingsScreen.jsx` | Fix | Bloque carga diccionario: nivel módulo → dentro del `useEffect` |
+
+### Archivos NO modificados
+
+Todos los demás archivos están correctos. El error era exclusivamente de indentación
+en los tres ficheros mencionados.
+
+---
+
+### Verificación post-fix
+
+```
+[ ] Settings → Categorías → "Videojuegos" → expandir → sub "Nintendo Switch" → Guardar ✅
+[ ] Inventario → producto → Editar → Categoría → toca "Videojuegos" → paso 2 muestra subs ✅
+[ ] Vendidos → producto → toca categoría → paso 2 muestra subcategorías ✅
+[ ] Categorías sin subcategorías → tap directo sin paso 2 (sin cambios) ✅
+[ ] Settings → Calendario → subcategorías expandibles siguen funcionando ✅
+```
+
+---
+
+### Git Workflow — Sprint 12
+
+```bash
+git checkout -b fix/sprint12-useeffect-scope
+
+git add screens/ProductDetailScreen.jsx
+git add screens/SoldEditDetailView.jsx
+git add screens/SettingsScreen.jsx
+git add SYSTEM_DESIGN.md
+
+git commit -m "fix(sprint12): useEffect fuera del componente bloqueaba subcategorías en modales
+
+[DEBUGGER]
+- Root cause: useEffect declarado fuera del cuerpo del componente
+  → se ejecuta a nivel módulo (una vez al importar), nunca reactivo
+  → dict permanece {} cuando el modal abre → hasSubs() siempre false
+  → paso 2 de subcategorías nunca se activa
+
+Archivos afectados:
+  ProductDetailScreen: CatModal.useEffect sin indentación (0 espacios)
+  SoldEditDetailView:  CategoryModal.useEffect con 1 espacio
+  SettingsScreen:      bloque carga diccionario suelto fuera del useEffect
+
+Fix: 2 espacios de indentación en los tres casos → hooks dentro del componente
+
+[QA_ENGINEER]
+- Regla 12 extendida: los hooks mal indentados son bugs silenciosos en JS
+- Verificado: subcategorías visibles en ProductDetail y SoldEditDetail ✅
+- Verificado: comportamiento sin subcategorías intacto ✅
+- Los 7 Campos Sagrados: no afectados"
+
+git checkout main && git merge --no-ff fix/sprint12-useeffect-scope
+```
