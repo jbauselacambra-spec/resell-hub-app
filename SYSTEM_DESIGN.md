@@ -3884,3 +3884,129 @@ calcTTS(producto sin firstUploadDate)
 [ ] Dashboard → TOP SUB no vacío (si hay matches con inventario) ✅
 [ ] calcTTS: productos de historial sin firstUploadDate → TTS null (no 0) ✅
 [ ] Importar segundo JSON (Enero 2026) → dedup activo (sin duplicados) ✅
+
+## [LIBRARIAN] — Archivos modificados Sprint 11
+ 
+| Archivo | Tipo | Cambio |
+|---------|------|--------|
+| `services/DatabaseService.js` | Modificado | +`parseSeasonalItem()` · +`productMatchesSeasonal()` · fix `getSmartAlerts()` alerta estacional con subcategorías |
+| `screens/ProductsScreen.jsx` | Modificado | +`filterSub` state · chips 2 niveles (cat + sub) · `filtered` useMemo actualizado |
+| `screens/SoldHistoryScreen.jsx` | Modificado | +`filterSub` state · chips 2 niveles (cat + sub) · `sorted` useMemo actualizado |
+| `screens/SettingsScreen.jsx` | Modificado | +`calModalExpandedCat` state · modal calendario con subcategorías expandibles · `toggleMonthItem()` · chips mes truncados |
+| `SYSTEM_DESIGN.md` | Documentación | Sprint 11 añadido |
+ 
+### Archivos NO modificados (ya correctos)
+ 
+| Archivo | Estado |
+|---------|--------|
+| `screens/ProductDetailScreen.jsx` | ✅ Pill cat›sub ya existe. CatModal ya tiene paso 2 subcategoría |
+| `screens/SoldEditDetailView.jsx` | ✅ CategoryModal ya tiene paso 2 subcategoría |
+| `screens/AdvancedStatsScreen.jsx` | ✅ Subcategorías expandibles por categoría ya implementadas |
+| `screens/DashboardScreen.jsx` | ✅ topSubcategory KPI ya existe |
+| `services/VintedParserService.js` | ✅ Sin cambios necesarios |
+| `services/BackupService.js` | ✅ Sin cambios necesarios |
+ 
+---
+ 
+## Git Workflow — Sprint 11
+ 
+```bash
+git checkout main
+git checkout -b feature/sprint11-subcategorias-globales
+ 
+git add services/DatabaseService.js
+git add screens/ProductsScreen.jsx
+git add screens/SoldHistoryScreen.jsx
+git add screens/SettingsScreen.jsx
+git add SYSTEM_DESIGN.md
+ 
+git commit -m "feat(sprint11): subcategorías globales en filtros e inventario estacional
+ 
+[ARCHITECT]
+- DatabaseService: +parseSeasonalItem(), +productMatchesSeasonal()
+- DatabaseService.getSmartAlerts(): alerta estacional soporta 'Cat › Sub'
+  en seasonalMap (retrocompatible con strings de solo categoría)
+ 
+[UI_SPECIALIST]
+- ProductsScreen: filtro en 2 niveles (cat → sub)
+  Fila 1: chips de categoría (behavior igual que antes)
+  Fila 2: chips de subcategoría (aparece al seleccionar cat con subs)
+  reset sub al cambiar cat, reset todo al seleccionar Todas
+- SoldHistoryScreen: ídem filtro 2 niveles (cat → sub)
+  allCats useMemo preservado, +filterSub state y FlatList de subs
+- SettingsScreen.renderCalendar: modal calendario extendido
+  Categorías expandibles con flecha (muestra count de subs)
+  Subcategorías seleccionables independientemente de la categoría
+  toggleMonthItem() soporta 'Cat' y 'Cat › Sub' en seasonalMap
+  Chips del mes truncan a solo el nombre de la sub si es cat›sub
+ 
+[QA_ENGINEER]
+- filterSub siempre se resetea al cambiar filterCat (no stranded state)
+- Fila 2 de subs: solo aparece si hay >= 2 subcats distintas en filtrado
+- seasonalMap retrocompatible: strings sin › siguen como categorías enteras
+- Los 7 Campos Sagrados intactos: filtros son solo lectura, no modifican BD
+ 
+[LIBRARIAN]
+- SYSTEM_DESIGN.md: Sprint 11 documentado"
+ 
+git checkout main
+git merge --no-ff feature/sprint11-subcategorias-globales -m "merge: Sprint 11 subcategorías globales"
+```
+ 
+---
+ 
+## Diagrama de flujo — Filtros 2 niveles (ProductsScreen y SoldHistoryScreen)
+ 
+```
+Usuario abre pantalla
+    │
+    ▼
+[Chips fila 1: Todas | Videojuegos | Libros | Ropa Niño | ...]
+    │
+    ├── toca "Todas"
+    │     → filterCat = null, filterSub = null
+    │     → fila 2 desaparece
+    │
+    └── toca "Videojuegos"
+          → filterCat = "Videojuegos", filterSub = null
+          → productos filtrados por categoría
+          │
+          ▼
+    [Chips fila 2: Todas | › Nintendo Switch | › Xbox | › PlayStation]
+          │
+          ├── toca "Todas" (fila 2)
+          │     → filterSub = null
+          │     → muestra todos los Videojuegos
+          │
+          └── toca "› Nintendo Switch"
+                → filterSub = "Nintendo Switch"
+                → muestra solo Videojuegos con sub=Nintendo Switch
+```
+ 
+## Diagrama de flujo — Calendario estacional con subcategorías
+ 
+```
+SettingsScreen → Tab Calendario → mes "Marzo" → [+]
+    │
+    ▼
+Modal "Marzo"
+    │
+    ├── [Videojuegos] [✓]  [↓ 3]  ← categoría + botón expandir (3 subs)
+    │
+    ├── (expandido)
+    │   ├── › Nintendo Switch  [✓]
+    │   ├── › Xbox
+    │   └── › PlayStation
+    │
+    ├── [Libros]              [↓ 2]
+    │
+    └── [Ropa Niño]
+    
+Al guardar:
+  config.seasonalMap[2] = ['Videojuegos', 'Videojuegos › Nintendo Switch']
+  
+En getSmartAlerts():
+  Producto {category:'Videojuegos', subcategory:'Nintendo Switch'} → ALERTA 🔥
+  Producto {category:'Videojuegos', subcategory:'Xbox'} → ALERTA 🔥 (cat entera)
+  Producto {category:'Libros'} → sin alerta
+```

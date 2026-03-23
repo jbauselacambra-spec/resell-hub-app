@@ -1,30 +1,23 @@
 /**
- * SoldHistoryScreen.jsx — Sprint 9.1 · FIX BUG-B (Hotfix 5)
+ * SoldHistoryScreen.jsx — Sprint 11
  *
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- * [DEBUGGER] ROOT CAUSE BUG-B (doble fallo):
+ * [UI_SPECIALIST] Sprint 11:
+ * - Filtro de 2 niveles: Categoría → Subcategoría
+ *   Fila 1: chips de categoría (igual que antes)
+ *   Fila 2: FlatList horizontal de subcats (aparece si cat seleccionada tiene >= 2 subs)
+ * - +filterSub state
+ * - sorted useMemo añade filtro por filterSub
+ * - Reset sub al cambiar cat
  *
- *   FALLO 1 — Imágenes no cargan:
- *     renderItem usaba `p.thumbnail || p.image` para la imagen.
- *     Los productos de Vinted almacenan la URL en `p.images[0]`
- *     (campo canónico desde Sprint 1). thumbnail/image no existen.
- *     Fix: usar `p.images?.[0] || p.thumbnail || p.image`
- *          con Image source={uri} protegido por guard.
+ * [QA_ENGINEER] Sprint 11:
+ * - filterSub siempre se resetea al cambiar filterCat
+ * - Fila 2 solo aparece si hay >= 2 subcats distintas en la selección
+ * - Los 7 Campos Sagrados intactos: filtros son solo lectura
  *
- *   FALLO 2 — No navega al detalle al pulsar la tarjeta:
- *     El renderItem devolvía un <View> sin TouchableOpacity envolvente
- *     a nivel de tarjeta. Solo la imagen y algunos elementos tenían
- *     onPress; el cuerpo de texto de la tarjeta era inerte.
- *     Fix: Envolver toda la tarjeta en <TouchableOpacity
- *            onPress={() => navigation.navigate('SoldEditDetail', {product: p})}>
- *
- * [QA_ENGINEER] VERIFICACIÓN:
- *   - images[0] → URL remota Vinted → <Image source={{uri}} />
- *   - Si no hay imagen → placeholder con icono "package"
- *   - Toda la tarjeta es pulsable → navega a SoldEditDetailView
- *   - Los 7 Campos Sagrados no se tocan
- *   - Hooks antes de early returns (Regla 12 ✅)
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ * Bugfixes heredados:
+ * - BUG-A: imagen desde p.images[0] (campo canónico Vinted)
+ * - BUG-B: TouchableOpacity envuelve toda la tarjeta
+ * - Hooks antes de early returns (Regla 12)
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -42,6 +35,7 @@ const C = {
   white:   '#FFFFFF',
   primary: '#FF6B35',
   blue:    '#004E89',
+  blueBg:  '#EAF2FB',
   success: '#00D9A3',
   warning: '#FFB800',
   danger:  '#E63946',
@@ -56,11 +50,12 @@ const C = {
 export default function SoldHistoryScreen({ navigation }) {
 
   // ── HOOKS primero — antes de cualquier early return (Regla 12) ──────────────
-  const [config, setConfig]         = useState(() => DatabaseService.getConfig());
-  const [soldProducts, setSold]     = useState([]);
-  const [filterType, setFilterType] = useState('date');
-  const [filterCat, setFilterCat]   = useState(null);
-  const [loading, setLoading]       = useState(true);
+  const [config,       setConfig]     = useState(() => DatabaseService.getConfig());
+  const [soldProducts, setSold]       = useState([]);
+  const [filterType,   setFilterType] = useState('date');
+  const [filterCat,    setFilterCat]  = useState(null);
+  const [filterSub,    setFilterSub]  = useState(null);  // ← Sprint 11
+  const [loading,      setLoading]    = useState(true);
 
   const loadData = () => {
     try {
@@ -93,9 +88,8 @@ export default function SoldHistoryScreen({ navigation }) {
     const recaudacion = soldProducts.reduce(
       (s, p) => s + Math.max(0, Number(p.soldPriceReal || p.soldPrice || p.price || 0)), 0,
     );
-    const avgPrecio   = count ? +(recaudacion / count).toFixed(0) : 0;
+    const avgPrecio = count ? +(recaudacion / count).toFixed(0) : 0;
 
-    // TTS medio (solo productos con soldDateReal)
     const ttsList = soldProducts.map(p => {
       const s = p.firstUploadDate || p.createdAt;
       const e = p.soldDateReal || p.soldDate || p.soldAt;
@@ -103,21 +97,36 @@ export default function SoldHistoryScreen({ navigation }) {
       return Math.max(1, Math.round((new Date(e) - new Date(s)) / 86_400_000));
     }).filter(v => v !== null);
 
-    const avgTTS = ttsList.length ? Math.round(ttsList.reduce((a, b) => a + b, 0) / ttsList.length) : 0;
+    const avgTTS = ttsList.length
+      ? Math.round(ttsList.reduce((a, b) => a + b, 0) / ttsList.length)
+      : 0;
     return { count, recaudacion, avgPrecio, avgTTS };
   }, [soldProducts]);
 
-  // Categorías únicas para filtro
+  // Categorías únicas para filtro fila 1
   const allCats = useMemo(
     () => [...new Set(soldProducts.map(p => p.category).filter(Boolean))].sort(),
     [soldProducts],
   );
 
-  // Lista ordenada + filtrada
+  // Sprint 11: Subcategorías disponibles para la categoría seleccionada
+  const availSubs = useMemo(() => {
+    if (!filterCat) return [];
+    return [...new Set(
+      soldProducts
+        .filter(p => p.category === filterCat && p.subcategory)
+        .map(p => p.subcategory)
+    )].sort();
+  }, [soldProducts, filterCat]);
+
+  // Lista ordenada + filtrada (Sprint 11: añade filterSub)
   const sorted = useMemo(() => {
     let arr = filterCat
       ? soldProducts.filter(p => p.category === filterCat)
       : soldProducts;
+
+    // Sprint 11: segundo nivel de filtro
+    if (filterSub) arr = arr.filter(p => p.subcategory === filterSub);
 
     if (filterType === 'precio') {
       return [...arr].sort((a, b) => {
@@ -142,13 +151,13 @@ export default function SoldHistoryScreen({ navigation }) {
       const dB = new Date(b.soldDateReal || b.soldDate || b.soldAt || 0);
       return dB - dA;
     });
-  }, [soldProducts, filterType, filterCat]);
+  }, [soldProducts, filterType, filterCat, filterSub]);
 
   const avgTtsColor = kpis.avgTTS > 0 && kpis.avgTTS <= ttsLightning
     ? C.success
     : kpis.avgTTS > 0 && kpis.avgTTS <= ttsAnchor ? C.warning : C.danger;
 
-  // ── renderItem — FIX BUG-B ───────────────────────────────────────────────────
+  // ── renderItem ─────────────────────────────────────────────────────────────
   const renderItem = ({ item: p }) => {
     const soldAmt = Math.max(0, Number(p.soldPriceReal || p.soldPrice || p.price || 0));
 
@@ -173,13 +182,11 @@ export default function SoldHistoryScreen({ navigation }) {
       :                       C.danger;
     const ttsEmoji = !tts ? '' : tts <= ttsLightning ? '⚡' : tts <= ttsAnchor ? '🟡' : '⚓';
 
-    // ── FIX: imagen correcta desde p.images[0] (campo canónico Vinted) ──────
-    // Antes: p.thumbnail || p.image  → siempre undefined → sin imagen
-    // Ahora: p.images?.[0] con fallbacks legacy
+    // FIX: imagen correcta desde p.images[0] (campo canónico Vinted)
     const imageUri = p.images?.[0] || p.thumbnail || p.image || null;
 
     return (
-      // ── FIX: TouchableOpacity envuelve toda la tarjeta → navega al detalle ──
+      // FIX: TouchableOpacity envuelve toda la tarjeta
       <TouchableOpacity
         style={styles.card}
         onPress={() => {
@@ -235,13 +242,12 @@ export default function SoldHistoryScreen({ navigation }) {
           <Text style={styles.cardDate}>{soldDateStr}</Text>
         </View>
 
-        {/* Flecha indicando que es pulsable */}
         <Icon name="chevron-right" size={16} color={C.textLow} style={{ alignSelf: 'center' }} />
       </TouchableOpacity>
     );
   };
 
-  // ── RENDER ────────────────────────────────────────────────────────────────────
+  // ── RENDER ─────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
 
@@ -249,13 +255,13 @@ export default function SoldHistoryScreen({ navigation }) {
       <View style={styles.header}>
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>Historial de Ventas</Text>
-         <TouchableOpacity
-  style={styles.importBtn}
-  onPress={() => navigation.navigate('Import')} // <--- Cambiado de 'VintedImportScreen' a 'Import'
->
-  <Icon name="download" size={13} color={C.purple} />
-  <Text style={styles.importBtnTxt}>Importar</Text>
-</TouchableOpacity>
+          <TouchableOpacity
+            style={styles.importBtn}
+            onPress={() => navigation.navigate('Import')}
+          >
+            <Icon name="download" size={13} color={C.purple} />
+            <Text style={styles.importBtnTxt}>Importar</Text>
+          </TouchableOpacity>
         </View>
 
         {/* KPI PANEL */}
@@ -288,26 +294,54 @@ export default function SoldHistoryScreen({ navigation }) {
         </Text>
       </View>
 
-      {/* FILTRO CATEGORÍA */}
+      {/* ── Sprint 11: FILTRO CATEGORÍA + SUBCATEGORÍA en 2 niveles ─────────── */}
       {allCats.length >= 2 && (
-        <FlatList
-          horizontal
-          data={[null, ...allCats]}
-          keyExtractor={item => item ?? '__all__'}
-          showsHorizontalScrollIndicator={false}
-          style={{ maxHeight: 44, paddingHorizontal: 12, marginBottom: 4 }}
-          contentContainerStyle={{ gap: 6, alignItems: 'center', paddingVertical: 6 }}
-          renderItem={({ item: cat }) => (
-            <TouchableOpacity
-              style={[styles.catChip, filterCat === cat && { backgroundColor: C.primary }]}
-              onPress={() => setFilterCat(cat)}
-            >
-              <Text style={[styles.catChipTxt, filterCat === cat && { color: '#FFF' }]}>
-                {cat ?? 'Todas'}
-              </Text>
-            </TouchableOpacity>
+        <View style={{ marginBottom: 4 }}>
+          {/* Fila 1: Categorías */}
+          <FlatList
+            horizontal
+            data={[null, ...allCats]}
+            keyExtractor={item => item ?? '__all__'}
+            showsHorizontalScrollIndicator={false}
+            style={{ maxHeight: 44, paddingHorizontal: 12 }}
+            contentContainerStyle={{ gap: 6, alignItems: 'center', paddingVertical: 6 }}
+            renderItem={({ item: cat }) => (
+              <TouchableOpacity
+                style={[styles.catChip, filterCat === cat && { backgroundColor: C.primary }]}
+                onPress={() => {
+                  setFilterCat(cat);
+                  setFilterSub(null); // reset sub al cambiar cat
+                }}
+              >
+                <Text style={[styles.catChipTxt, filterCat === cat && { color: '#FFF' }]}>
+                  {cat ?? 'Todas'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          />
+
+          {/* Fila 2: Subcategorías (solo si hay cat seleccionada y >= 2 subs) */}
+          {filterCat && availSubs.length >= 2 && (
+            <FlatList
+              horizontal
+              data={[null, ...availSubs]}
+              keyExtractor={item => item ?? '__allsub__'}
+              showsHorizontalScrollIndicator={false}
+              style={{ maxHeight: 36, paddingLeft: 20, marginTop: 2 }}
+              contentContainerStyle={{ gap: 5, alignItems: 'center', paddingVertical: 4 }}
+              renderItem={({ item: sub }) => (
+                <TouchableOpacity
+                  style={[styles.subChip, filterSub === sub && { backgroundColor: C.blue }]}
+                  onPress={() => setFilterSub(sub)}
+                >
+                  <Text style={[styles.subChipTxt, filterSub === sub && { color: '#FFF' }]}>
+                    {sub ? `› ${sub}` : 'Todas'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
           )}
-        />
+        </View>
       )}
 
       {/* FILTRO ORDEN */}
@@ -355,37 +389,52 @@ export default function SoldHistoryScreen({ navigation }) {
 
 // ─── Estilos ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container:  { flex: 1, backgroundColor: C.bg },
+  container: { flex: 1, backgroundColor: C.bg },
 
   // Header
-  header:     { backgroundColor: C.white, paddingTop: 52, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: C.border },
-  headerRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  headerTitle:{ fontSize: 22, fontWeight: '900', color: C.text },
-  importBtn:  { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, backgroundColor: '#F0EEFF', borderWidth: 1, borderColor: '#DDD8FF' },
+  header:      { backgroundColor: C.white, paddingTop: 52, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: C.border },
+  headerRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  headerTitle: { fontSize: 22, fontWeight: '900', color: C.text },
+  importBtn:   { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, backgroundColor: '#F0EEFF', borderWidth: 1, borderColor: '#DDD8FF' },
   importBtnTxt:{ fontSize: 12, fontWeight: '700', color: '#6C63FF' },
 
   // KPIs
-  kpiPanel:   { flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: 12, padding: 10, marginBottom: 8 },
-  kpiItem:    { flex: 1, alignItems: 'center' },
-  kpiVal:     { fontSize: 18, fontWeight: '900', color: C.text },
-  kpiLab:     { fontSize: 9, color: C.textLow, fontWeight: '600', marginTop: 1 },
-  kpiDivider: { width: 1, height: 28, backgroundColor: C.border, marginHorizontal: 4 },
-  ttsLegend:  { fontSize: 10, color: C.textLow, textAlign: 'center', marginTop: 2, marginBottom: 4 },
+  kpiPanel:  { flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: 12, padding: 10, marginBottom: 8 },
+  kpiItem:   { flex: 1, alignItems: 'center' },
+  kpiVal:    { fontSize: 18, fontWeight: '900', color: C.text },
+  kpiLab:    { fontSize: 9, color: C.textLow, fontWeight: '600', marginTop: 1 },
+  kpiDivider:{ width: 1, height: 28, backgroundColor: C.border, marginHorizontal: 4 },
+  ttsLegend: { fontSize: 10, color: C.textLow, textAlign: 'center', marginTop: 2, marginBottom: 4 },
 
-  // Filtro cat
+  // Filtro cat fila 1
   catChip:    { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: C.white, borderWidth: 1, borderColor: C.border },
   catChipTxt: { fontSize: 12, fontWeight: '600', color: C.textMed },
 
-  // Filtro orden
-  filterBar:  { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
-  filterBtn:  { flex: 1, alignItems: 'center', paddingVertical: 6, borderRadius: 8, backgroundColor: C.white, borderWidth: 1, borderColor: C.border },
-  filterBtnActive: { backgroundColor: C.primary, borderColor: C.primary },
-  filterText: { fontSize: 11, fontWeight: '600', color: C.textMed },
-  filterTextActive: { color: '#FFF' },
+  // Sprint 11: filtro sub fila 2
+  subChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 14,
+    backgroundColor: C.blueBg,
+    borderWidth: 1,
+    borderColor: C.blue + '28',
+  },
+  subChipTxt: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: C.blue,
+  },
 
-  // Tarjeta — FIX: ahora es TouchableOpacity completo
-  list:       { padding: 12, gap: 8 },
-  card:       {
+  // Filtro orden
+  filterBar:      { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
+  filterBtn:      { flex: 1, alignItems: 'center', paddingVertical: 6, borderRadius: 8, backgroundColor: C.white, borderWidth: 1, borderColor: C.border },
+  filterBtnActive:{ backgroundColor: C.primary, borderColor: C.primary },
+  filterText:     { fontSize: 11, fontWeight: '600', color: C.textMed },
+  filterTextActive:{ color: '#FFF' },
+
+  // Tarjeta
+  list: { padding: 12, gap: 8 },
+  card: {
     flexDirection: 'row',
     backgroundColor: C.white,
     borderRadius: 14,
@@ -398,26 +447,26 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
 
-  // Imagen — FIX: carga desde images[0]
-  thumbnail:  { width: 72, height: 72, borderRadius: 10, marginRight: 10, backgroundColor: C.bg },
+  // Imagen desde images[0]
+  thumbnail:            { width: 72, height: 72, borderRadius: 10, marginRight: 10, backgroundColor: C.bg },
   thumbnailPlaceholder: { justifyContent: 'center', alignItems: 'center' },
 
   // Contenido tarjeta
-  cardBody:   { flex: 1, gap: 3 },
-  cardTitle:  { fontSize: 13, fontWeight: '700', color: C.text, lineHeight: 17 },
-  cardMeta:   { fontSize: 10, color: C.textMed, fontWeight: '500' },
-  cardRow:    { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 },
-  cardPrice:  { fontSize: 15, fontWeight: '900', color: C.text },
-  cardDate:   { fontSize: 10, color: C.textLow, marginTop: 2 },
+  cardBody:  { flex: 1, gap: 3 },
+  cardTitle: { fontSize: 13, fontWeight: '700', color: C.text, lineHeight: 17 },
+  cardMeta:  { fontSize: 10, color: C.textMed, fontWeight: '500' },
+  cardRow:   { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 },
+  cardPrice: { fontSize: 15, fontWeight: '900', color: C.text },
+  cardDate:  { fontSize: 10, color: C.textLow, marginTop: 2 },
 
-  // Chips
+  // Chips TTS / bundle
   ttsChip:    { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
   ttsChipTxt: { fontSize: 11, fontWeight: '700' },
   bundleChip: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: '#EAE8FF' },
-  bundleChipTxt:{ fontSize: 10, fontWeight: '700', color: '#6C63FF' },
+  bundleChipTxt: { fontSize: 10, fontWeight: '700', color: '#6C63FF' },
 
   // Empty
-  empty:      { alignItems: 'center', paddingTop: 60 },
-  emptyText:  { fontSize: 16, fontWeight: '700', color: C.textMed, marginTop: 12 },
-  emptySub:   { fontSize: 13, color: C.textLow, textAlign: 'center', marginTop: 4, paddingHorizontal: 40 },
+  empty:    { alignItems: 'center', paddingTop: 60 },
+  emptyText:{ fontSize: 16, fontWeight: '700', color: C.textMed, marginTop: 12 },
+  emptySub: { fontSize: 13, color: C.textLow, textAlign: 'center', marginTop: 4, paddingHorizontal: 40 },
 });

@@ -1,80 +1,67 @@
 /**
- * SettingsScreen.jsx — Sprint 10
+ * SettingsScreen.jsx — Sprint 11
  *
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- * [ORCHESTRATOR] Sprint 10 — Persistencia de BBDD ante rebuilds de APK
+ * [UI_SPECIALIST] Sprint 11:
+ * - renderCalendar: modal calendario extendido con subcategorías expandibles
+ *   · Categorías con botón [↓ N] para expandir subcategorías
+ *   · Subcategorías seleccionables independientemente de la categoría entera
+ *   · toggleMonthItem() soporta 'Cat' y 'Cat › Sub' en seasonalMap
+ *   · Chips del mes: truncan a solo nombre de sub si es "Cat › Sub"
+ * - +calModalExpandedCat state para el modal
  *
- * [ARCHITECT] CAMBIOS EN TAB "💾 BBDD":
- *   ANTES (Sprint 9): solo Export manual + Import manual
- *   AHORA (Sprint 10): añade sección "Auto-Backup" con:
- *     - Estado del backup automático (fecha, nº productos, tamaño)
- *     - Botón "Forzar backup ahora" (actualiza el fichero de FileSystem)
- *     - Info card: explica la doble capa de persistencia
- *     - Export manual: ahora delega en BackupService.exportToShare()
- *     - Import manual: ahora delega en BackupService.importFromFile()
- *
- * [MIGRATION_MANAGER] ESTRATEGIA DE PERSISTENCIA SPRINT 10:
- *   CAPA 1 (MMKV): datos en memoria — rápido, puede perderse al reinstalar
- *   CAPA 2 (FileSystem.documentDirectory): auto-backup JSON persistente
- *     → sobrevive a actualizaciones de APK sin desinstalar ✅
- *     → se pierde solo si el usuario desinstala manualmente ⚠️
- *   CAPA 3 (Share API): export manual a Drive/email como seguro externo
- *
- * [QA_ENGINEER] Sin cambios en otras tabs. Solo la tab "database" es nueva.
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ * [QA_ENGINEER] Sprint 11:
+ * - seasonalMap retrocompatible: strings sin › siguen como categorías enteras
+ * - Modal se cierra limpiamente con reset de calModalExpandedCat
+ * - Los 7 Campos Sagrados intactos
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TextInput,
-  TouchableOpacity, Alert, Modal, FlatList, Share,
-  ActivityIndicator, Dimensions,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  TextInput, Modal, Alert, ActivityIndicator, FlatList,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { DatabaseService } from '../services/DatabaseService';
-import { VintedSalesDB } from '../services/VintedParserService';
-import LogService from '../services/LogService';
-// [Sprint 10] BackupService para la nueva sección de auto-backup
-import { BackupService } from '../services/BackupService';
+import { BackupService }   from '../services/BackupService';
+import { VintedSalesDB }   from '../services/VintedParserService';
+import LogService          from '../services/LogService';
 
-// DocumentPicker — instalado en Sprint 8
-let DocumentPicker, FileSystem;
-try {
-  DocumentPicker = require('expo-document-picker');
-  FileSystem     = require('expo-file-system');
-} catch { /* graceful — si no está instalado no rompe */ }
-
-const { width } = Dimensions.get('window');
-const MONTHS = [
-  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
-];
-
-// ─── Paleta canónica DS ───────────────────────────────────────────────────────
+// ─── Colores ─────────────────────────────────────────────────────────────────
 const C = {
-  bg:      '#F8F9FA', white:   '#FFFFFF', primary: '#FF6B35',
-  blue:    '#004E89', success: '#00D9A3', warning: '#FFB800',
-  danger:  '#E63946', gray900: '#1A1A2E', gray700: '#5C6070',
-  gray500: '#A0A5B5', gray100: '#F0F2F5', border:  '#EAEDF0',
+  primary:  '#FF6B35',
+  blue:     '#004E89',
+  blueBg:   '#EAF2FB',
+  success:  '#00D9A3',
+  warning:  '#FFB800',
+  danger:   '#E63946',
+  white:    '#FFFFFF',
+  bg:       '#F8F9FA',
+  border:   '#EAEDF0',
+  gray100:  '#F0F2F5',
+  gray500:  '#A0A5B5',
+  gray900:  '#1A1A2E',
 };
 
+const MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
 const TABS = [
-  { id: 'thresholds', label: 'Umbrales',  icon: 'sliders'   },
-  { id: 'calendar',  label: 'Calendario', icon: 'calendar'  },
-  { id: 'categories',label: 'Categorías', icon: 'tag'       },
-  { id: 'database',  label: '💾 BBDD',    icon: 'database'  }, // Sprint 9: NUEVA
-  { id: 'import',    label: 'Importación',icon: 'download'  },
-  { id: 'notif',     label: 'Avisos',     icon: 'bell'      },
+  { id: 'thresholds', label: 'Umbrales',    icon: 'sliders'    },
+  { id: 'calendar',   label: 'Calendario',  icon: 'calendar'   },
+  { id: 'categories', label: 'Categorías',  icon: 'tag'        },
+  { id: 'database',   label: 'BBDD',        icon: 'database'   },
+  { id: 'import',     label: 'Import',      icon: 'upload'     },
+  { id: 'notif',      label: 'Alertas',     icon: 'bell'       },
 ];
 
-// ─── Sub-componentes ──────────────────────────────────────────────────────────
+// ─── Componentes auxiliares ───────────────────────────────────────────────────
 const SectionTitle = ({ children }) => (
   <Text style={styles.sectionTitle}>{children}</Text>
 );
 
 const SettingCard = ({ label, desc, children }) => (
   <View style={styles.settingCard}>
-    <View style={styles.cardInfo}>
+    <View style={styles.cardLeft}>
       <Text style={styles.cardLabel}>{label}</Text>
       {desc ? <Text style={styles.cardDesc}>{desc}</Text> : null}
     </View>
@@ -100,7 +87,6 @@ const SaveBtn = ({ onPress }) => (
     <Text style={styles.saveBtnTxt}>Guardar cambios</Text>
   </TouchableOpacity>
 );
-
 
 function CatCardExpanded({ cat, data, onDelete, onUpdateTags, onAddSubcategory, onDeleteSubcategory }) {
   const [expanded, setExpanded] = React.useState(false);
@@ -128,167 +114,93 @@ function CatCardExpanded({ cat, data, onDelete, onUpdateTags, onAddSubcategory, 
 
   return (
     <View style={styles.catCardDB}>
-      {/* Header: nombre + expand + delete */}
       <TouchableOpacity
         style={styles.catCardHeader}
         onPress={() => setExpanded(e => !e)}
         activeOpacity={0.7}
       >
-        <Icon
-          name={expanded ? 'chevron-down' : 'chevron-right'}
-          size={14}
-          color={C.blue}
-          style={{ marginRight: 6 }}
-        />
-        <Text style={[styles.catCardName, { flex: 1 }]}>{cat}</Text>
-        {subcats.length > 0 && (
-          <View style={{
-            backgroundColor: C.blueBg || '#EAF2FB',
-            borderRadius: 10,
-            paddingHorizontal: 7,
-            paddingVertical: 2,
-            marginRight: 6,
-          }}>
-            <Text style={{ fontSize: 10, fontWeight: '800', color: C.blue }}>
-              {subcats.length} subs
-            </Text>
-          </View>
-        )}
-        <TouchableOpacity
-          onPress={onDelete}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
+        <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color={C.gray500} />
+        <Text style={styles.catCardName}>{cat}</Text>
+        <Text style={styles.catCardTags}>{subcats.length} subs · {tags.length} tags</Text>
+        <TouchableOpacity onPress={onDelete} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Icon name="trash-2" size={14} color={C.danger} />
         </TouchableOpacity>
       </TouchableOpacity>
 
-      {/* Tags de la categoría */}
-      {tags.length > 0 && (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 4, marginTop: 4 }}>
-          {tags.map(tag => (
-            <TouchableOpacity
-              key={tag}
-              onPress={() => removeTag(tag)}
-              style={{
-                backgroundColor: C.surface2 || '#F0F2F5',
-                borderRadius: 10,
-                paddingHorizontal: 8,
-                paddingVertical: 3,
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 4,
-              }}
-            >
-              <Text style={{ fontSize: 10, color: C.textMed || '#5C6070' }}>{tag}</Text>
-              <Icon name="x" size={9} color={C.textLow || '#A0A5B5'} />
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-
-      {/* Sección expandible */}
       {expanded && (
-        <View style={{ marginTop: 8 }}>
-
-          {/* Añadir tag */}
-          <View style={styles.addCatRow}>
+        <View style={{ paddingTop: 8 }}>
+          {/* Tags */}
+          <Text style={[styles.cardDesc, { marginBottom: 6 }]}>Tags de búsqueda:</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+            {tags.map(t => (
+              <TouchableOpacity
+                key={t}
+                style={{ backgroundColor: C.primary + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 }}
+                onPress={() => removeTag(t)}
+              >
+                <Text style={{ fontSize: 11, color: C.primary, fontWeight: '700' }}>{t} ✕</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
             <TextInput
-              style={[styles.addCatInput, { flex: 1, fontSize: 12, paddingVertical: 6 }]}
+              style={[styles.addCatInput, { flex: 1 }]}
               placeholder="Añadir tag..."
               placeholderTextColor={C.gray500}
               value={newTagText}
               onChangeText={setNewTagText}
               onSubmitEditing={addTag}
             />
-            <TouchableOpacity
-              style={[styles.addCatBtn, { backgroundColor: C.blue || '#004E89' }]}
-              onPress={addTag}
-              activeOpacity={0.7}
-            >
-              <Icon name="tag" size={13} color="#FFF" />
+            <TouchableOpacity style={styles.addCatBtn} onPress={addTag}>
+              <Icon name="plus" size={14} color="#FFF" />
             </TouchableOpacity>
           </View>
 
           {/* Subcategorías */}
-          <Text style={{
-            fontSize: 9,
-            fontWeight: '900',
-            color: C.textLow || '#A0A5B5',
-            letterSpacing: 1.2,
-            marginTop: 12,
-            marginBottom: 6,
-          }}>
-            SUBCATEGORÍAS
-          </Text>
-
-          {subcats.length === 0 && (
-            <Text style={{ fontSize: 11, color: C.textLow || '#A0A5B5', marginBottom: 8 }}>
-              Sin subcategorías — añade la primera abajo
-            </Text>
-          )}
-
+          <Text style={[styles.cardDesc, { marginBottom: 6 }]}>Subcategorías:</Text>
           {subcats.map(sub => (
-            <View key={sub} style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              backgroundColor: C.surface2 || '#F0F2F5',
-              borderRadius: 10,
-              paddingHorizontal: 12,
-              paddingVertical: 8,
-              marginBottom: 6,
-            }}>
-              <Icon name="corner-down-right" size={12} color={C.blue} style={{ marginRight: 8 }} />
-              <Text style={{ flex: 1, fontSize: 13, fontWeight: '700', color: C.text || '#1A1A2E' }}>
-                {sub}
-              </Text>
-              <TouchableOpacity onPress={() => onDeleteSubcategory(sub)}>
-                <Icon name="x" size={13} color={C.danger} />
+            <View key={sub} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <Icon name="corner-down-right" size={11} color={C.gray500} />
+              <Text style={{ flex: 1, fontSize: 12, color: C.gray900 }}>{sub}</Text>
+              <TouchableOpacity onPress={() => onDeleteSubcategory(sub)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                <Icon name="x" size={12} color={C.danger} />
               </TouchableOpacity>
             </View>
           ))}
-
-          {/* Input nueva subcategoría */}
-          <View style={styles.addCatRow}>
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
             <TextInput
-              style={[styles.addCatInput, { flex: 1, fontSize: 12, paddingVertical: 6 }]}
+              style={[styles.addCatInput, { flex: 1 }]}
               placeholder="Nueva subcategoría..."
               placeholderTextColor={C.gray500}
               value={newSubName}
               onChangeText={setNewSubName}
               onSubmitEditing={addSub}
             />
-            <TouchableOpacity
-              style={styles.addCatBtn}
-              onPress={addSub}
-              activeOpacity={0.7}
-            >
+            <TouchableOpacity style={[styles.addCatBtn, { backgroundColor: C.blue }]} onPress={addSub}>
               <Icon name="plus" size={14} color="#FFF" />
             </TouchableOpacity>
           </View>
-
         </View>
       )}
     </View>
   );
 }
 
-
-// ─── Pantalla principal ───────────────────────────────────────────────────────
+// ─── Componente principal ─────────────────────────────────────────────────────
 export default function SettingsScreen({ navigation }) {
-  const [activeTab, setActiveTab] = useState('thresholds');
-  const [config, setConfig] = useState(() => DatabaseService.getConfig());
-  const [dictionary, setDictionary] = useState({});
-  const [calModal, setCalModal] = useState({ visible: false, monthIdx: null });
-  const [newCatName, setNewCatName] = useState('');
-  const [selectedCatForSub, setSelectedCatForSub] = useState(null);
-  const [newSubName, setNewSubName] = useState('');
+  const [activeTab,     setActiveTab]     = useState('thresholds');
+  const [config,        setConfig]        = useState(() => DatabaseService.getConfig());
+  const [dictionary,    setDictionary]    = useState({});
+  const [calModal,      setCalModal]      = useState({ visible: false, monthIdx: null });
+  // Sprint 11: categoría expandida dentro del modal de calendario
+  const [calModalExpandedCat, setCalModalExpandedCat] = useState(null);
+  const [newCatName,    setNewCatName]    = useState('');
 
-  // Sprint 9: estados para export/import BBDD
-  const [dbStats,     setDbStats]     = useState(null);
-  const [exporting,   setExporting]   = useState(false);
-  const [importing,   setImporting]   = useState(false);
-  // Sprint 10: estado del auto-backup persistente
-  const [backupInfo,  setBackupInfo]  = useState(null);
+  // BBDD
+  const [dbStats,       setDbStats]       = useState(null);
+  const [exporting,     setExporting]     = useState(false);
+  const [importing,     setImporting]     = useState(false);
+  const [backupInfo,    setBackupInfo]    = useState(null);
   const [forcingBackup, setForcingBackup] = useState(false);
 
   useEffect(() => {
@@ -296,13 +208,13 @@ export default function SettingsScreen({ navigation }) {
     const savedDict = DatabaseService.getDictionary();
 
     if (saved) {
-      const sm = saved.seasonalMap || {};
+      const sm    = saved.seasonalMap || {};
       const newSm = {};
       for (let i = 0; i < 12; i++) {
         const val = sm[i];
-        if (Array.isArray(val))               newSm[i] = val;
+        if (Array.isArray(val))                  newSm[i] = val;
         else if (typeof val === 'string' && val) newSm[i] = [val];
-        else                                  newSm[i] = [];
+        else                                     newSm[i] = [];
       }
       setConfig(c => ({ ...c, ...saved, seasonalMap: newSm }));
     }
@@ -318,15 +230,13 @@ export default function SettingsScreen({ navigation }) {
     }
   }, []);
 
-  // Cargar estadísticas BBDD cuando se abre la tab
   useEffect(() => {
     if (activeTab === 'database') {
       loadDbStats();
-      loadBackupInfo(); // [Sprint 10]
+      loadBackupInfo();
     }
   }, [activeTab]);
 
-  // [Sprint 10] Cargar info del auto-backup desde FileSystem
   const loadBackupInfo = async () => {
     try {
       const info = await BackupService.getBackupInfo();
@@ -336,16 +246,16 @@ export default function SettingsScreen({ navigation }) {
 
   const loadDbStats = () => {
     try {
-      const products    = DatabaseService.getAllProducts();
-      const sold        = products.filter(p => p.status === 'sold');
-      const salesStats  = VintedSalesDB.getStats?.() || {};
+      const products   = DatabaseService.getAllProducts();
+      const sold       = products.filter(p => p.status === 'sold');
+      const salesStats = VintedSalesDB.getStats?.() || {};
       setDbStats({
         totalProducts:  products.length,
         soldProducts:   sold.length,
         activeProducts: products.filter(p => p.status !== 'sold').length,
-        salesRecords:   salesStats.totalRecords || 0,
-        ventas:         salesStats.totalVentas  || 0,
-        compras:        salesStats.totalCompras || 0,
+        salesRecords:   salesStats.totalRecords  || 0,
+        ventas:         salesStats.totalVentas   || 0,
+        compras:        salesStats.totalCompras  || 0,
         ingresos:       salesStats.ingresosBrutos || 0,
         lastProduct:    products.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0]?.title || '—',
       });
@@ -360,17 +270,20 @@ export default function SettingsScreen({ navigation }) {
 
   const updateCfg = (key, val) => setConfig(c => ({ ...c, [key]: val }));
 
-  const toggleMonthCategory = (monthIdx, catName) => {
+  // ── Sprint 11: toggleMonthItem — soporta 'Cat' y 'Cat › Sub' ─────────────
+  const toggleMonthItem = (monthIdx, itemStr) => {
     const sm  = { ...config.seasonalMap };
     const arr = sm[monthIdx] ? [...sm[monthIdx]] : [];
-    const idx = arr.indexOf(catName);
-    if (idx === -1) arr.push(catName);
+    const idx = arr.indexOf(itemStr);
+    if (idx === -1) arr.push(itemStr);
     else arr.splice(idx, 1);
     sm[monthIdx] = arr;
     updateCfg('seasonalMap', sm);
   };
 
-  // ── [Sprint 10] Forzar backup ahora ──────────────────────────────────────
+  // Legacy helper — mantener retrocompatibilidad
+  const toggleMonthCategory = (monthIdx, catName) => toggleMonthItem(monthIdx, catName);
+
   const handleForceBackup = async () => {
     setForcingBackup(true);
     try {
@@ -392,22 +305,18 @@ export default function SettingsScreen({ navigation }) {
     }
   };
 
-  // ── [Sprint 10] Exportar BBDD (compartir externamente) ───────────────────
   const handleExportDB = async () => {
     setExporting(true);
     try {
       const payload = DatabaseService.exportFullDatabase();
       await BackupService.exportToShare(payload);
     } catch (e) {
-      if (e.message !== 'User did not share') {
-        Alert.alert('Error al exportar', e.message);
-      }
+      if (e.message !== 'User did not share') Alert.alert('Error al exportar', e.message);
     } finally {
       setExporting(false);
     }
   };
 
-  // ── [Sprint 10] Importar/Restaurar BBDD desde fichero ────────────────────
   const handleImportDB = async () => {
     try {
       const result = await BackupService.importFromFile(
@@ -422,7 +331,6 @@ export default function SettingsScreen({ navigation }) {
         result.exportedAt ? `📅 Backup del: ${result.exportedAt.slice(0, 10)}` : '',
         result.errors?.length > 0 ? `⚠️ Errores: ${result.errors.join(', ')}` : '',
       ].filter(Boolean).join('\n');
-
       Alert.alert('BBDD Restaurada', msg, [
         { text: 'OK', onPress: () => { loadDbStats(); loadBackupInfo(); } },
       ]);
@@ -433,12 +341,12 @@ export default function SettingsScreen({ navigation }) {
     }
   };
 
-  // ─── RENDER: Tab BBDD ─────────────────────────────────────────────────────
+  // ─── RENDER: Tab BBDD ──────────────────────────────────────────────────────
   const renderDatabase = () => (
     <View>
       <SectionTitle>Base de Datos</SectionTitle>
 
-      {/* ── AUTO-BACKUP STATUS (Sprint 10) ─────────────────────────────── */}
+      {/* AUTO-BACKUP STATUS */}
       <View style={styles.autoBackupCard}>
         <View style={styles.autoBackupHeader}>
           <View style={[styles.autoBackupDot, { backgroundColor: backupInfo?.exists ? C.success : C.warning }]} />
@@ -447,7 +355,6 @@ export default function SettingsScreen({ navigation }) {
             <Icon name="refresh-cw" size={13} color={C.gray500} />
           </TouchableOpacity>
         </View>
-
         {backupInfo?.exists ? (
           <View style={styles.autoBackupBody}>
             <View style={styles.autoBackupRow}>
@@ -475,11 +382,10 @@ export default function SettingsScreen({ navigation }) {
           <View style={styles.autoBackupBody}>
             <View style={styles.autoBackupRow}>
               <Icon name="alert-circle" size={14} color={C.warning} />
-              <Text style={styles.autoBackupWarn}>Sin backup local. Pulsa "Guardar ahora" para crearlo.</Text>
+              <Text style={styles.autoBackupWarn}>Sin backup local. Guarda uno ahora.</Text>
             </View>
           </View>
         )}
-
         <TouchableOpacity
           style={[styles.forceBackupBtn, forcingBackup && { opacity: 0.6 }]}
           onPress={handleForceBackup}
@@ -488,21 +394,18 @@ export default function SettingsScreen({ navigation }) {
         >
           {forcingBackup
             ? <ActivityIndicator size="small" color={C.blue} />
-            : <Icon name="save" size={15} color={C.blue} />
+            : <Icon name="save" size={14} color={C.blue} />
           }
-          <Text style={styles.forceBackupTxt}>
-            {forcingBackup ? 'Guardando...' : 'Guardar backup ahora'}
-          </Text>
+          <Text style={styles.forceBackupTxt}>Guardar backup ahora</Text>
         </TouchableOpacity>
       </View>
 
-      {/* ── Info doble capa ──────────────────────────────────────────────── */}
+      {/* Qué pasa al reinstalar */}
       <View style={styles.infoBox}>
         <Icon name="info" size={16} color={C.blue} />
         <Text style={styles.infoTxt}>
-          <Text style={{ fontWeight: '800' }}>¿Cómo funciona?{'\n'}</Text>
-          Cada vez que guardas un producto, la app actualiza automáticamente un
-          fichero de backup en el dispositivo.{'\n\n'}
+          <Text style={{ fontWeight: '700' }}>Backup automático activo.{'\n'}</Text>
+          Cada vez que guardas un producto, la app actualiza automáticamente un fichero de backup en el dispositivo.{'\n\n'}
           Si instalas una nueva build,{' '}
           <Text style={{ fontWeight: '700' }}>la app restaura tus datos automáticamente</Text>
           {' '}al arrancar si detecta que MMKV está vacío.{'\n\n'}
@@ -511,7 +414,7 @@ export default function SettingsScreen({ navigation }) {
         </Text>
       </View>
 
-      {/* ── Estadísticas MMKV actuales ───────────────────────────────────── */}
+      {/* Estadísticas MMKV */}
       {dbStats && (
         <View style={styles.dbStatsCard}>
           <Text style={styles.dbStatsTitle}>Estado actual de la BBDD</Text>
@@ -545,7 +448,7 @@ export default function SettingsScreen({ navigation }) {
         </View>
       )}
 
-      {/* ── Seguro externo: Export/Import manual ────────────────────────── */}
+      {/* Seguro externo */}
       <Text style={styles.sectionTitle}>Seguro Externo</Text>
       <View style={styles.dbActionsRow}>
         <TouchableOpacity
@@ -561,7 +464,6 @@ export default function SettingsScreen({ navigation }) {
           <Text style={styles.dbActionTxt}>Exportar JSON</Text>
           <Text style={styles.dbActionSub}>Drive / Email / WhatsApp</Text>
         </TouchableOpacity>
-
         <TouchableOpacity
           style={[styles.dbActionBtn, { backgroundColor: C.success }]}
           onPress={handleImportDB}
@@ -577,7 +479,6 @@ export default function SettingsScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* ── Acción: actualizar stats ─────────────────────────────────────── */}
       <TouchableOpacity
         style={styles.refreshStatsBtn}
         onPress={() => { loadDbStats(); loadBackupInfo(); }}
@@ -589,7 +490,7 @@ export default function SettingsScreen({ navigation }) {
     </View>
   );
 
-  // ─── RENDER: Tab Umbrales ────────────────────────────────────────────────
+  // ─── RENDER: Tab Umbrales ──────────────────────────────────────────────────
   const renderThresholds = () => (
     <View>
       <SectionTitle>Velocidad de Venta (TTS)</SectionTitle>
@@ -620,8 +521,14 @@ export default function SettingsScreen({ navigation }) {
       <SectionTitle>Oportunidades</SectionTitle>
       <SettingCard label="Producto caliente" desc="Favs y vistas para marcar como caliente">
         <View style={styles.row}>
-          <NumInput value={config.hotFavs || 10} onChangeText={v => updateCfg('hotFavs', v)} unit="favs" />
+          <NumInput value={config.hotFavs  || 10} onChangeText={v => updateCfg('hotFavs', v)}  unit="favs" />
           <NumInput value={config.hotViews || 50} onChangeText={v => updateCfg('hotViews', v)} unit="vistas" />
+        </View>
+      </SettingCard>
+      <SettingCard label="Casi listo" desc="Días publicado y favs mínimos para alerta 'Casi Listo'">
+        <View style={styles.row}>
+          <NumInput value={config.daysAlmostReady || 30} onChangeText={v => updateCfg('daysAlmostReady', v)} unit="días" />
+          <NumInput value={config.favsAlmostReady || 8}  onChangeText={v => updateCfg('favsAlmostReady', v)}  unit="favs" />
         </View>
       </SettingCard>
       <SettingCard label="Alerta oportunidad" desc="Lanza alerta cuando favs y días superan estos umbrales">
@@ -635,14 +542,14 @@ export default function SettingsScreen({ navigation }) {
     </View>
   );
 
-  // ─── RENDER: Tab Calendario ──────────────────────────────────────────────
+  // ─── RENDER: Tab Calendario — Sprint 11 ───────────────────────────────────
   const renderCalendar = () => {
     const catNames = Object.keys(dictionary);
     return (
       <View>
         <SectionTitle>Calendario de Oportunidades</SectionTitle>
         <Text style={styles.calHint}>
-          Asigna categorías a cada mes. El sistema priorizará estas categorías en alertas y Smart Insights.
+          Asigna categorías o subcategorías específicas a cada mes. El sistema priorizará estos items en alertas y Smart Insights.
         </Text>
         {MONTHS.map((mes, idx) => {
           const selected = Array.isArray(config.seasonalMap?.[idx]) ? config.seasonalMap[idx] : [];
@@ -652,47 +559,124 @@ export default function SettingsScreen({ navigation }) {
               <View style={styles.monthChips}>
                 {selected.length === 0
                   ? <Text style={styles.monthEmpty}>Sin asignar</Text>
-                  : selected.map(cat => (
-                    <TouchableOpacity key={cat} style={styles.monthChip}
-                      onPress={() => toggleMonthCategory(idx, cat)} activeOpacity={0.7}>
-                      <Text style={styles.monthChipTxt}>{cat} ✕</Text>
-                    </TouchableOpacity>
-                  ))
+                  : selected.map(item => {
+                    // Sprint 11: mostrar solo nombre corto si es "Cat › Sub"
+                    const displayLabel = item.includes(' › ')
+                      ? item.split(' › ')[1]
+                      : item;
+                    return (
+                      <TouchableOpacity
+                        key={item}
+                        style={styles.monthChip}
+                        onPress={() => toggleMonthItem(idx, item)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.monthChipTxt} numberOfLines={1}>
+                          {displayLabel} ✕
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })
                 }
               </View>
-              <TouchableOpacity style={styles.monthAddBtn}
-                onPress={() => setCalModal({ visible: true, monthIdx: idx })} activeOpacity={0.7}>
+              <TouchableOpacity
+                style={styles.monthAddBtn}
+                onPress={() => {
+                  setCalModal({ visible: true, monthIdx: idx });
+                  setCalModalExpandedCat(null);
+                }}
+                activeOpacity={0.7}
+              >
                 <Icon name="plus" size={14} color={C.primary} />
               </TouchableOpacity>
             </View>
           );
         })}
 
+        {/* ── Sprint 11: Modal extendido con subcategorías ────────────────── */}
         <Modal visible={calModal.visible} transparent animationType="slide">
           <View style={styles.modalOverlay}>
             <View style={styles.modalSheet}>
+              {/* Cabecera */}
               <Text style={styles.modalTitle}>
                 {calModal.monthIdx !== null ? MONTHS[calModal.monthIdx] : ''}
               </Text>
-              <Text style={styles.modalHint}>Toca una categoría para añadir/quitar</Text>
-              <FlatList
-                data={catNames}
-                keyExtractor={k => k}
-                renderItem={({ item }) => {
-                  const isSelected = config.seasonalMap?.[calModal.monthIdx]?.includes(item);
+              <Text style={styles.modalHint}>
+                Toca una categoría o subcategoría para añadir/quitar al mes
+              </Text>
+
+              {/* Lista de categorías + subcategorías expandibles */}
+              <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+                {catNames.map(cat => {
+                  const catSelected = config.seasonalMap?.[calModal.monthIdx]?.includes(cat);
+                  const catSubs     = Object.keys(dictionary[cat]?.subcategories || {});
+                  const isExpanded  = calModalExpandedCat === cat;
+
                   return (
-                    <TouchableOpacity
-                      style={[styles.modalItem, isSelected && styles.modalItemActive]}
-                      onPress={() => { toggleMonthCategory(calModal.monthIdx, item); }}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={[styles.modalItemTxt, isSelected && styles.modalItemTxtActive]}>{item}</Text>
-                      {isSelected && <Icon name="check" size={16} color={C.blue} />}
-                    </TouchableOpacity>
+                    <View key={cat}>
+                      {/* Fila de categoría */}
+                      <View style={styles.calCatRow}>
+                        {/* Botón seleccionar categoría entera */}
+                        <TouchableOpacity
+                          style={[styles.calCatItem, catSelected && styles.modalItemActive]}
+                          onPress={() => toggleMonthItem(calModal.monthIdx, cat)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.modalItemTxt, catSelected && styles.modalItemTxtActive]}>
+                            {cat}
+                          </Text>
+                          {catSelected && <Icon name="check" size={14} color={C.blue} />}
+                        </TouchableOpacity>
+
+                        {/* Botón expandir/colapsar subcategorías */}
+                        {catSubs.length > 0 && (
+                          <TouchableOpacity
+                            style={styles.calExpandBtn}
+                            onPress={() => setCalModalExpandedCat(isExpanded ? null : cat)}
+                            activeOpacity={0.7}
+                          >
+                            <Icon
+                              name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                              size={14}
+                              color={C.primary}
+                            />
+                            <Text style={styles.calExpandTxt}>{catSubs.length}</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+
+                      {/* Subcategorías expandidas */}
+                      {isExpanded && catSubs.map(sub => {
+                        const subKey      = `${cat} › ${sub}`;
+                        const subSelected = config.seasonalMap?.[calModal.monthIdx]?.includes(subKey);
+                        return (
+                          <TouchableOpacity
+                            key={subKey}
+                            style={[styles.calSubItem, subSelected && styles.calSubItemActive]}
+                            onPress={() => toggleMonthItem(calModal.monthIdx, subKey)}
+                            activeOpacity={0.7}
+                          >
+                            <Icon name="corner-down-right" size={11} color={C.primary} style={{ marginRight: 6 }} />
+                            <Text style={[styles.calSubTxt, subSelected && { color: C.blue, fontWeight: '700' }]}>
+                              {sub}
+                            </Text>
+                            {subSelected && <Icon name="check" size={13} color={C.blue} style={{ marginLeft: 'auto' }} />}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
                   );
+                })}
+              </ScrollView>
+
+              <TouchableOpacity
+                style={styles.modalClose}
+                onPress={() => {
+                  setCalModal({ visible: false, monthIdx: null });
+                  setCalModalExpandedCat(null);  // reset al cerrar
                 }}
-              />
-              <TouchableOpacity style={styles.modalClose} onPress={() => setCalModal({ visible: false, monthIdx: null })} activeOpacity={0.7}>
+                activeOpacity={0.7}
+              >
                 <Text style={styles.modalCloseTxt}>Cerrar</Text>
               </TouchableOpacity>
             </View>
@@ -704,97 +688,96 @@ export default function SettingsScreen({ navigation }) {
     );
   };
 
-  // ─── RENDER: Tab Categorías ──────────────────────────────────────────────
- // ─── RENDER: Tab Categorías ──────────────────────────────────────────────
-const renderCategories = () => {
-  const catNames = Object.keys(dictionary);
+  // ─── RENDER: Tab Categorías ───────────────────────────────────────────────
+  const renderCategories = () => {
+    const catNames = Object.keys(dictionary);
 
-  const handleSaveDictionary = () => {
-    const legacy = {};
-    for (const [cat, val] of Object.entries(dictionary)) {
-      legacy[cat] = Array.isArray(val.tags) ? val.tags : [];
-    }
-    const okFull   = DatabaseService.saveFullDictionary(dictionary);
-    const okLegacy = DatabaseService.saveDictionary(legacy);
-    if (okFull && okLegacy) {
-      LogService.add(`📚 Diccionario guardado: ${catNames.length} categorías`, 'success');
-      Alert.alert('✅ Categorías guardadas', `${catNames.length} categorías actualizadas correctamente.`);
-    } else {
-      Alert.alert('⚠️ Error al guardar', 'No se pudieron guardar todas las categorías. Revisa los Logs.');
-    }
+    const handleSaveDictionary = () => {
+      const legacy = {};
+      for (const [cat, val] of Object.entries(dictionary)) {
+        legacy[cat] = Array.isArray(val.tags) ? val.tags : [];
+      }
+      const okFull   = DatabaseService.saveFullDictionary(dictionary);
+      const okLegacy = DatabaseService.saveDictionary(legacy);
+      if (okFull && okLegacy) {
+        LogService.add(`📚 Diccionario guardado: ${catNames.length} categorías`, 'success');
+        Alert.alert('✅ Categorías guardadas', `${catNames.length} categorías actualizadas correctamente.`);
+      } else {
+        Alert.alert('⚠️ Error al guardar', 'No se pudieron guardar todas las categorías. Revisa los Logs.');
+      }
+    };
+
+    return (
+      <View>
+        <SectionTitle>Diccionario de Categorías</SectionTitle>
+
+        {catNames.map(cat => (
+          <CatCardExpanded
+            key={cat}
+            cat={cat}
+            data={dictionary[cat]}
+            onDelete={() => {
+              const d = { ...dictionary };
+              delete d[cat];
+              setDictionary(d);
+            }}
+            onUpdateTags={(tags) => {
+              setDictionary(d => ({ ...d, [cat]: { ...d[cat], tags } }));
+            }}
+            onAddSubcategory={(subName) => {
+              if (!subName.trim()) return;
+              setDictionary(d => ({
+                ...d,
+                [cat]: {
+                  ...d[cat],
+                  subcategories: {
+                    ...(d[cat]?.subcategories || {}),
+                    [subName.trim()]: { tags: [] },
+                  },
+                },
+              }));
+            }}
+            onDeleteSubcategory={(subName) => {
+              setDictionary(d => {
+                const subs = { ...(d[cat]?.subcategories || {}) };
+                delete subs[subName];
+                return { ...d, [cat]: { ...d[cat], subcategories: subs } };
+              });
+            }}
+          />
+        ))}
+
+        {/* Añadir nueva categoría */}
+        <View style={styles.addCatRow}>
+          <TextInput
+            style={styles.addCatInput}
+            placeholder="Nueva categoría..."
+            placeholderTextColor={C.gray500}
+            value={newCatName}
+            onChangeText={setNewCatName}
+          />
+          <TouchableOpacity
+            style={styles.addCatBtn}
+            onPress={() => {
+              if (!newCatName.trim()) return;
+              setDictionary(d => ({
+                ...d,
+                [newCatName.trim()]: { tags: [], subcategories: {} },
+              }));
+              setNewCatName('');
+            }}
+            activeOpacity={0.7}
+          >
+            <Icon name="plus" size={16} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+
+        <SaveBtn onPress={handleSaveDictionary} />
+      </View>
+    );
   };
 
-  return (
-    <View>
-      <SectionTitle>Diccionario de Categorías</SectionTitle>
-
-      {catNames.map(cat => (
-        <CatCardExpanded
-          key={cat}
-          cat={cat}
-          data={dictionary[cat]}
-          onDelete={() => {
-            const d = { ...dictionary };
-            delete d[cat];
-            setDictionary(d);
-          }}
-          onUpdateTags={(tags) => {
-            setDictionary(d => ({ ...d, [cat]: { ...d[cat], tags } }));
-          }}
-          onAddSubcategory={(subName) => {
-            if (!subName.trim()) return;
-            setDictionary(d => ({
-              ...d,
-              [cat]: {
-                ...d[cat],
-                subcategories: {
-                  ...(d[cat]?.subcategories || {}),
-                  [subName.trim()]: { tags: [] },
-                },
-              },
-            }));
-          }}
-          onDeleteSubcategory={(subName) => {
-            setDictionary(d => {
-              const subs = { ...(d[cat]?.subcategories || {}) };
-              delete subs[subName];
-              return { ...d, [cat]: { ...d[cat], subcategories: subs } };
-            });
-          }}
-        />
-      ))}
-
-      {/* Añadir nueva categoría */}
-      <View style={styles.addCatRow}>
-        <TextInput
-          style={styles.addCatInput}
-          placeholder="Nueva categoría..."
-          placeholderTextColor={C.gray500}
-          value={newCatName}
-          onChangeText={setNewCatName}
-        />
-        <TouchableOpacity
-          style={styles.addCatBtn}
-          onPress={() => {
-            if (!newCatName.trim()) return;
-            setDictionary(d => ({
-              ...d,
-              [newCatName.trim()]: { tags: [], subcategories: {} },
-            }));
-            setNewCatName('');
-          }}
-          activeOpacity={0.7}
-        >
-          <Icon name="plus" size={16} color="#FFF" />
-        </TouchableOpacity>
-      </View>
-
-      <SaveBtn onPress={handleSaveDictionary} />
-    </View>
-  );
-};
-
-  // ─── RENDER: Tab Import ──────────────────────────────────────────────────
+  // ─── RENDER: Tab Import ───────────────────────────────────────────────────
   const renderImport = () => (
     <View>
       <SectionTitle>Opciones de Importación</SectionTitle>
@@ -825,7 +808,7 @@ const renderCategories = () => {
     </View>
   );
 
-  // ─── RENDER: Tab Notificaciones ──────────────────────────────────────────
+  // ─── RENDER: Tab Notificaciones ───────────────────────────────────────────
   const renderNotif = () => (
     <View>
       <SectionTitle>Alertas y Notificaciones</SectionTitle>
@@ -876,8 +859,12 @@ const renderCategories = () => {
       </View>
 
       {/* Tab bar */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabBarScroll}
-        contentContainerStyle={styles.tabBar}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.tabBarScroll}
+        contentContainerStyle={styles.tabBar}
+      >
         {TABS.map(tab => (
           <TouchableOpacity
             key={tab.id}
@@ -885,7 +872,7 @@ const renderCategories = () => {
             onPress={() => setActiveTab(tab.id)}
             activeOpacity={0.7}
           >
-            <Icon name={tab.icon} size={13} color={activeTab === tab.id ? '#FFF' : C.gray500} />
+            <Icon name={tab.icon} size={13} color={activeTab === tab.id ? C.primary : C.gray500} />
             <Text style={[styles.tabTxt, activeTab === tab.id && styles.tabTxtActive]}>
               {tab.label}
             </Text>
@@ -893,8 +880,8 @@ const renderCategories = () => {
         ))}
       </ScrollView>
 
-      {/* Contenido */}
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 60 }}>
+      {/* Content */}
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentPad}>
         {renderTab()}
       </ScrollView>
     </View>
@@ -903,139 +890,158 @@ const renderCategories = () => {
 
 // ─── Estilos ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root:         { flex: 1, backgroundColor: C.bg },
-  header:       { paddingHorizontal: 20, paddingTop: 52, paddingBottom: 12,
-                  backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.border },
-  headerTitle:  { fontSize: 22, fontWeight: '900', color: C.gray900 },
-  headerSub:    { fontSize: 11, color: C.gray500, marginTop: 2 },
+  root:    { flex: 1, backgroundColor: C.bg },
+  header:  { paddingTop: 52, paddingHorizontal: 20, paddingBottom: 12, backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.border },
+  headerTitle: { fontSize: 24, fontWeight: '900', color: C.gray900 },
+  headerSub:   { fontSize: 10, color: C.gray500, fontWeight: '600', marginTop: 2 },
 
-  tabBarScroll: { backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.border, maxHeight: 52 },
-  tabBar:       { paddingHorizontal: 12, paddingVertical: 8, gap: 8, flexDirection: 'row', alignItems: 'center' },
-  tab:          { flexDirection: 'row', alignItems: 'center', gap: 5,
-                  paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: C.gray100 },
-  tabActive:    { backgroundColor: C.gray900 },
-  tabTxt:       { fontSize: 11, fontWeight: '700', color: C.gray500 },
-  tabTxtActive: { color: '#FFF' },
+  // Tab bar
+  tabBarScroll: { maxHeight: 52, backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.border },
+  tabBar:       { paddingHorizontal: 12, gap: 4, alignItems: 'center', paddingVertical: 8 },
+  tab:          { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  tabActive:    { backgroundColor: C.primary + '15' },
+  tabTxt:       { fontSize: 11, fontWeight: '600', color: C.gray500 },
+  tabTxtActive: { color: C.primary, fontWeight: '800' },
 
-  content:      { flex: 1, padding: 16 },
-  sectionTitle: { fontSize: 13, fontWeight: '900', color: C.gray900, marginTop: 16, marginBottom: 12,
-                  textTransform: 'uppercase', letterSpacing: 0.5 },
+  content:    { flex: 1 },
+  contentPad: { padding: 16, paddingBottom: 100 },
 
-  settingCard:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-                  backgroundColor: C.white, borderRadius: 14, padding: 14, marginBottom: 8,
-                  borderWidth: 1, borderColor: C.border },
-  cardInfo:     { flex: 1, marginRight: 12 },
-  cardLabel:    { fontSize: 13, fontWeight: '700', color: C.gray900 },
-  cardDesc:     { fontSize: 10, color: C.gray500, marginTop: 2, lineHeight: 14 },
+  sectionTitle: { fontSize: 11, fontWeight: '900', color: C.gray500, letterSpacing: 1.2, marginTop: 20, marginBottom: 10 },
 
-  numRow:       { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  numInput:     { backgroundColor: C.bg, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6,
-                  fontSize: 14, borderWidth: 1, borderColor: C.border, textAlign: 'center', fontWeight: '700' },
-  numUnit:      { fontSize: 11, color: C.gray500 },
-  row:          { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  settingCard:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: C.white, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: C.border },
+  cardLeft:     { flex: 1, marginRight: 12 },
+  cardLabel:    { fontSize: 13, fontWeight: '700', color: C.gray900, marginBottom: 2 },
+  cardDesc:     { fontSize: 11, color: C.gray500 },
 
-  saveBtn:      { backgroundColor: C.gray900, flexDirection: 'row', justifyContent: 'center',
-                  alignItems: 'center', gap: 8, padding: 16, borderRadius: 16,
-                  marginTop: 20, marginBottom: 8 },
-  saveBtnTxt:   { color: '#FFF', fontWeight: '900', fontSize: 14 },
+  numRow:    { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  numInput:  { borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14, fontWeight: '700', color: C.gray900, textAlign: 'center', backgroundColor: C.bg },
+  numUnit:   { fontSize: 11, color: C.gray500, fontWeight: '600' },
 
-  // Calendar
-  calHint:      { fontSize: 11, color: C.gray500, lineHeight: 16, marginBottom: 12 },
-  monthRow:     { flexDirection: 'row', alignItems: 'center', backgroundColor: C.white,
-                  borderRadius: 12, padding: 10, marginBottom: 6, borderWidth: 1, borderColor: C.border },
-  monthName:    { width: 80, fontSize: 12, fontWeight: '700', color: C.gray900 },
-  monthChips:   { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
-  monthChip:    { backgroundColor: C.primary + '18', borderRadius: 10,
-                  paddingHorizontal: 8, paddingVertical: 3 },
-  monthChipTxt: { fontSize: 10, fontWeight: '700', color: C.primary },
-  monthEmpty:   { fontSize: 10, color: C.gray500, fontStyle: 'italic' },
-  monthAddBtn:  { padding: 6 },
+  row:       { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
 
-  modalOverlay: { flex: 1, backgroundColor: '#00000055', justifyContent: 'flex-end' },
-  modalSheet:   { backgroundColor: C.white, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-                  padding: 24, maxHeight: '65%' },
+  saveBtn:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.primary, borderRadius: 14, padding: 14, marginTop: 20 },
+  saveBtnTxt: { color: '#FFF', fontWeight: '900', fontSize: 15 },
+
+  // Calendario
+  calHint:    { fontSize: 11, color: C.gray500, marginBottom: 16, lineHeight: 16 },
+  monthRow:   { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
+  monthName:  { width: 72, fontSize: 12, fontWeight: '700', color: C.gray900 },
+  monthChips: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
+  monthEmpty: { fontSize: 11, color: C.gray500, fontStyle: 'italic' },
+  monthChip:  { backgroundColor: C.blue + '15', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  monthChipTxt: { fontSize: 10, fontWeight: '700', color: C.blue, maxWidth: 120 },
+  monthAddBtn:  { width: 28, height: 28, borderRadius: 14, backgroundColor: C.primary + '20', justifyContent: 'center', alignItems: 'center' },
+
+  // Modal calendario
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  modalSheet:   { backgroundColor: C.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 36, maxHeight: '80%' },
   modalTitle:   { fontSize: 18, fontWeight: '900', color: C.gray900, marginBottom: 4 },
   modalHint:    { fontSize: 11, color: C.gray500, marginBottom: 14 },
-  modalItem:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-                  paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: C.border },
-  modalItemActive:    { backgroundColor: C.blue + '0D', paddingHorizontal: 10, borderRadius: 8, marginHorizontal: -10 },
-  modalItemTxt:       { fontSize: 14, color: C.gray900, fontWeight: '600' },
+
+  // Items del modal — categoría
+  modalItem:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: C.border },
+  modalItemActive: { backgroundColor: C.blue + '0D', paddingHorizontal: 10, borderRadius: 8, marginHorizontal: -10 },
+  modalItemTxt:    { fontSize: 14, color: C.gray900, fontWeight: '600' },
   modalItemTxtActive: { color: C.blue, fontWeight: '900' },
-  modalClose:   { backgroundColor: C.gray900, borderRadius: 14, padding: 14, alignItems: 'center', marginTop: 14 },
-  modalCloseTxt:{ color: '#FFF', fontWeight: '900', fontSize: 14 },
+  modalClose:      { backgroundColor: C.gray900, borderRadius: 14, padding: 14, alignItems: 'center', marginTop: 14 },
+  modalCloseTxt:   { color: '#FFF', fontWeight: '900', fontSize: 14 },
 
-  // Categories
-  catCardDB:    { backgroundColor: C.white, borderRadius: 12, padding: 12, marginBottom: 8,
-                  borderWidth: 1, borderColor: C.border },
-  catCardHeader:{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  catCardName:  { fontSize: 13, fontWeight: '800', color: C.gray900 },
-  catCardTags:  { fontSize: 10, color: C.gray500 },
-  addCatRow:    { flexDirection: 'row', gap: 8, marginTop: 8 },
-  addCatInput:  { flex: 1, backgroundColor: C.white, borderRadius: 12, paddingHorizontal: 12,
-                  paddingVertical: 10, fontSize: 13, borderWidth: 1, borderColor: C.border },
-  addCatBtn:    { backgroundColor: C.blue, width: 44, height: 44, borderRadius: 22,
-                  justifyContent: 'center', alignItems: 'center' },
+  // Sprint 11: filas expandibles del modal
+  calCatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  calCatItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  calExpandBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  calExpandTxt: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: C.primary,
+  },
+  calSubItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 28,
+    paddingRight: 16,
+    paddingVertical: 9,
+    backgroundColor: '#F8F9FA',
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  calSubItemActive: {
+    backgroundColor: C.blueBg,
+  },
+  calSubTxt: {
+    flex: 1,
+    fontSize: 13,
+    color: '#555',
+    fontWeight: '500',
+  },
 
-  // Import
-  importDefaultCat: { fontSize: 14, fontWeight: '700', color: C.gray900 },
-  toggleBtn:    { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
-                  backgroundColor: C.gray100, borderWidth: 1, borderColor: C.border },
-  toggleBtnOn:  { backgroundColor: C.success, borderColor: C.success },
-  toggleTxt:    { fontSize: 12, fontWeight: '900', color: C.gray500 },
-  toggleTxtOn:  { color: '#FFF' },
+  // Categorías
+  catCardDB:     { backgroundColor: C.white, borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: C.border },
+  catCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  catCardName:   { flex: 1, fontSize: 13, fontWeight: '800', color: C.gray900 },
+  catCardTags:   { fontSize: 10, color: C.gray500 },
+  addCatRow:     { flexDirection: 'row', gap: 8, marginTop: 8 },
+  addCatInput:   { flex: 1, backgroundColor: C.white, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 13, borderWidth: 1, borderColor: C.border },
+  addCatBtn:     { backgroundColor: C.primary, width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
 
-  // Info box
-  infoBox:      { backgroundColor: C.blue + '0D', borderRadius: 14, padding: 14,
-                  flexDirection: 'row', gap: 10, marginBottom: 14 },
-  infoTxt:      { flex: 1, fontSize: 11, color: C.blue, lineHeight: 17 },
+  // BBDD
+  autoBackupCard:    { backgroundColor: C.white, borderRadius: 14, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: C.border },
+  autoBackupHeader:  { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  autoBackupDot:     { width: 10, height: 10, borderRadius: 5 },
+  autoBackupTitle:   { flex: 1, fontSize: 13, fontWeight: '800', color: C.gray900 },
+  autoBackupBody:    { gap: 6 },
+  autoBackupRow:     { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  autoBackupOk:      { fontSize: 12, color: C.success, fontWeight: '600' },
+  autoBackupWarn:    { fontSize: 12, color: C.warning, fontWeight: '600' },
+  autoBackupMeta:    { flexDirection: 'row', gap: 16, marginTop: 6 },
+  autoBackupMetaItem:{ alignItems: 'center' },
+  autoBackupMetaVal: { fontSize: 16, fontWeight: '900', color: C.gray900 },
+  autoBackupMetaLab: { fontSize: 9, color: C.gray500, fontWeight: '600' },
+  forceBackupBtn:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, borderWidth: 1.5, borderColor: C.blue, borderRadius: 10, padding: 10 },
+  forceBackupTxt:    { fontSize: 13, fontWeight: '700', color: C.blue },
 
-  // ── Auto-backup card (Sprint 10) ──────────────────────────────────────────
-  autoBackupCard:   { backgroundColor: C.white, borderRadius: 16, padding: 16, marginBottom: 14,
-                      borderWidth: 2, borderColor: C.border },
-  autoBackupHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-  autoBackupDot:    { width: 10, height: 10, borderRadius: 5 },
-  autoBackupTitle:  { flex: 1, fontSize: 13, fontWeight: '900', color: C.gray900 },
-  autoBackupBody:   { marginBottom: 12 },
-  autoBackupRow:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  autoBackupOk:     { fontSize: 12, color: C.success, fontWeight: '700', flex: 1 },
-  autoBackupWarn:   { fontSize: 12, color: C.warning, fontWeight: '700', flex: 1 },
-  autoBackupMeta:   { flexDirection: 'row', gap: 16, marginTop: 4 },
-  autoBackupMetaItem: { alignItems: 'center' },
-  autoBackupMetaVal:  { fontSize: 16, fontWeight: '900', color: C.gray900 },
-  autoBackupMetaLab:  { fontSize: 9, color: C.gray500, textTransform: 'uppercase', marginTop: 1 },
-  forceBackupBtn:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                      gap: 8, padding: 12, borderRadius: 12,
-                      backgroundColor: C.blue + '12', borderWidth: 1, borderColor: C.blue + '30' },
-  forceBackupTxt:   { fontSize: 13, fontWeight: '800', color: C.blue },
+  infoBox:    { flexDirection: 'row', gap: 10, backgroundColor: '#EAF2FB', borderRadius: 12, padding: 12, marginBottom: 14 },
+  infoTxt:    { flex: 1, fontSize: 11, color: C.gray900, lineHeight: 18 },
 
-  // ── BBDD Tab styles ────────────────────────────────────────────────────────
-  dbStatsCard:  { backgroundColor: C.white, borderRadius: 16, padding: 16, marginBottom: 14,
-                  borderWidth: 1, borderColor: C.border },
-  dbStatsTitle: { fontSize: 12, fontWeight: '800', color: C.gray900, marginBottom: 12,
-                  textTransform: 'uppercase', letterSpacing: 0.5 },
-  dbStatsGrid:  { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 10 },
-  dbStatItem:   { alignItems: 'center', minWidth: 60 },
-  dbStatVal:    { fontSize: 22, fontWeight: '900', color: C.gray900 },
-  dbStatLab:    { fontSize: 9, color: C.gray500, marginTop: 2, textTransform: 'uppercase' },
-  dbIngresoRow: { flexDirection: 'row', alignItems: 'center', gap: 6,
-                  backgroundColor: C.success + '10', borderRadius: 10, padding: 8, marginTop: 4 },
-  dbIngresoTxt: { fontSize: 11, color: C.gray900, flex: 1 },
+  dbStatsCard:  { backgroundColor: C.white, borderRadius: 14, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: C.border },
+  dbStatsTitle: { fontSize: 12, fontWeight: '800', color: C.gray900, marginBottom: 10 },
+  dbStatsGrid:  { flexDirection: 'row', gap: 12 },
+  dbStatItem:   { flex: 1, alignItems: 'center' },
+  dbStatVal:    { fontSize: 20, fontWeight: '900', color: C.gray900 },
+  dbStatLab:    { fontSize: 9, color: C.gray500, fontWeight: '600', marginTop: 2 },
+  dbIngresoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
+  dbIngresoTxt: { fontSize: 11, color: C.gray900 },
 
-  dbActionsRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
-  dbActionBtn:  { flex: 1, borderRadius: 16, padding: 16, alignItems: 'center', gap: 6 },
-  dbActionTxt:  { color: '#FFF', fontSize: 13, fontWeight: '900' },
-  dbActionSub:  { color: 'rgba(255,255,255,0.7)', fontSize: 9 },
+  dbActionsRow:   { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  dbActionBtn:    { flex: 1, alignItems: 'center', padding: 14, borderRadius: 14, gap: 4 },
+  dbActionTxt:    { color: '#FFF', fontWeight: '900', fontSize: 13 },
+  dbActionSub:    { color: 'rgba(255,255,255,0.75)', fontSize: 9 },
+  refreshStatsBtn:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 10 },
+  refreshStatsTxt:{ fontSize: 12, color: C.blue, fontWeight: '700' },
 
-  deploySteps:  { backgroundColor: C.white, borderRadius: 16, padding: 16,
-                  borderWidth: 1, borderColor: C.border, marginBottom: 12 },
-  deployStepsTitle: { fontSize: 12, fontWeight: '800', color: C.gray900, marginBottom: 12 },
-  deployStep:   { flexDirection: 'row', gap: 10, marginBottom: 10, alignItems: 'flex-start' },
-  deployStepNum:{ width: 22, height: 22, borderRadius: 11, backgroundColor: C.blue,
-                  justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
-  deployStepNumTxt: { fontSize: 10, fontWeight: '900', color: '#FFF' },
-  deployStepTxt:{ flex: 1, fontSize: 11, color: C.gray700, lineHeight: 16 },
-
-  refreshStatsBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 10,
-                     justifyContent: 'center' },
-  refreshStatsTxt: { fontSize: 11, fontWeight: '700', color: C.blue },
+  importDefaultCat:{ fontSize: 14, fontWeight: '700', color: C.gray900 },
+  toggleBtn:       { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: C.gray100, borderWidth: 1, borderColor: C.border },
+  toggleBtnOn:     { backgroundColor: C.success, borderColor: C.success },
+  toggleTxt:       { fontSize: 12, fontWeight: '700', color: C.gray500 },
+  toggleTxtOn:     { color: '#FFF' },
 });
