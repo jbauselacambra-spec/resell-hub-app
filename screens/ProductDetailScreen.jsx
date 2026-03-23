@@ -152,22 +152,27 @@ function CatModal({ visible, onClose, onSelect, currentCat, currentSub }) {
   const [selCat, setSelCat] = useState(currentCat || null);
   const [step, setStep]     = useState('cat');
 
-  React.useEffect(() => {
-    if (!visible) return;
-    // Cargar diccionario completo (con subcategorías)
-    const full = DatabaseService.getFullDictionary() || {};
-    if (Object.keys(full).length) {
-      setDict(full);
-    } else {
-      // Fallback: convertir diccionario legacy a formato full
-      const leg = DatabaseService.getDictionary();
-      const b   = {};
-      Object.keys(leg).forEach(k => { b[k] = { tags: leg[k], subcategories: {} }; });
-      setDict(b);
-    }
-    setSelCat(currentCat || null);
-    setStep('cat');
-  }, [visible, currentCat]);
+React.useEffect(() => {
+  if (!visible) return;
+  // Prioridad: diccionario completo con subcategorías
+  const full = DatabaseService.getFullDictionary();
+  if (full && Object.keys(full).length > 0) {
+    setDict(full);
+  } else {
+    // Fallback: diccionario legacy
+    const leg = DatabaseService.getDictionary();
+    const b   = {};
+    Object.keys(leg || {}).forEach(k => {
+      const val = leg[k];
+      b[k] = Array.isArray(val)
+        ? { tags: val, subcategories: {} }
+        : { tags: val?.tags || [], subcategories: val?.subcategories || {} };
+    });
+    setDict(Object.keys(b).length > 0 ? b : {});
+  }
+  setSelCat(currentCat || null);
+  setStep('cat');
+}, [visible, currentCat]);
 
   const cats    = Object.keys(dict);
   const catData = selCat ? dict[selCat] : null;
