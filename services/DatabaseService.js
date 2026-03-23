@@ -207,6 +207,49 @@ export class DatabaseService {
     } catch { return { ...DEFAULT_CONFIG }; }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+// INSERCIÓN 1: Después de `static getConfig()`, antes de `static saveConfig()`
+// ─────────────────────────────────────────────────────────────────────────────
+ 
+  /**
+   * [DATA_SCIENTIST] Sprint 11
+   * Parsea un item del seasonalMap.
+   * Si contiene ' › ', es una subcategoría específica.
+   * Si no, es una categoría entera.
+   *
+   * @param {string} item — item del seasonalMap
+   * @returns {{ cat: string, sub: string|null }}
+   */
+  static parseSeasonalItem(item) {
+    if (!item || typeof item !== 'string') return { cat: '', sub: null };
+    const idx = item.indexOf(' › ');
+    if (idx === -1) return { cat: item, sub: null };
+    return { cat: item.slice(0, idx), sub: item.slice(idx + 3) };
+  }
+ 
+  /**
+   * [DATA_SCIENTIST] Sprint 11
+   * Comprueba si un producto coincide con algún item del seasonalMap del mes.
+   * Soporta tanto categorías (match si product.category === cat) como
+   * subcategorías específicas (match si category === cat AND subcategory === sub).
+   *
+   * Retrocompatible: strings sin ' › ' se comportan como antes.
+   *
+   * @param {object} product — producto con { category, subcategory }
+   * @param {string[]} seasonalItems — array del seasonalMap[monthIdx]
+   * @returns {boolean}
+   */
+  static productMatchesSeasonal(product, seasonalItems) {
+    if (!Array.isArray(seasonalItems) || !product) return false;
+    return seasonalItems.some(item => {
+      const { cat, sub } = this.parseSeasonalItem(item);
+      if (!sub) return product.category === cat;
+      return product.category === cat && product.subcategory === sub;
+    });
+  }
+ 
+ 
+
   static saveConfig(config) {
     try {
       storage.set(KEYS.CONFIG, JSON.stringify(config));
@@ -367,6 +410,20 @@ export class DatabaseService {
       const config  = this.getConfig();
       const current = this.getAllProducts();
       const map     = new Map(current.map(p => [String(p.id), p]));
+
+
+      // [FIX anti-duplicados] Índice de sold con precio conocido
+      const _normTitle = (s) =>
+        (s || '').toLowerCase().replace(/[^\wáéíóúüñ\s]/gi, ' ').replace(/\s+/g, ' ').trim();
+      const _soldByTitle = new Map();
+      current.forEach(ex => {
+        if (ex.status === 'sold' && ex.soldPriceReal) {
+          const key = _normTitle(ex.title);
+          if (!_soldByTitle.has(key)) _soldByTitle.set(key, []);
+          _soldByTitle.get(key).push(ex);
+        }
+      });
+
       const now     = new Date().toISOString();
       const incomingIds = new Set(newProducts.map(p => String(p.id)));
       let created = 0, updated = 0, reposted = 0, priceChanged = 0;
@@ -389,6 +446,18 @@ export class DatabaseService {
           updated++;
         } else {
           const existing       = Array.from(map.values());
+
+          // [FIX anti-duplicados] Skip si ya existe sold con este título y precio real
+          if (p.status === 'sold') {
+            const _key = _normTitle(p.title);
+            const _existing = _soldByTitle.get(_key) || [];
+            if (_existing.length > 0) {
+              LogService.debug(`Skip dup sold: "${p.title}" → ya existe ${_existing[0].id}`, LOG_CTX.IMPORT);
+              return;
+            }
+          }
+
+
           const repostOriginal = detectRepost(existing, p);
           const newEntry       = {
             ...p, isBundle: false, lastSync: now,
@@ -405,6 +474,14 @@ export class DatabaseService {
             reposted++;
           } else { created++; }
           map.set(id, newEntry);
+
+          // [FIX anti-duplicados] Registrar en índice al crear nuevo sold con precio
+          if (newEntry.status === 'sold' && newEntry.soldPriceReal) {
+            const _k = _normTitle(newEntry.title);
+            if (!_soldByTitle.has(_k)) _soldByTitle.set(_k, []);
+            _soldByTitle.get(_k).push(newEntry);
+          }
+
         }
       });
 
@@ -756,11 +833,15 @@ export class DatabaseService {
           action: 'REVISAR PRECIO', icon: 'clock', category: cat, subcategory: sub || null, effectiveTTS: effTTS,
         });
       }
-      // 2. ESTACIONALIDAD
-      if (seasonalCats.includes(cat)) {
+     // 2. ESTACIONALIDAD — Sprint 11: soporta 'Cat' y 'Cat › Sub' en seasonalMap
+      const productSeasonalKey = sub ? `${cat} › ${sub}` : null;
+      const isSeasonalCat = seasonalCats.includes(cat);
+      const isSeasonalSub = !!productSeasonalKey && seasonalCats.includes(productSeasonalKey);
+      if (isSeasonalCat || isSeasonalSub) {
+        const seasonalLabel = isSeasonalSub ? `${cat} › ${sub}` : cat;
         alerts.push({
           type: 'seasonal', priority: 'high', productId: p.id,
-          title: `🔥 Temporada de ${cat}`,
+          title: `🔥 Temporada de ${seasonalLabel}`,
           message: `${p.title}${sub ? ` (${sub})` : ''} encaja con este mes. Republica y sube un ${parseInt(config.priceBoostPct||10)}%.`,
           action: 'REPUBLICAR / SUBIR', icon: 'zap', category: cat, subcategory: sub || null,
         });
