@@ -36,6 +36,53 @@ const DS = {
 const fmt  = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('es-ES', { day:'2-digit', month:'long', year:'numeric' }); } catch { return '—'; } };
 const fmtS = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('es-ES', { day:'2-digit', month:'short', year:'numeric' }); } catch { return '—'; } };
 
+// ─── Helper: cargar diccionario completo con fallbacks ────────────────────────
+// [FIX Sprint 12+] Función centralizada para cargar el diccionario.
+// Intenta 3 fuentes en orden de prioridad:
+//   1. getFullDictionary() — nuevo formato con subcategorías
+//   2. getDictionary()     — formato legacy (sin subcategorías)
+//   3. {} vacío            — fallback seguro
+// Normaliza siempre al formato { cat: { tags[], subcategories: { sub: { tags[] } } } }
+function loadDictionaryWithFallbacks() {
+  try {
+    // Prioridad 1: diccionario completo con subcategorías
+    const full = DatabaseService.getFullDictionary();
+    if (full && typeof full === 'object' && Object.keys(full).length > 0) {
+      LogService.debug(
+        `CatModal: dict completo cargado — ${Object.keys(full).length} cats`,
+        LOG_CTX.UI,
+      );
+      return full;
+    }
+
+    // Prioridad 2: diccionario legacy (puede tener sólo arrays de tags)
+    const legacy = DatabaseService.getDictionary();
+    if (legacy && typeof legacy === 'object' && Object.keys(legacy).length > 0) {
+      LogService.debug(
+        `CatModal: usando dict legacy — ${Object.keys(legacy).length} cats (sin subs)`,
+        LOG_CTX.UI,
+      );
+      const normalized = {};
+      Object.entries(legacy).forEach(([cat, val]) => {
+        normalized[cat] = Array.isArray(val)
+          ? { tags: val, subcategories: {} }
+          : { tags: val?.tags || [], subcategories: val?.subcategories || {} };
+      });
+      return normalized;
+    }
+
+    // Sin diccionario configurado
+    LogService.warn(
+      'CatModal: diccionario vacío — configura categorías en Ajustes → Categorías',
+      LOG_CTX.UI,
+    );
+    return {};
+  } catch (e) {
+    LogService.error('CatModal.loadDictionaryWithFallbacks', LOG_CTX.UI, e);
+    return {};
+  }
+}
+
 // ─── CalPicker canónico ───────────────────────────────────────────────────────
 function CalPicker({ visible, onClose, value, onChange, accent = DS.primary, label }) {
   const [nav, setNav]           = useState(value ? new Date(value) : new Date());
@@ -143,41 +190,66 @@ const cS = StyleSheet.create({
   cancelTxt:    {fontSize:11,fontWeight:'700',color:DS.textMed},
 });
 
-// ─── Modal Categoría con subcategorías — Sprint 11 ────────────────────────────
-// Soporta diccionario completo (cat → subcategorías → tags)
-// Paso 1: seleccionar categoría
-// Paso 2: seleccionar subcategoría (si la categoría tiene subcategorías configuradas)
+// ─── Modal Categoría con subcategorías ───────────────────────────────────────
+// [FIX Sprint 12+]
+// ROOT CAUSE del bug: el useEffect cargaba el diccionario solo cuando `visible` cambiaba,
+// pero si getFullDictionary() devolvía null (porque las categorías nunca se guardaron en
+// el MMKV correcto — bug Hotfix 5 BUG-C), el modal mostraba un dict vacío.
+//
+// SOLUCIÓN:
+//   1. loadDictionaryWithFallbacks() intenta 3 fuentes antes de rendirse
+//   2. useState inicializa con el diccionario ya cargado (no espera al useEffect)
+//   3. useEffect actualiza si el dict cambia mientras el modal está visible
+//   4. Logs de diagnóstico ayudan a identificar el origen del problema
 function CatModal({ visible, onClose, onSelect, currentCat, currentSub }) {
-  const [dict, setDict]     = useState({});
+  // [FIX] Inicializar con el diccionario ya cargado — no esperar al useEffect
+  const [dict, setDict]     = useState(() => loadDictionaryWithFallbacks());
   const [selCat, setSelCat] = useState(currentCat || null);
   const [step, setStep]     = useState('cat');
 
   React.useEffect(() => {
-    if (!visible) return;
-    // Prioridad: diccionario completo con subcategorías
-    const full = DatabaseService.getFullDictionary();
-    if (full && Object.keys(full).length > 0) {
-      setDict(full);
-    } else {
-      // Fallback: diccionario legacy
-      const leg = DatabaseService.getDictionary();
-      const b   = {};
-      Object.keys(leg || {}).forEach(k => {
-        const val = leg[k];
-        b[k] = Array.isArray(val)
-          ? { tags: val, subcategories: {} }
-          : { tags: val?.tags || [], subcategories: val?.subcategories || {} };
-      });
-      setDict(Object.keys(b).length > 0 ? b : {});
-    }
-    setSelCat(currentCat || null);
-    setStep('cat');
-  }, [visible, currentCat]);
+  if (!visible) return;
+ 
+  const full = DatabaseService.getFullDictionary();
+  const catCount = full ? Object.keys(full).length : 0;
+  const subCount = full
+    ? Object.values(full).reduce((acc, cat) => {
+        return acc + Object.keys(cat?.subcategories || {}).length;
+      }, 0)
+    : 0;
+ 
+  console.log(`🔍 CatModal useEffect: full=${JSON.stringify(full)}`);
+  console.log(`🔍 CatModal: ${catCount} cats, ${subCount} subcats`);
+ 
+  if (full && catCount > 0) {
+    setDict(full);
+  } else {
+    // Fallback a diccionario legacy
+    const leg = DatabaseService.getDictionary();
+    const b = {};
+    Object.keys(leg || {}).forEach(k => {
+      const val = leg[k];
+      b[k] = Array.isArray(val)
+        ? { tags: val, subcategories: {} }
+        : { tags: val?.tags || [], subcategories: val?.subcategories || {} };
+    });
+    setDict(Object.keys(b).length > 0 ? b : {});
+  }
+ 
+  setSelCat(currentCat || null);
+  setStep('cat');
+}, [visible, currentCat]);
 
   const cats    = Object.keys(dict);
   const catData = selCat ? dict[selCat] : null;
   const subs    = catData ? Object.keys(catData.subcategories || {}) : [];
-  const hasSubs = (cat) => Object.keys(dict[cat]?.subcategories || {}).length > 0;
+  const hasSubs = (cat) => {
+  const subs = dict[cat]?.subcategories;
+  const count = Object.keys(subs || {}).length;
+  // Log solo la primera vez que se evalúa para no saturar
+  // console.log(`hasSubs(${cat}): ${count} subcats`, subs);
+  return count > 0;
+};
 
   const pickCat = (cat) => {
     if (hasSubs(cat)) {
@@ -235,10 +307,21 @@ function CatModal({ visible, onClose, onSelect, currentCat, currentSub }) {
             </View>
           )}
 
+          {/* Lista vacía — mensaje de ayuda */}
+          {cats.length === 0 && step === 'cat' && (
+            <View style={mS.emptyBox}>
+              <Icon name="tag" size={32} color={DS.textLow}/>
+              <Text style={mS.emptyTitle}>Sin categorías configuradas</Text>
+              <Text style={mS.emptySub}>
+                Ve a Ajustes → Categorías para añadir tus categorías y subcategorías.
+              </Text>
+            </View>
+          )}
+
           <FlatList
             data={listData}
             keyExtractor={item => item}
-            style={{flexGrow: 0, maxHeight: 420}}
+            style={{flexGrow: 0, maxHeight: cats.length === 0 ? 0 : 420}}
             renderItem={({item}) => {
               const isNone    = item === '__none__';
               const label     = isNone ? 'Sin subcategoría' : item;
@@ -248,7 +331,6 @@ function CatModal({ visible, onClose, onSelect, currentCat, currentSub }) {
                 ? item === currentCat
                 : (!isNone && item === currentSub) || (isNone && !currentSub);
 
-              // Tags para preview en paso cat
               const previewTags = step === 'cat' && dict[item]?.tags?.slice(0,4) || [];
 
               return (
@@ -313,6 +395,10 @@ const mS = StyleSheet.create({
   itemActive: {backgroundColor:DS.blueBg,paddingHorizontal:10,marginHorizontal:-10,borderRadius:10},
   itemTxt:    {fontSize:15,color:DS.text,fontWeight:'600'},
   itemSub:    {fontSize:10,color:DS.textMed,marginTop:3},
+  // Estado vacío
+  emptyBox:   {alignItems:'center',padding:24,gap:10},
+  emptyTitle: {fontSize:15,fontWeight:'800',color:DS.textMed,textAlign:'center'},
+  emptySub:   {fontSize:12,color:DS.textLow,textAlign:'center',lineHeight:18},
 });
 
 // ─── Modal Vendido ────────────────────────────────────────────────────────────
@@ -465,7 +551,6 @@ export default function ProductDetailScreen({ route, navigation }) {
   // ─── Vista de producto ────────────────────────────────────────────────────
   const renderView = () => (
     <>
-      {/* Marca + Categoría */}
       <View style={styles.topRow}>
         <Text style={styles.brandTxt}>{product.brand || 'Sin marca'}</Text>
         {(product.category || product.subcategory) && (
@@ -482,7 +567,6 @@ export default function ProductDetailScreen({ route, navigation }) {
         )}
       </View>
 
-      {/* Título + Precio */}
       <View style={styles.titleRow}>
         <Text style={styles.titleTxt} numberOfLines={3}>{product.title}</Text>
         <View style={styles.pricePill}>
@@ -490,7 +574,6 @@ export default function ProductDetailScreen({ route, navigation }) {
         </View>
       </View>
 
-      {/* Bundle badge */}
       {product.isBundle && (
         <View style={styles.bundleBadge}>
           <Icon name="package" size={11} color={DS.purple}/>
@@ -498,7 +581,6 @@ export default function ProductDetailScreen({ route, navigation }) {
         </View>
       )}
 
-      {/* Semáforo de estado */}
       <View style={[styles.statusBar, {borderColor: sC+'40', backgroundColor: sC+'0E'}]}>
         <View style={[styles.statusDot, {backgroundColor: sC}]}/>
         <Text style={[styles.statusLbl, {color: sC}]}>{sL}</Text>
@@ -511,7 +593,6 @@ export default function ProductDetailScreen({ route, navigation }) {
         )}
       </View>
 
-      {/* Stats */}
       <View style={styles.statsRow}>
         {[
           {icon:'eye',   lbl:'VISTAS',   val: product.views     || 0, c: DS.blue},
@@ -526,7 +607,6 @@ export default function ProductDetailScreen({ route, navigation }) {
         ))}
       </View>
 
-      {/* Historial de precio */}
       {product.priceHistory?.length > 0 && (
         <View style={styles.histBox}>
           <View style={styles.histHdr}>
@@ -542,7 +622,6 @@ export default function ProductDetailScreen({ route, navigation }) {
         </View>
       )}
 
-      {/* Fecha de subida */}
       <View style={styles.dateBar}>
         <View style={[styles.dateIcon, {backgroundColor: DS.primaryBg}]}>
           <Icon name="upload" size={13} color={DS.primary}/>
@@ -553,7 +632,6 @@ export default function ProductDetailScreen({ route, navigation }) {
         </View>
       </View>
 
-      {/* Tags de categoría */}
       {catTags.length > 0 && (
         <View style={styles.tagsSection}>
           <Text style={styles.sectionLabel}>TAGS DE CATEGORÍA</Text>
@@ -567,11 +645,9 @@ export default function ProductDetailScreen({ route, navigation }) {
         </View>
       )}
 
-      {/* Descripción */}
       <Text style={styles.sectionLabel}>DESCRIPCIÓN</Text>
       <Text style={styles.descTxt}>{product.description || 'Sin descripción'}</Text>
 
-      {/* Acciones */}
       <View style={styles.actionsRow}>
         <TouchableOpacity style={styles.btnEdit} onPress={() => setEditing(true)}>
           <Icon name="edit-3" size={16} color={DS.text}/>
@@ -603,7 +679,6 @@ export default function ProductDetailScreen({ route, navigation }) {
         </View>
       </View>
 
-      {/* Categoría / Subcategoría */}
       <Text style={styles.sectionLabel}>CATEGORÍA / SUBCATEGORÍA</Text>
       <TouchableOpacity style={styles.catSelector} onPress={() => setCatModal(true)}>
         <View style={[styles.catSelIcon, {backgroundColor: DS.blueBg}]}>
@@ -623,7 +698,6 @@ export default function ProductDetailScreen({ route, navigation }) {
         <Icon name="chevron-right" size={16} color={DS.textLow}/>
       </TouchableOpacity>
 
-      {/* Preview de tags */}
       {(() => {
         const full = DatabaseService.getFullDictionary() || {};
         const catD = full[editForm.category];
@@ -646,7 +720,6 @@ export default function ProductDetailScreen({ route, navigation }) {
         );
       })()}
 
-      {/* Fecha de subida */}
       <Text style={[styles.sectionLabel, {marginTop:16}]}>FECHA DE SUBIDA ORIGINAL</Text>
       <TouchableOpacity style={styles.datePickBtn} onPress={() => setShowCal(true)}>
         <View style={[styles.datePickIcon, {backgroundColor: DS.primaryBg}]}>
@@ -659,7 +732,6 @@ export default function ProductDetailScreen({ route, navigation }) {
         <Icon name="chevron-right" size={16} color={DS.textLow}/>
       </TouchableOpacity>
 
-      {/* Botones */}
       <View style={styles.editActions}>
         <TouchableOpacity style={styles.btnSave} onPress={handleSave}>
           <Icon name="save" size={15} color="#FFF"/>
@@ -715,7 +787,6 @@ export default function ProductDetailScreen({ route, navigation }) {
 const styles = StyleSheet.create({
   container:      {flex:1, backgroundColor: DS.bg},
 
-  // Hero
   hero:           {height:320, position:'relative'},
   heroImg:        {width, height:320},
   heroPlaceholder:{backgroundColor: DS.border, justifyContent:'center', alignItems:'center'},
@@ -726,11 +797,9 @@ const styles = StyleSheet.create({
                    paddingVertical:7, borderRadius:20},
   heroBadgeTxt:   {color:'#FFF', fontWeight:'900', fontSize:12, letterSpacing:0.4},
 
-  // Content card
   contentCard:    {backgroundColor: DS.white, borderTopLeftRadius:28, borderTopRightRadius:28,
                    padding:24, marginTop:-28, minHeight:500},
 
-  // Fila superior
   topRow:         {flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:10},
   brandTxt:       {fontSize:11, fontWeight:'900', color: DS.primary, letterSpacing:1.2, textTransform:'uppercase'},
   catPill:        {flexDirection:'row', alignItems:'center', gap:4, backgroundColor: DS.blueBg,
@@ -738,19 +807,16 @@ const styles = StyleSheet.create({
   catPillTxt:     {fontSize:10, fontWeight:'800', color: DS.blue},
   catSep:         {fontSize:10, color: DS.textLow},
 
-  // Título + precio
   titleRow:       {flexDirection:'row', alignItems:'flex-start', gap:10, marginBottom:10},
   titleTxt:       {flex:1, fontSize:21, fontWeight:'900', color: DS.text, lineHeight:27},
   pricePill:      {backgroundColor: DS.primary, paddingHorizontal:14, paddingVertical:8, borderRadius:14},
   pricePillTxt:   {color:'#FFF', fontWeight:'900', fontSize:16},
 
-  // Bundle
   bundleBadge:    {flexDirection:'row', alignItems:'center', gap:6, backgroundColor: DS.purpleBg,
                    paddingHorizontal:10, paddingVertical:5, borderRadius:10,
                    alignSelf:'flex-start', marginBottom:10},
   bundleTxt:      {fontSize:10, fontWeight:'900', color: DS.purple},
 
-  // Semáforo
   statusBar:      {flexDirection:'row', alignItems:'center', gap:8, borderWidth:1,
                    borderRadius:14, padding:12, marginBottom:14},
   statusDot:      {width:8, height:8, borderRadius:4},
@@ -760,14 +826,12 @@ const styles = StyleSheet.create({
                    paddingHorizontal:7, paddingVertical:3, borderRadius:8},
   repostTxt:      {fontSize:9, fontWeight:'800', color: DS.blue},
 
-  // Stats
   statsRow:       {flexDirection:'row', gap:10, marginBottom:14},
   statCard:       {flex:1, backgroundColor: DS.bg, borderRadius:16, padding:12,
                    alignItems:'center', gap:4},
   statVal:        {fontSize:20, fontWeight:'900', fontFamily: DS.mono},
   statLbl:        {fontSize:8, fontWeight:'900', color: DS.textLow, letterSpacing:1},
 
-  // Historial precio
   histBox:        {backgroundColor: DS.primaryBg, borderRadius:14, padding:14,
                    marginBottom:14, borderWidth:1, borderColor: DS.primary+'25'},
   histHdr:        {flexDirection:'row', alignItems:'center', gap:6, marginBottom:8},
@@ -776,25 +840,21 @@ const styles = StyleSheet.create({
   histTxt:        {fontSize:12, fontWeight:'700', color: DS.text},
   histDate:       {fontSize:10, color: DS.textMed},
 
-  // Fecha bar
   dateBar:        {flexDirection:'row', alignItems:'center', gap:12, backgroundColor: DS.bg,
                    borderRadius:14, padding:12, marginBottom:14},
   dateIcon:       {width:36, height:36, borderRadius:10, justifyContent:'center', alignItems:'center'},
   dateLbl:        {fontSize:10, color: DS.textMed, marginBottom:2},
   dateVal:        {fontSize:13, fontWeight:'800', color: DS.text},
 
-  // Tags
   tagsSection:    {marginBottom:14},
   tagsCloud:      {flexDirection:'row', flexWrap:'wrap', gap:7, marginTop:6},
   tag:            {backgroundColor: DS.blueBg, paddingHorizontal:10, paddingVertical:5, borderRadius:10},
   tagTxt:         {fontSize:11, color: DS.blue, fontWeight:'700'},
 
-  // Descripción
   sectionLabel:   {fontSize:10, fontWeight:'900', color: DS.textLow, letterSpacing:1.5,
                    textTransform:'uppercase', marginBottom:6, marginTop:14},
   descTxt:        {fontSize:14, color: DS.textMed, lineHeight:22, marginBottom:16},
 
-  // Acciones
   actionsRow:     {flexDirection:'row', gap:10, marginTop:16},
   btnEdit:        {flex:1, flexDirection:'row', alignItems:'center', justifyContent:'center',
                    gap:8, backgroundColor: DS.bg, borderWidth:1, borderColor: DS.border,
@@ -804,7 +864,6 @@ const styles = StyleSheet.create({
                    gap:8, backgroundColor: DS.success, paddingVertical:15, borderRadius:18},
   btnVendidoTxt:  {fontSize:13, fontWeight:'900', color:'#FFF', letterSpacing:0.5},
 
-  // Edición
   editBanner:     {flexDirection:'row', alignItems:'center', gap:12, backgroundColor: DS.primaryBg,
                    borderRadius:16, padding:14, marginBottom:16, borderWidth:1, borderColor: DS.primary+'20'},
   editTitle:      {fontSize:15, fontWeight:'900', color: DS.text},
@@ -829,14 +888,12 @@ const styles = StyleSheet.create({
                    borderWidth:1, borderColor: DS.border, padding:16, borderRadius:18},
   btnCancelTxt:   {color: DS.textMed, fontWeight:'800'},
 
-  // Modal overlay
   modalOverlay:   {flex:1, backgroundColor:'#00000060', justifyContent:'flex-end'},
   modalCloseBtn:  {width:30, height:30, borderRadius:15, backgroundColor: DS.bg,
                    justifyContent:'center', alignItems:'center'},
   handle:         {width:40, height:4, backgroundColor: DS.border, borderRadius:2,
                    alignSelf:'center', marginBottom:14},
 
-  // Sold modal
   soldSheet:      {backgroundColor: DS.white, borderTopLeftRadius:28, borderTopRightRadius:28,
                    paddingBottom:30},
   soldHdr:        {flexDirection:'row', alignItems:'center', gap:12, padding:20,

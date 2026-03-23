@@ -272,14 +272,47 @@ export class DatabaseService {
     try { storage.set(KEYS.DICTIONARY, JSON.stringify(dict)); _triggerBackup(); return true; }
     catch { return false; }
   }
-  static getFullDictionary() {
-    try { const r = storage.getString(KEYS.FULL_DICTIONARY); return r ? JSON.parse(r) : null; }
-    catch { return null; }
+
+ static getFullDictionary() {
+    try {
+      const r = storage.getString(KEYS.FULL_DICTIONARY);
+      if (!r) return null;
+      // Copia profunda al leer para evitar mutaciones externas
+      return JSON.parse(r);
+    } catch (e) {
+      LogService.add('❌ getFullDictionary error: ' + e.message, 'error');
+      return null;
+    }
   }
-  static saveFullDictionary(dict) {
-    try { storage.set(KEYS.FULL_DICTIONARY, JSON.stringify(dict)); _triggerBackup(); return true; }
-    catch { return false; }
+
+static saveFullDictionary(dict) {
+    try {
+      // Copia profunda limpia ANTES de serializar
+      // Evita que referencias internas de React corrompan JSON.stringify
+      const cleanDict = JSON.parse(JSON.stringify(dict));
+      storage.set(KEYS.FULL_DICTIONARY, JSON.stringify(cleanDict));
+ 
+      // Verificación inmediata de lo guardado
+      const readBack = storage.getString(KEYS.FULL_DICTIONARY);
+      if (readBack) {
+        const verified = JSON.parse(readBack);
+        const catCount = Object.keys(verified).length;
+        const subCount = Object.values(verified).reduce((acc, cat) => {
+          return acc + Object.keys(cat?.subcategories || {}).length;
+        }, 0);
+        LogService.add(
+          `✅ saveFullDictionary: ${catCount} cats, ${subCount} subcats`,
+          'success',
+        );
+      }
+      _triggerBackup();
+      return true;
+    } catch (e) {
+      LogService.add('❌ saveFullDictionary error: ' + e.message, 'error');
+      return false;
+    }
   }
+
   static getCategoryTags(category, subcategory) {
     const full   = this.getFullDictionary();
     const legacy = this.getDictionary();

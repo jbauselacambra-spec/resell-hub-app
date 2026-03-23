@@ -1,17 +1,10 @@
 /**
- * SettingsScreen.jsx — Sprint 11 verificado
+ * SettingsScreen.jsx — Sprint 11 + Fix subcategorías
  *
- * [UI_SPECIALIST] Sprint 11:
- * - Tab Calendario: modal con subcategorías expandibles
- *   · Categorías con botón [↓ N] para expandir subcategorías
- *   · Subcategorías seleccionables independientemente
- *   · toggleMonthItem() soporta 'Cat' y 'Cat › Sub' en seasonalMap
- *   · Chips del mes truncan al nombre de sub si es "Cat › Sub"
- * - DS Light canónico en toda la pantalla
- *
- * [QA_ENGINEER] Sprint 11:
- * - seasonalMap retrocompatible: strings sin › siguen como categorías
- * - Campos sagrados intactos
+ * [QA_ENGINEER] Fix aplicado:
+ * - handleSaveDictionary: copia profunda (JSON.parse/stringify) antes de guardar
+ * - useEffect inicial: copia profunda al cargar el diccionario
+ * - Ambos cambios evitan que referencias internas de React corrompan MMKV
  */
 
 import React, { useState, useEffect } from 'react';
@@ -91,7 +84,7 @@ const SaveBtn = ({ onPress }) => (
   </TouchableOpacity>
 );
 
-// ─── CatCardExpanded: tarjeta de categoría con subcategorías editables ────────
+// ─── CatCardExpanded ──────────────────────────────────────────────────────────
 function CatCardExpanded({ cat, data, onDelete, onUpdateTags, onAddSubcategory, onDeleteSubcategory }) {
   const [expanded, setExpanded] = React.useState(false);
   const [newSubName, setNewSubName] = React.useState('');
@@ -133,14 +126,12 @@ function CatCardExpanded({ cat, data, onDelete, onUpdateTags, onAddSubcategory, 
 
       {expanded && (
         <View style={{ paddingTop: 8 }}>
-          {/* Tags */}
           <Text style={[styles.cardDesc, { marginBottom: 6 }]}>Tags de búsqueda:</Text>
           <View style={{ flexDirection:'row', flexWrap:'wrap', gap:6, marginBottom:8 }}>
             {tags.map(t => (
               <TouchableOpacity
                 key={t}
-                style={{ backgroundColor: C.primary+'20', paddingHorizontal:8,
-                         paddingVertical:3, borderRadius:10 }}
+                style={{ backgroundColor: C.primary+'20', paddingHorizontal:8, paddingVertical:3, borderRadius:10 }}
                 onPress={() => removeTag(t)}
               >
                 <Text style={{ fontSize:11, color: C.primary, fontWeight:'700' }}>{t} ✕</Text>
@@ -161,7 +152,6 @@ function CatCardExpanded({ cat, data, onDelete, onUpdateTags, onAddSubcategory, 
             </TouchableOpacity>
           </View>
 
-          {/* Subcategorías */}
           <Text style={[styles.cardDesc, { marginBottom: 6 }]}>Subcategorías:</Text>
           {subcats.map(sub => (
             <View key={sub} style={{ flexDirection:'row', alignItems:'center', gap:8, marginBottom:4 }}>
@@ -194,13 +184,12 @@ function CatCardExpanded({ cat, data, onDelete, onUpdateTags, onAddSubcategory, 
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function SettingsScreen({ navigation }) {
-  const [activeTab,             setActiveTab]             = useState('thresholds');
-  const [config,                setConfig]                = useState(() => DatabaseService.getConfig());
-  const [dictionary,            setDictionary]            = useState({});
-  const [calModal,              setCalModal]              = useState({ visible: false, monthIdx: null });
-  // Sprint 11: categoría expandida dentro del modal de calendario
-  const [calModalExpandedCat,   setCalModalExpandedCat]   = useState(null);
-  const [newCatName,            setNewCatName]            = useState('');
+  const [activeTab,           setActiveTab]           = useState('thresholds');
+  const [config,              setConfig]              = useState(() => DatabaseService.getConfig());
+  const [dictionary,          setDictionary]          = useState({});
+  const [calModal,            setCalModal]            = useState({ visible: false, monthIdx: null });
+  const [calModalExpandedCat, setCalModalExpandedCat] = useState(null);
+  const [newCatName,          setNewCatName]          = useState('');
 
   // BBDD
   const [dbStats,       setDbStats]       = useState(null);
@@ -209,11 +198,10 @@ export default function SettingsScreen({ navigation }) {
   const [backupInfo,    setBackupInfo]    = useState(null);
   const [forcingBackup, setForcingBackup] = useState(false);
 
+  // ── FIX: useEffect con copia profunda limpia ─────────────────────────────
   useEffect(() => {
     const saved = DatabaseService.getConfig();
-
     if (saved) {
-      // Normalizar seasonalMap a arrays
       const sm    = saved.seasonalMap || {};
       const newSm = {};
       for (let i = 0; i < 12; i++) {
@@ -225,20 +213,28 @@ export default function SettingsScreen({ navigation }) {
       setConfig(c => ({ ...c, ...saved, seasonalMap: newSm }));
     }
 
-    // Intentar cargar el diccionario completo (con subcategorías) primero
+    // Cargar diccionario con copia profunda para evitar referencias React en MMKV
     const savedFull = DatabaseService.getFullDictionary();
     if (savedFull && Object.keys(savedFull).length > 0) {
-      // Ya tiene el formato correcto { cat: { tags, subcategories } }
-      setDictionary(savedFull);
+      try {
+        const cleanFull = JSON.parse(JSON.stringify(savedFull));
+        const subCount = Object.values(cleanFull).reduce((acc, cat) => {
+          return acc + Object.keys(cat?.subcategories || {}).length;
+        }, 0);
+        console.log(`📖 Dict cargado: ${Object.keys(cleanFull).length} cats, ${subCount} subcats`);
+        setDictionary(cleanFull);
+      } catch (e) {
+        console.warn('Error copia dict:', e.message);
+        setDictionary(savedFull);
+      }
     } else {
-      // Fallback: migrar desde diccionario legacy
       const savedLeg = DatabaseService.getDictionary();
       if (savedLeg && Object.keys(savedLeg).length > 0) {
         const migrated = {};
         for (const [cat, val] of Object.entries(savedLeg)) {
           migrated[cat] = Array.isArray(val)
             ? { tags: val, subcategories: {} }
-            : { tags: val.tags || [], subcategories: val.subcategories || {} };
+            : { tags: val?.tags || [], subcategories: val?.subcategories || {} };
         }
         setDictionary(migrated);
       }
@@ -284,8 +280,6 @@ export default function SettingsScreen({ navigation }) {
 
   const updateCfg = (key, val) => setConfig(c => ({ ...c, [key]: val }));
 
-  // ── Sprint 11: toggleMonthItem — soporta 'Cat' y 'Cat › Sub' ─────────────
-  // Retrocompatible: strings sin › siguen funcionando como categorías enteras
   const toggleMonthItem = (monthIdx, itemStr) => {
     const sm  = { ...config.seasonalMap };
     const arr = sm[monthIdx] ? [...sm[monthIdx]] : [];
@@ -348,7 +342,7 @@ export default function SettingsScreen({ navigation }) {
     </View>
   );
 
-  // ─── RENDER: Tab Calendario — Sprint 11 ───────────────────────────────────
+  // ─── RENDER: Tab Calendario ───────────────────────────────────────────────
   const renderCalendar = () => {
     const catNames = Object.keys(dictionary);
     return (
@@ -359,7 +353,6 @@ export default function SettingsScreen({ navigation }) {
           El sistema priorizará estos items en alertas y Smart Insights.
         </Text>
 
-        {/* Cada fila de mes */}
         {MONTHS.map((mes, idx) => {
           const selected = Array.isArray(config.seasonalMap?.[idx])
             ? config.seasonalMap[idx] : [];
@@ -370,7 +363,6 @@ export default function SettingsScreen({ navigation }) {
                 {selected.length === 0
                   ? <Text style={styles.monthEmpty}>Sin asignar</Text>
                   : selected.map(item => {
-                      // Sprint 11: truncar a nombre de sub si es "Cat › Sub"
                       const displayLabel = item.includes(' › ')
                         ? item.split(' › ')[1]
                         : item;
@@ -403,11 +395,9 @@ export default function SettingsScreen({ navigation }) {
           );
         })}
 
-        {/* ── Sprint 11: Modal calendario con subcategorías expandibles ──── */}
         <Modal visible={calModal.visible} transparent animationType="slide">
           <View style={styles.modalOverlay}>
             <View style={styles.modalSheet}>
-              {/* Cabecera */}
               <View style={styles.modalHandle}/>
               <Text style={styles.modalTitle}>
                 {calModal.monthIdx !== null ? MONTHS[calModal.monthIdx] : ''}
@@ -416,7 +406,6 @@ export default function SettingsScreen({ navigation }) {
                 Toca una categoría o subcategoría para añadir/quitar al mes
               </Text>
 
-              {/* Lista de categorías + subcategorías expandibles */}
               <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
                 {catNames.length === 0 && (
                   <View style={styles.calEmptyBox}>
@@ -434,9 +423,7 @@ export default function SettingsScreen({ navigation }) {
 
                   return (
                     <View key={cat}>
-                      {/* Fila de categoría */}
                       <View style={styles.calCatRow}>
-                        {/* Botón seleccionar categoría entera */}
                         <TouchableOpacity
                           style={[styles.calCatItem, catSelected && styles.modalItemActive]}
                           onPress={() => toggleMonthItem(calModal.monthIdx, cat)}
@@ -448,7 +435,6 @@ export default function SettingsScreen({ navigation }) {
                           {catSelected && <Icon name="check" size={14} color={C.blue}/>}
                         </TouchableOpacity>
 
-                        {/* Botón expandir subcategorías */}
                         {catSubs.length > 0 && (
                           <TouchableOpacity
                             style={styles.calExpandBtn}
@@ -464,7 +450,6 @@ export default function SettingsScreen({ navigation }) {
                         )}
                       </View>
 
-                      {/* Subcategorías expandidas */}
                       {isExpanded && catSubs.map(sub => {
                         const subKey      = `${cat} › ${sub}`;
                         const subSelected = config.seasonalMap?.[calModal.monthIdx]?.includes(subKey);
@@ -479,10 +464,7 @@ export default function SettingsScreen({ navigation }) {
                               color={subSelected ? C.blue : C.gray500}
                               style={{ marginRight:6 }}
                             />
-                            <Text style={[
-                              styles.calSubTxt,
-                              subSelected && { color: C.blue, fontWeight:'700' }
-                            ]}>
+                            <Text style={[styles.calSubTxt, subSelected && { color: C.blue, fontWeight:'700' }]}>
                               {sub}
                             </Text>
                             {subSelected && (
@@ -496,7 +478,6 @@ export default function SettingsScreen({ navigation }) {
                 })}
               </ScrollView>
 
-              {/* Botón cerrar */}
               <TouchableOpacity
                 style={styles.modalCloseBtn}
                 onPress={() => {
@@ -520,20 +501,37 @@ export default function SettingsScreen({ navigation }) {
   const renderCategories = () => {
     const catNames = Object.keys(dictionary);
 
+    // FIX: copia profunda limpia antes de guardar en MMKV
     const handleSaveDictionary = () => {
-      // Guardar usando los métodos correctos de DatabaseService (no MMKV directo)
-      const legacy = {};
-      for (const [cat, val] of Object.entries(dictionary)) {
-        legacy[cat] = Array.isArray(val.tags) ? val.tags : [];
+      let cleanDict;
+      try {
+        cleanDict = JSON.parse(JSON.stringify(dictionary));
+      } catch (e) {
+        Alert.alert('Error', 'Formato de diccionario inválido: ' + e.message);
+        return;
       }
-      const okFull   = DatabaseService.saveFullDictionary(dictionary);
+
+      const catCount = Object.keys(cleanDict).length;
+      const subCount = Object.values(cleanDict).reduce((acc, catData) => {
+        return acc + Object.keys(catData?.subcategories || {}).length;
+      }, 0);
+      console.log(`💾 Guardando: ${catCount} cats, ${subCount} subcats`);
+
+      const legacy = {};
+      for (const [cat, val] of Object.entries(cleanDict)) {
+        legacy[cat] = Array.isArray(val?.tags) ? val.tags : [];
+      }
+      const okFull   = DatabaseService.saveFullDictionary(cleanDict);
       const okLegacy = DatabaseService.saveDictionary(legacy);
 
       if (okFull && okLegacy) {
-        LogService.add(`📚 Diccionario guardado: ${catNames.length} categorías`, 'success');
-        Alert.alert('✅ Categorías guardadas', `${catNames.length} categorías actualizadas.`);
+        LogService.add(`📚 Diccionario guardado: ${catCount} cats, ${subCount} subcats`, 'success');
+        Alert.alert(
+          '✅ Categorías guardadas',
+          `${catCount} categorías · ${subCount} subcategorías actualizadas.`,
+        );
       } else {
-        Alert.alert('⚠️ Error al guardar', 'No se pudieron guardar las categorías.');
+        Alert.alert('⚠️ Error al guardar', 'Revisa los logs para más detalles.');
       }
     };
 
@@ -581,7 +579,6 @@ export default function SettingsScreen({ navigation }) {
           />
         ))}
 
-        {/* Añadir nueva categoría */}
         <View style={styles.addCatRow}>
           <TextInput
             style={styles.addCatInput}
@@ -616,7 +613,6 @@ export default function SettingsScreen({ navigation }) {
     <View>
       <SectionTitle>Base de Datos</SectionTitle>
 
-      {/* AUTO-BACKUP STATUS */}
       <View style={styles.autoBackupCard}>
         <View style={styles.autoBackupHeader}>
           <View style={[styles.autoBackupDot, { backgroundColor: backupInfo?.exists ? C.success : C.warning }]} />
@@ -684,7 +680,6 @@ export default function SettingsScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Info */}
       <View style={styles.infoBox}>
         <Icon name="info" size={16} color={C.blue} />
         <Text style={styles.infoTxt}>
@@ -695,7 +690,6 @@ export default function SettingsScreen({ navigation }) {
         </Text>
       </View>
 
-      {/* Estadísticas */}
       {dbStats && (
         <View style={styles.dbStatsCard}>
           <Text style={styles.dbStatsTitle}>Estado actual de la BBDD</Text>
@@ -725,7 +719,6 @@ export default function SettingsScreen({ navigation }) {
         </View>
       )}
 
-      {/* Seguro externo */}
       <Text style={styles.sectionTitle}>Seguro Externo</Text>
       <View style={styles.dbActionsRow}>
         <TouchableOpacity
@@ -848,13 +841,11 @@ export default function SettingsScreen({ navigation }) {
 
   return (
     <View style={styles.root}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Configuración</Text>
         <Text style={styles.headerSub}>ResellHub · ajustes del sistema</Text>
       </View>
 
-      {/* Tab bar */}
       <ScrollView
         horizontal showsHorizontalScrollIndicator={false}
         style={styles.tabBarScroll} contentContainerStyle={styles.tabBar}
@@ -874,7 +865,6 @@ export default function SettingsScreen({ navigation }) {
         ))}
       </ScrollView>
 
-      {/* Contenido */}
       <ScrollView style={styles.content} contentContainerStyle={styles.contentPad}>
         {renderTab()}
       </ScrollView>
@@ -923,7 +913,6 @@ const styles = StyleSheet.create({
                backgroundColor: C.primary, borderRadius:14, padding:14, marginTop:20},
   saveBtnTxt: {color:'#FFF', fontWeight:'900', fontSize:15},
 
-  // Calendario
   calHint:    {fontSize:11, color: C.gray500, marginBottom:16, lineHeight:16},
   monthRow:   {flexDirection:'row', alignItems:'center', gap:10, paddingVertical:10,
                borderBottomWidth:1, borderBottomColor: C.border},
@@ -935,7 +924,6 @@ const styles = StyleSheet.create({
   monthAddBtn:  {width:28, height:28, borderRadius:14, backgroundColor: C.primary+'20',
                  justifyContent:'center', alignItems:'center'},
 
-  // Modal calendario Sprint 11
   modalOverlay: {flex:1, backgroundColor:'rgba(0,0,0,0.4)', justifyContent:'flex-end'},
   modalSheet:   {backgroundColor: C.white, borderTopLeftRadius:24, borderTopRightRadius:24,
                  paddingHorizontal:20, paddingTop:16, paddingBottom:36, maxHeight:'80%'},
@@ -949,7 +937,6 @@ const styles = StyleSheet.create({
                       alignItems:'center', marginTop:14},
   modalCloseTxt:     {color:'#FFF', fontWeight:'900', fontSize:14},
 
-  // Sprint 11: filas expandibles
   calCatRow:   {flexDirection:'row', alignItems:'center'},
   calCatItem:  {flex:1, flexDirection:'row', alignItems:'center', justifyContent:'space-between',
                 paddingHorizontal:4, paddingVertical:12, borderBottomWidth:1, borderBottomColor: C.border},
@@ -965,7 +952,6 @@ const styles = StyleSheet.create({
   calEmptyBox: {padding:20, alignItems:'center', gap:10},
   calEmptyTxt: {fontSize:12, color: C.gray500, textAlign:'center', lineHeight:18},
 
-  // Categorías
   catCardDB:     {backgroundColor: C.white, borderRadius:12, padding:12, marginBottom:8,
                   borderWidth:1, borderColor: C.border},
   catCardHeader: {flexDirection:'row', alignItems:'center', gap:8},
@@ -978,7 +964,6 @@ const styles = StyleSheet.create({
   addCatBtn:     {backgroundColor: C.primary, width:44, height:44, borderRadius:22,
                   justifyContent:'center', alignItems:'center'},
 
-  // BBDD
   autoBackupCard:    {backgroundColor: C.white, borderRadius:14, padding:14, marginBottom:12,
                       borderWidth:1, borderColor: C.border},
   autoBackupHeader:  {flexDirection:'row', alignItems:'center', gap:8, marginBottom:10},

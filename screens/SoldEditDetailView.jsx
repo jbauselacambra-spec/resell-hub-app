@@ -35,6 +35,46 @@ const DS = {
 const fmt  = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('es-ES', { day:'2-digit', month:'long', year:'numeric' }); } catch { return '—'; } };
 const fmtS = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('es-ES', { day:'2-digit', month:'short', year:'numeric' }); } catch { return '—'; } };
 
+// ─── Helper: cargar diccionario completo con fallbacks ────────────────────────
+// [FIX Sprint 12+] Centralizado e igual que en ProductDetailScreen.
+// Tres niveles de fallback para garantizar que el modal nunca quede vacío.
+function loadDictionaryWithFallbacks() {
+  try {
+    const full = DatabaseService.getFullDictionary();
+    if (full && typeof full === 'object' && Object.keys(full).length > 0) {
+      LogService.debug(
+        `CategoryModal: dict completo — ${Object.keys(full).length} cats`,
+        LOG_CTX.UI,
+      );
+      return full;
+    }
+
+    const legacy = DatabaseService.getDictionary();
+    if (legacy && typeof legacy === 'object' && Object.keys(legacy).length > 0) {
+      LogService.debug(
+        `CategoryModal: usando dict legacy — ${Object.keys(legacy).length} cats`,
+        LOG_CTX.UI,
+      );
+      const normalized = {};
+      Object.entries(legacy).forEach(([cat, val]) => {
+        normalized[cat] = Array.isArray(val)
+          ? { tags: val, subcategories: {} }
+          : { tags: val?.tags || [], subcategories: val?.subcategories || {} };
+      });
+      return normalized;
+    }
+
+    LogService.warn(
+      'CategoryModal: diccionario vacío — configura en Ajustes → Categorías',
+      LOG_CTX.UI,
+    );
+    return {};
+  } catch (e) {
+    LogService.error('CategoryModal.loadDictionaryWithFallbacks', LOG_CTX.UI, e);
+    return {};
+  }
+}
+
 // ─── CalPicker canónico ───────────────────────────────────────────────────────
 function CalPicker({ visible, onClose, value, onChange, accent = DS.primary, label }) {
   const [nav, setNav]           = useState(value ? new Date(value) : new Date());
@@ -146,40 +186,41 @@ const cS = StyleSheet.create({
   cancelTxt:    {fontSize:11,fontWeight:'700',color:DS.textMed},
 });
 
-// ─── Modal Categoría con subcategorías — Sprint 11 ────────────────────────────
-// Soporta diccionario completo (cat → subcategorías → tags)
-// Paso 1: seleccionar categoría
-// Paso 2: seleccionar subcategoría (si existe en el diccionario)
+// ─── Modal Categoría con subcategorías ───────────────────────────────────────
+// [FIX Sprint 12+] Misma lógica robusta que CatModal en ProductDetailScreen.
+// Inicializa con el diccionario ya cargado, recarga en useEffect al abrir.
 function CategoryModal({ visible, onClose, onSelect, currentCat, currentSub }) {
-  const [dict, setDict]     = useState({});
+  // [FIX] Inicializar con dict ya cargado — no esperar al useEffect
+  const [dict, setDict]     = useState(() => loadDictionaryWithFallbacks());
   const [selCat, setSelCat] = useState(currentCat || null);
   const [step, setStep]     = useState('cat');
 
   useEffect(() => {
-    if (!visible) return;
-    // Prioridad: diccionario completo con subcategorías
-    const full = DatabaseService.getFullDictionary();
-    if (full && Object.keys(full).length > 0) {
-      setDict(full);
-    } else {
-      // Fallback: diccionario legacy
-      const leg = DatabaseService.getDictionary();
-      const b   = {};
-      Object.keys(leg || {}).forEach(k => {
-        const val = leg[k];
-        b[k] = Array.isArray(val)
-          ? { tags: val, subcategories: {} }
-          : { tags: val?.tags || [], subcategories: val?.subcategories || {} };
-      });
-      setDict(Object.keys(b).length > 0 ? b : {});
-    }
-    setSelCat(currentCat || null);
-    setStep('cat');
-  }, [visible, currentCat]);
+  if (!visible) return;
+ 
+  const full = DatabaseService.getFullDictionary();
+ 
+  if (full && Object.keys(full).length > 0) {
+    setDict(full);
+  } else {
+    const leg = DatabaseService.getDictionary();
+    const b = {};
+    Object.keys(leg || {}).forEach(k => {
+      const val = leg[k];
+      b[k] = Array.isArray(val)
+        ? { tags: val, subcategories: {} }
+        : { tags: val?.tags || [], subcategories: val?.subcategories || {} };
+    });
+    setDict(Object.keys(b).length > 0 ? b : {});
+  }
+ 
+  setSelCat(currentCat || null);
+  setStep('cat');
+}, [visible, currentCat]);
 
-  const cats   = Object.keys(dict);
+  const cats    = Object.keys(dict);
   const hasSubs = (cat) => Object.keys(dict[cat]?.subcategories || {}).length > 0;
-  const subs   = selCat ? Object.keys(dict[selCat]?.subcategories || {}) : [];
+  const subs    = selCat ? Object.keys(dict[selCat]?.subcategories || {}) : [];
 
   const handleCatSelect = (cat) => {
     if (hasSubs(cat)) {
@@ -229,10 +270,21 @@ function CategoryModal({ visible, onClose, onSelect, currentCat, currentSub }) {
             </View>
           )}
 
+          {/* Estado vacío */}
+          {cats.length === 0 && step === 'cat' && (
+            <View style={mS.emptyBox}>
+              <Icon name="tag" size={32} color={DS.textLow}/>
+              <Text style={mS.emptyTitle}>Sin categorías configuradas</Text>
+              <Text style={mS.emptySub}>
+                Ve a Ajustes → Categorías para añadir tus categorías y subcategorías.
+              </Text>
+            </View>
+          )}
+
           <FlatList
             data={listData}
             keyExtractor={item => item}
-            style={{flexGrow:0, maxHeight:420}}
+            style={{flexGrow:0, maxHeight: cats.length === 0 ? 0 : 420}}
             renderItem={({item}) => {
               const isNone    = item === '__none__';
               const label     = isNone ? 'Sin subcategoría' : item;
@@ -297,6 +349,9 @@ const mS = StyleSheet.create({
   itemActive: {backgroundColor:DS.blueBg,paddingHorizontal:10,marginHorizontal:-10,borderRadius:10},
   itemTxt:    {fontSize:15,color:DS.text,fontWeight:'600'},
   itemSub:    {fontSize:10,color:DS.textMed,marginTop:3},
+  emptyBox:   {alignItems:'center',padding:24,gap:10},
+  emptyTitle: {fontSize:15,fontWeight:'800',color:DS.textMed,textAlign:'center'},
+  emptySub:   {fontSize:12,color:DS.textLow,textAlign:'center',lineHeight:18},
 });
 
 // ─── Pantalla principal ───────────────────────────────────────────────────────
