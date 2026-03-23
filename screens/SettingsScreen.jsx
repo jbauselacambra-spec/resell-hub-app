@@ -210,7 +210,7 @@ export default function SettingsScreen({ navigation }) {
   const [forcingBackup, setForcingBackup] = useState(false);
 
   useEffect(() => {
-    const saved     = DatabaseService.getConfig();   
+    const saved = DatabaseService.getConfig();
 
     if (saved) {
       // Normalizar seasonalMap a arrays
@@ -225,28 +225,24 @@ export default function SettingsScreen({ navigation }) {
       setConfig(c => ({ ...c, ...saved, seasonalMap: newSm }));
     }
 
-  // Intentar cargar el diccionario completo (con subcategorías) primero
-const savedFull = DatabaseService.getFullDictionary();
-if (savedFull && Object.keys(savedFull).length > 0) {
-  // Ya tiene el formato correcto { cat: { tags, subcategories } }
-  setDictionary(savedFull);
-} else {
-  // Fallback: migrar desde diccionario legacy
-  const savedLeg = DatabaseService.getDictionary();
-  if (savedLeg && Object.keys(savedLeg).length > 0) {
-    const migrated = {};
-    for (const [cat, val] of Object.entries(savedLeg)) {
-      migrated[cat] = Array.isArray(val)
-        ? { tags: val, subcategories: {} }
-        : { tags: val.tags || [], subcategories: val.subcategories || {} };
+    // Intentar cargar el diccionario completo (con subcategorías) primero
+    const savedFull = DatabaseService.getFullDictionary();
+    if (savedFull && Object.keys(savedFull).length > 0) {
+      // Ya tiene el formato correcto { cat: { tags, subcategories } }
+      setDictionary(savedFull);
+    } else {
+      // Fallback: migrar desde diccionario legacy
+      const savedLeg = DatabaseService.getDictionary();
+      if (savedLeg && Object.keys(savedLeg).length > 0) {
+        const migrated = {};
+        for (const [cat, val] of Object.entries(savedLeg)) {
+          migrated[cat] = Array.isArray(val)
+            ? { tags: val, subcategories: {} }
+            : { tags: val.tags || [], subcategories: val.subcategories || {} };
+        }
+        setDictionary(migrated);
+      }
     }
-    setDictionary(migrated);
-  }
-}
-
-
-
-
   }, []);
 
   useEffect(() => {
