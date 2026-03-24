@@ -28,11 +28,13 @@ canónica. **Nunca ignorar este fichero.**
 └── skills/
     ├── ARCH-001-smart_merge.md
     ├── ARCH-005-backup_system.md
+    ├── UI-006-modal_dictionary_loading.md
     ├── react-native-hooks-safety.SKILL.md
-    ├── patch-delivery-safety.SKILL.md   ← NUEVA v4.3
+    ├── patch-delivery-safety.SKILL.md
+    ├── stale-closure-prevention.SKILL.md  ← NUEVA v4.3
     └── SYS-003-claude_projects_integration.md
 
-services/resellhub_v4.2.mdc    ← Las 18 reglas canónicas (Cursor)
+services/resellhub_v4.2.mdc    ← Las 19 reglas canónicas (Cursor)
 SYSTEM_DESIGN.md               ← FUENTE DE VERDAD DEL PROYECTO
 ```
 
@@ -49,7 +51,7 @@ SYSTEM_DESIGN.md               ← FUENTE DE VERDAD DEL PROYECTO
 
 ---
 
-## 🔒 LAS 8 REGLAS DE HIERRO (nunca violar)
+## 🔒 LAS 9 REGLAS DE HIERRO (nunca violar)
 
 | # | Regla | Consecuencia si se viola |
 |---|-------|--------------------------|
@@ -61,26 +63,61 @@ SYSTEM_DESIGN.md               ← FUENTE DE VERDAD DEL PROYECTO
 | 6 | `seoTags` eliminado desde v2.1 — nunca reintroducir | Regresión |
 | 7 | Todo trabajo pasa por [ORCHESTRATOR] — sin excepciones | Inconsistencia |
 | **8** | **SIEMPRE entregar archivos COMPLETOS** — nunca fragmentos a pegar | **Typos fatales como `seEffect`** |
+| **9** | **Handlers que leen estado anidado → usar `useRef` como mirror** | **Stale closure: datos perdidos silenciosamente** |
 
-### ⚠️ REGLA 8 — Entrega de código (NUEVA v4.3)
+### ⚠️ REGLA 8 — Entrega de código (v4.3)
 
 **NUNCA** generar fragmentos de código con instrucciones como:
-- "reemplaza esta función por..."
+- "reemplaza esta función por..."  
 - "pega esto después de la línea X..."
-- "busca Y y sustitúyelo por..."
 
 **SIEMPRE** generar el archivo completo listo para sobreescribir.
 
-**Razón:** Los parches parciales requieren que el usuario pegue código manualmente,
-lo que introduce typos silenciosos como `seEffect` (falta la `u`) que crashean la app
-con errores crípticos (`ReferenceError: Property 'seEffect' doesn't exist`).
+### ⚠️ REGLA 9 — Stale Closures en Handlers (NUEVA v4.3)
 
-**Formato correcto de entrega:**
+**SÍNTOMA:** El usuario ve cambios en la UI (estado React correcto) pero al guardar,
+los datos en MMKV no contienen esos cambios. El bug es silencioso — no hay crash.
+
+**CAUSA:** Un handler (`handleSave`, `handleSaveDictionary`, etc.) captura `state`
+en su closure en el momento del render. Si el state fue actualizado con callbacks
+funcionales (`setState(prev => ...)`) DESPUÉS de ese render, el handler lee el
+valor anterior (stale).
+
+**PATRÓN OBLIGATORIO cuando un handler lee estado mutable:**
+
+```js
+// ✅ CORRECTO — useRef como mirror garantiza valor siempre fresco
+const dictRef = useRef({});
+const [dict, setDict] = useState({});
+
+// Helper que sincroniza estado Y ref en una sola llamada
+const updateDict = (updater) => {
+  if (typeof updater === 'function') {
+    setDict(prev => {
+      const next = updater(prev);
+      dictRef.current = next;   // ← ref siempre actualizado
+      return next;
+    });
+  } else {
+    dictRef.current = updater;
+    setDict(updater);
+  }
+};
+
+// El handler lee del REF, nunca del closure
+const handleSave = () => {
+  const current = dictRef.current;  // ← siempre fresco
+  DatabaseService.save(current);
+};
+
+// ❌ INCORRECTO — stale closure
+const handleSave = () => {
+  DatabaseService.save(dict);  // ← puede ser el valor de un render anterior
+};
 ```
-✅ CORRECTO: Archivo completo SettingsScreen.jsx (800 líneas, listo para reemplazar)
-❌ INCORRECTO: "En handleSaveDictionary añade JSON.parse(JSON.stringify(...))"
-❌ INCORRECTO: "Busca el useEffect y reemplázalo por..."
-```
+
+**Aplica a:** `SettingsScreen.handleSaveDictionary`, cualquier handler que
+lea estado que fue modificado por callbacks funcionales (`setX(prev => ...)`).
 
 ### Los 7 Campos Sagrados (NUNCA sobreescribir en imports):
 ```
@@ -97,16 +134,15 @@ firstUploadDate · category · title · brand · soldPriceReal · soldDateReal �
 - **Dispositivo objetivo:** Poco X7 Pro (393dp · 120Hz · Android 14)
 - **Bundle ID:** `com.perdigon85.resellhub`
 
-### Fix activo — Sprint 13: Subcategorías no aparecen en modales
+### Fix activo — Sprint 13: Subcategorías no se guardan (Stale Closure)
 
-**Bug:** `ReferenceError: Property 'seEffect' doesn't exist` en SettingsScreen
-**Causa raíz:** Typo introducido al pegar parche parcial (`seEffect` en vez de `useEffect`)
-**Fix:** Archivo completo `SettingsScreen.jsx` entregado con:
-- `handleSaveDictionary`: `JSON.parse(JSON.stringify(dictionary))` antes de guardar
-- `useEffect` inicial: copia profunda al cargar diccionario
-- `saveFullDictionary` en DatabaseService: copia profunda + verificación post-escritura
+**Bug:** Settings → Categorías → añadir subcategoría → Guardar → subcategorías desaparecen
+**Causa raíz:** `handleSaveDictionary` leía `dictionary` del closure (stale), no el
+valor actual tras los `setDictionary(prev => ...)` funcionales de `onAddSubcategory`.
+**Fix:** `useRef dictionaryRef` + helper `updateDictionary()` que sincroniza ref y estado.
+**Archivos:** `screens/SettingsScreen.jsx` completo entregado.
 
-**Lección aprendida → Regla 8:** Entregar siempre archivos completos.
+**Lección aprendida → Regla 9:** Handlers que leen estado anidado requieren `useRef` como mirror.
 
 ### Navegación canónica (App.jsx — 6 tabs fijos)
 ```
@@ -133,6 +169,7 @@ Stack (no tabs):
 | Feature UI sin datos | PAIR | [UI_SPECIALIST] + [QA_ENGINEER] |
 | Feature con datos nuevos | FULL | [ARCHITECT] + [UI_SPECIALIST] + [QA_ENGINEER] + [LIBRARIAN] |
 | Typo/crash runtime | SOLO | [DEBUGGER] → entrega archivo completo corregido |
+| Datos UI correctos pero no persisten | PAIR | [DEBUGGER] (stale closure) + [QA_ENGINEER] |
 
 ---
 
@@ -141,7 +178,8 @@ Stack (no tabs):
 | Sprint | Rama | Descripción |
 |--------|------|-------------|
 | 1-12 | varios | Ver SYSTEM_DESIGN.md |
-| **13** | `fix/sprint13-seeffect-typo-subcats` | Fix typo `seEffect` + Regla 8 archivos completos |
+| 13 | `fix/sprint13-seeffect-typo-subcats` | Fix typo `seEffect` + Regla 8 archivos completos |
+| **13b** | `fix/sprint13b-stale-closure-subcats` | Fix stale closure en SettingsScreen + Regla 9 |
 
 ---
 
@@ -171,10 +209,12 @@ NUNCA:
 [ ] _triggerBackup() en todos los métodos de escritura nuevos
 [ ] LogService.add() en todos los catch
 [ ] SYSTEM_DESIGN.md actualizado
-[ ] Archivos entregados COMPLETOS (no fragmentos)   ← NUEVO v4.3
-[ ] Sin typos en nombres de hooks/funciones React   ← NUEVO v4.3
+[ ] Archivos entregados COMPLETOS (no fragmentos)            ← Regla 8
+[ ] Sin typos en nombres de hooks/funciones React            ← Regla 8
+[ ] Handlers con estado anidado usan useRef como mirror      ← Regla 9
+[ ] updateDictionary() (o helper equivalente) sincroniza ref y estado ← Regla 9
 ```
 
 ---
 
-*CLAUDE.md — ResellHub v4.3 · Sprint 13 · Marzo 2026*
+*CLAUDE.md — ResellHub v4.3 · Sprint 13b · Marzo 2026*

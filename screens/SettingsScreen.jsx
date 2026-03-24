@@ -1,13 +1,34 @@
 /**
- * SettingsScreen.jsx — Sprint 11 + Fix subcategorías
+ * SettingsScreen.jsx — Sprint 11 + Fix subcategorías (Marzo 2026)
  *
- * [QA_ENGINEER] Fix aplicado:
- * - handleSaveDictionary: copia profunda (JSON.parse/stringify) antes de guardar
- * - useEffect inicial: copia profunda al cargar el diccionario
- * - Ambos cambios evitan que referencias internas de React corrompan MMKV
+ * [DEBUGGER] BUG CORREGIDO — Stale Closure en handleSaveDictionary:
+ *
+ * SÍNTOMA: Subcategorías se muestran en UI pero al guardar aparecen como {}
+ * CAUSA:   handleSaveDictionary() leía `dictionary` del closure del render
+ *          donde se definió, no el valor actualizado por setDictionary().
+ *          Los updates funcionales de setState son asíncronos; el closure
+ *          capturaba la versión anterior del objeto.
+ *
+ * FIX:     useRef `dictionaryRef` siempre sincronizado con el estado actual.
+ *          handleSaveDictionary lee dictionaryRef.current (siempre fresco).
+ *
+ * REGLA NUEVA (v4.3 Regla 19):
+ *   Cuando un handler necesita leer estado que puede haber sido actualizado
+ *   por callbacks funcionales (setX(prev => ...)), usar useRef como mirror:
+ *     const xRef = useRef(initialValue);
+ *     const [x, setX] = useState(initialValue);
+ *     // En cada update: xRef.current = newValue; setX(newValue);
+ *     // En el handler: leer xRef.current, nunca x directamente
+ *
+ * [QA_ENGINEER] Checks adicionales:
+ * - handleSaveDictionary: usa dictionaryRef.current, no dictionary del closure
+ * - onAddSubcategory: actualiza tanto el ref como el estado React
+ * - onDeleteSubcategory: ídem
+ * - onUpdateTags: ídem
+ * - onDelete: ídem
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Modal, Alert, ActivityIndicator, FlatList,
@@ -85,6 +106,7 @@ const SaveBtn = ({ onPress }) => (
 );
 
 // ─── CatCardExpanded ──────────────────────────────────────────────────────────
+// Recibe callbacks que actualizan tanto el estado React como el ref (dictionaryRef).
 function CatCardExpanded({ cat, data, onDelete, onUpdateTags, onAddSubcategory, onDeleteSubcategory }) {
   const [expanded, setExpanded] = React.useState(false);
   const [newSubName, setNewSubName] = React.useState('');
@@ -103,9 +125,9 @@ function CatCardExpanded({ cat, data, onDelete, onUpdateTags, onAddSubcategory, 
   const removeTag = (tag) => onUpdateTags(tags.filter(t => t !== tag));
 
   const addSub = () => {
-    if (!newSubName.trim()) return;
-    if (subcats.includes(newSubName.trim())) return;
-    onAddSubcategory(newSubName.trim());
+    const name = newSubName.trim();
+    if (!name || subcats.includes(name)) return;
+    onAddSubcategory(name);
     setNewSubName('');
   };
 
@@ -126,6 +148,7 @@ function CatCardExpanded({ cat, data, onDelete, onUpdateTags, onAddSubcategory, 
 
       {expanded && (
         <View style={{ paddingTop: 8 }}>
+          {/* Tags */}
           <Text style={[styles.cardDesc, { marginBottom: 6 }]}>Tags de búsqueda:</Text>
           <View style={{ flexDirection:'row', flexWrap:'wrap', gap:6, marginBottom:8 }}>
             {tags.map(t => (
@@ -152,30 +175,48 @@ function CatCardExpanded({ cat, data, onDelete, onUpdateTags, onAddSubcategory, 
             </TouchableOpacity>
           </View>
 
+          {/* Subcategorías */}
           <Text style={[styles.cardDesc, { marginBottom: 6 }]}>Subcategorías:</Text>
+          {subcats.length === 0 && (
+            <Text style={{ fontSize:11, color: C.gray500, fontStyle:'italic', marginBottom:6 }}>
+              Sin subcategorías. Añade una abajo.
+            </Text>
+          )}
           {subcats.map(sub => (
-            <View key={sub} style={{ flexDirection:'row', alignItems:'center', gap:8, marginBottom:4 }}>
-              <Icon name="corner-down-right" size={11} color={C.gray500} />
-              <Text style={{ flex:1, fontSize:12, color: C.gray900 }}>{sub}</Text>
-              <TouchableOpacity onPress={() => onDeleteSubcategory(sub)}
-                hitSlop={{ top:6, bottom:6, left:6, right:6 }}>
-                <Icon name="x" size={12} color={C.danger} />
+            <View key={sub} style={{ flexDirection:'row', alignItems:'center', gap:8, marginBottom:6, paddingLeft:4 }}>
+              <Icon name="corner-down-right" size={11} color={C.blue} />
+              <View style={[styles.subChipPreview]}>
+                <Text style={styles.subChipPreviewTxt}>{sub}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => onDeleteSubcategory(sub)}
+                hitSlop={{ top:8, bottom:8, left:8, right:8 }}
+              >
+                <Icon name="x" size={13} color={C.danger} />
               </TouchableOpacity>
             </View>
           ))}
-          <View style={{ flexDirection:'row', gap:8, marginTop:6 }}>
+
+          {/* Añadir subcategoría */}
+          <View style={{ flexDirection:'row', gap:8, marginTop:8 }}>
             <TextInput
-              style={[styles.addCatInput, { flex:1 }]}
-              placeholder="Nueva subcategoría..."
+              style={[styles.addCatInput, { flex:1, borderColor: C.blue+'60', borderWidth:1.5 }]}
+              placeholder="Nueva subcategoría (ej: Cortavientos)..."
               placeholderTextColor={C.gray500}
               value={newSubName}
               onChangeText={setNewSubName}
               onSubmitEditing={addSub}
+              returnKeyType="done"
             />
             <TouchableOpacity style={[styles.addCatBtn, { backgroundColor: C.blue }]} onPress={addSub}>
               <Icon name="plus" size={14} color="#FFF" />
             </TouchableOpacity>
           </View>
+          {newSubName.trim().length > 0 && subcats.includes(newSubName.trim()) && (
+            <Text style={{ fontSize:10, color: C.danger, marginTop:4 }}>
+              Esta subcategoría ya existe.
+            </Text>
+          )}
         </View>
       )}
     </View>
@@ -186,7 +227,26 @@ function CatCardExpanded({ cat, data, onDelete, onUpdateTags, onAddSubcategory, 
 export default function SettingsScreen({ navigation }) {
   const [activeTab,           setActiveTab]           = useState('thresholds');
   const [config,              setConfig]              = useState(() => DatabaseService.getConfig());
-  const [dictionary,          setDictionary]          = useState({});
+
+  // [FIX] dictionaryRef siempre refleja el valor actual del diccionario.
+  // handleSaveDictionary lee dictionaryRef.current para evitar stale closure.
+  const dictionaryRef = useRef({});
+  const [dictionary,  setDictionary]  = useState({});
+
+  // Helper que actualiza tanto el state como el ref de forma atómica
+  const updateDictionary = (updaterOrValue) => {
+    if (typeof updaterOrValue === 'function') {
+      setDictionary(prev => {
+        const next = updaterOrValue(prev);
+        dictionaryRef.current = next;
+        return next;
+      });
+    } else {
+      dictionaryRef.current = updaterOrValue;
+      setDictionary(updaterOrValue);
+    }
+  };
+
   const [calModal,            setCalModal]            = useState({ visible: false, monthIdx: null });
   const [calModalExpandedCat, setCalModalExpandedCat] = useState(null);
   const [newCatName,          setNewCatName]          = useState('');
@@ -198,7 +258,7 @@ export default function SettingsScreen({ navigation }) {
   const [backupInfo,    setBackupInfo]    = useState(null);
   const [forcingBackup, setForcingBackup] = useState(false);
 
-  // ── FIX: useEffect con copia profunda limpia ─────────────────────────────
+  // ── Carga inicial ─────────────────────────────────────────────────────────
   useEffect(() => {
     const saved = DatabaseService.getConfig();
     if (saved) {
@@ -213,19 +273,20 @@ export default function SettingsScreen({ navigation }) {
       setConfig(c => ({ ...c, ...saved, seasonalMap: newSm }));
     }
 
-    // Cargar diccionario con copia profunda para evitar referencias React en MMKV
+    // Cargar diccionario con copia profunda
     const savedFull = DatabaseService.getFullDictionary();
     if (savedFull && Object.keys(savedFull).length > 0) {
       try {
         const cleanFull = JSON.parse(JSON.stringify(savedFull));
-        const subCount = Object.values(cleanFull).reduce((acc, cat) => {
-          return acc + Object.keys(cat?.subcategories || {}).length;
-        }, 0);
-        console.log(`📖 Dict cargado: ${Object.keys(cleanFull).length} cats, ${subCount} subcats`);
-        setDictionary(cleanFull);
+        const catCount  = Object.keys(cleanFull).length;
+        const subCount  = Object.values(cleanFull).reduce(
+          (acc, cat) => acc + Object.keys(cat?.subcategories || {}).length, 0
+        );
+        console.log(`📖 Dict cargado: ${catCount} cats, ${subCount} subcats`);
+        updateDictionary(cleanFull);
       } catch (e) {
         console.warn('Error copia dict:', e.message);
-        setDictionary(savedFull);
+        updateDictionary(savedFull);
       }
     } else {
       const savedLeg = DatabaseService.getDictionary();
@@ -236,7 +297,7 @@ export default function SettingsScreen({ navigation }) {
             ? { tags: val, subcategories: {} }
             : { tags: val?.tags || [], subcategories: val?.subcategories || {} };
         }
-        setDictionary(migrated);
+        updateDictionary(migrated);
       }
     }
   }, []);
@@ -501,11 +562,15 @@ export default function SettingsScreen({ navigation }) {
   const renderCategories = () => {
     const catNames = Object.keys(dictionary);
 
-    // FIX: copia profunda limpia antes de guardar en MMKV
+    // [FIX PRINCIPAL] Lee dictionaryRef.current para evitar stale closure.
+    // dictionaryRef siempre tiene el valor más actualizado gracias a updateDictionary().
     const handleSaveDictionary = () => {
+      // Leer del REF, no del closure — garantiza el valor más reciente
+      const currentDict = dictionaryRef.current;
+
       let cleanDict;
       try {
-        cleanDict = JSON.parse(JSON.stringify(dictionary));
+        cleanDict = JSON.parse(JSON.stringify(currentDict));
       } catch (e) {
         Alert.alert('Error', 'Formato de diccionario inválido: ' + e.message);
         return;
@@ -515,12 +580,21 @@ export default function SettingsScreen({ navigation }) {
       const subCount = Object.values(cleanDict).reduce((acc, catData) => {
         return acc + Object.keys(catData?.subcategories || {}).length;
       }, 0);
-      console.log(`💾 Guardando: ${catCount} cats, ${subCount} subcats`);
+      console.log(`💾 Guardando desde ref: ${catCount} cats, ${subCount} subcats`);
+
+      // Verificación de debug: mostrar qué hay en cada categoría
+      Object.entries(cleanDict).forEach(([cat, catData]) => {
+        const subs = Object.keys(catData?.subcategories || {});
+        if (subs.length > 0) {
+          console.log(`  ✓ ${cat}: ${subs.join(', ')}`);
+        }
+      });
 
       const legacy = {};
       for (const [cat, val] of Object.entries(cleanDict)) {
         legacy[cat] = Array.isArray(val?.tags) ? val.tags : [];
       }
+
       const okFull   = DatabaseService.saveFullDictionary(cleanDict);
       const okLegacy = DatabaseService.saveDictionary(legacy);
 
@@ -543,22 +617,36 @@ export default function SettingsScreen({ navigation }) {
           historial de ventas y calendario de oportunidades.
         </Text>
 
+        {catNames.length === 0 && (
+          <View style={styles.calEmptyBox}>
+            <Icon name="tag" size={32} color={C.gray500}/>
+            <Text style={styles.calEmptyTxt}>
+              No hay categorías. Añade una abajo para empezar.
+            </Text>
+          </View>
+        )}
+
         {catNames.map(cat => (
           <CatCardExpanded
             key={cat}
             cat={cat}
             data={dictionary[cat]}
             onDelete={() => {
-              const d = { ...dictionary };
-              delete d[cat];
-              setDictionary(d);
+              updateDictionary(d => {
+                const next = { ...d };
+                delete next[cat];
+                return next;
+              });
             }}
             onUpdateTags={(tags) => {
-              setDictionary(d => ({ ...d, [cat]: { ...d[cat], tags } }));
+              updateDictionary(d => ({
+                ...d,
+                [cat]: { ...d[cat], tags },
+              }));
             }}
             onAddSubcategory={(subName) => {
               if (!subName.trim()) return;
-              setDictionary(d => ({
+              updateDictionary(d => ({
                 ...d,
                 [cat]: {
                   ...d[cat],
@@ -570,7 +658,7 @@ export default function SettingsScreen({ navigation }) {
               }));
             }}
             onDeleteSubcategory={(subName) => {
-              setDictionary(d => {
+              updateDictionary(d => {
                 const subs = { ...(d[cat]?.subcategories || {}) };
                 delete subs[subName];
                 return { ...d, [cat]: { ...d[cat], subcategories: subs } };
@@ -579,19 +667,32 @@ export default function SettingsScreen({ navigation }) {
           />
         ))}
 
+        {/* Añadir nueva categoría */}
         <View style={styles.addCatRow}>
           <TextInput
             style={styles.addCatInput}
-            placeholder="Nueva categoría..."
+            placeholder="Nueva categoría (ej: Ropa, Calzado...)"
             placeholderTextColor={C.gray500}
             value={newCatName}
             onChangeText={setNewCatName}
+            onSubmitEditing={() => {
+              if (!newCatName.trim() || dictionary[newCatName.trim()]) return;
+              updateDictionary(d => ({
+                ...d,
+                [newCatName.trim()]: { tags: [], subcategories: {} },
+              }));
+              setNewCatName('');
+            }}
           />
           <TouchableOpacity
             style={styles.addCatBtn}
             onPress={() => {
               if (!newCatName.trim()) return;
-              setDictionary(d => ({
+              if (dictionary[newCatName.trim()]) {
+                Alert.alert('Categoría duplicada', `"${newCatName.trim()}" ya existe.`);
+                return;
+              }
+              updateDictionary(d => ({
                 ...d,
                 [newCatName.trim()]: { tags: [], subcategories: {} },
               }));
@@ -952,11 +1053,29 @@ const styles = StyleSheet.create({
   calEmptyBox: {padding:20, alignItems:'center', gap:10},
   calEmptyTxt: {fontSize:12, color: C.gray500, textAlign:'center', lineHeight:18},
 
+  // Categorías
   catCardDB:     {backgroundColor: C.white, borderRadius:12, padding:12, marginBottom:8,
                   borderWidth:1, borderColor: C.border},
   catCardHeader: {flexDirection:'row', alignItems:'center', gap:8},
   catCardName:   {flex:1, fontSize:13, fontWeight:'800', color: C.gray900},
   catCardTags:   {fontSize:10, color: C.gray500},
+
+  // Preview de subcategoría dentro del CatCard
+  subChipPreview: {
+    flex: 1,
+    backgroundColor: C.blueBg,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: C.blue + '30',
+  },
+  subChipPreviewTxt: {
+    fontSize: 12,
+    color: C.blue,
+    fontWeight: '700',
+  },
+
   addCatRow:     {flexDirection:'row', gap:8, marginTop:8},
   addCatInput:   {flex:1, backgroundColor: C.white, borderRadius:12, paddingHorizontal:12,
                   paddingVertical:10, fontSize:13, borderWidth:1, borderColor: C.border,
@@ -964,6 +1083,7 @@ const styles = StyleSheet.create({
   addCatBtn:     {backgroundColor: C.primary, width:44, height:44, borderRadius:22,
                   justifyContent:'center', alignItems:'center'},
 
+  // Auto-backup
   autoBackupCard:    {backgroundColor: C.white, borderRadius:14, padding:14, marginBottom:12,
                       borderWidth:1, borderColor: C.border},
   autoBackupHeader:  {flexDirection:'row', alignItems:'center', gap:8, marginBottom:10},
