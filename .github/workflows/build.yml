@@ -1,7 +1,7 @@
 name: Mobile Build CI/CD
 on:
   push:
-    branches: [ main, develop ] # Asegúrate de que tu rama se llama exactamente 'develop'
+    branches: [ main, develop ]
 
 jobs:
   build:
@@ -25,13 +25,8 @@ jobs:
       - name: 📦 Install dependencies
         run: npm ci --legacy-peer-deps
 
-      # --- LÓGICA DE DESARROLLO ---
-      - name: 🛠 Build Development APK
-        # Esta condición es más flexible: detecta si la rama es 'develop'
-        if: github.ref_name == 'develop'
-        run: eas build --platform android --profile development --non-interactive
-
       # --- LÓGICA DE PRODUCCIÓN ---
+      # Solo se ejecuta si la rama es exactamente 'main'
       - name: 🚀 Build Production APK
         if: github.ref_name == 'main'
         run: eas build --platform android --profile production --non-interactive

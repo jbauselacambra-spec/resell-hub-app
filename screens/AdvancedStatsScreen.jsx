@@ -44,6 +44,7 @@ const DS = {
   text:      '#1A1A2E',
   textMed:   '#5C6070',
   textLow:   '#A0A5B5',
+   purple:  '#6C63FF',
 };
 
 // ─── Helper: agrupar meses por año (client-side) ───────────────────────────────
@@ -135,6 +136,23 @@ export default function AdvancedStatsScreen({ navigation }) {
       <View style={s.header}>
         <Text style={s.headerEyebrow}>ANÁLISIS ESTRATÉGICO</Text>
         <Text style={s.headerTitle}>Speed Intelligence</Text>
+
+          {/* Nuevo Botón */}
+          <View style={s.headerBadge}>
+                 <TouchableOpacity
+                     style={setAlerts.importBtn}
+                     onPress={() => navigation.navigate('Intelligence')}
+                   >
+                     <Icon name="cpu" size={14} color={DS.purple} />
+                  <Text style={s.headerBadgeTxt}>Bussines Intelligence</Text>
+                   </TouchableOpacity>
+                </View>
+
+       
+         
+
+
+          
       </View>
 
       {/* ── KPI STRIP ─────────────────────────────────────────────────────── */}
@@ -554,7 +572,9 @@ const s = StyleSheet.create({
   header:       { paddingHorizontal: 20, paddingTop: 56, paddingBottom: 12, backgroundColor: DS.white, borderBottomWidth: 1, borderBottomColor: DS.border },
   headerEyebrow:{ fontSize: 10, fontWeight: '900', color: DS.textLow, letterSpacing: 2, marginBottom: 2 },
   headerTitle:  { fontSize: 26, fontWeight: '900', color: DS.text },
-
+  headerBadge:  { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: DS.purpleBg,
+                  paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
+  headerBadgeTxt:{ fontSize: 11, fontWeight: '900', color: DS.purple },
   kpiStrip:     { maxHeight: 90 },
   kpiChip:      { borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, minWidth: 100, justifyContent: 'center', alignItems: 'center' },
   kpiChipLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 0.5, marginBottom: 3 },

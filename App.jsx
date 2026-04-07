@@ -1,34 +1,9 @@
 /**
- * App.jsx — Sprint 10.1
+ * App.jsx — Sprint 14
  *
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- * [ORCHESTRATOR] Sprint 10.1 — Fix navegación + persistencia BBDD
- *
- * [ARCHITECT] ESTRUCTURA DE NAVEGACIÓN CANÓNICA (Sprint 8+):
- *
- *   Tab.Navigator (MainTabs):
- *     Inicio     → DashboardScreen
- *     Inventario → ProductsScreen
- *     Vendidos   → SoldHistoryScreen
- *     Stats      → AdvancedStatsScreen
- *     Config     → SettingsScreen
- *     Importar   → VintedImportScreen  ← TAB (reemplaza "Logs" desde Sprint 8)
- *
- *   Stack.Navigator (Stack.Screen):
- *     ProductDetail  → ProductDetailScreen
- *     SoldEditDetail → SoldEditDetailView
- *     Logs           → LogsScreen  ← accesible desde Settings o VintedImportScreen
- *
- * [QA_ENGINEER] BUG SPRINT 10 CORREGIDO:
- *   Sprint 10 entregó App.jsx con tab "Logs"→LogsScreen, revirtiendo
- *   la estructura de Sprint 8 que convirtió "Importar" en tab principal.
- *   Este fichero restaura la navegación canónica.
- *
- * [MIGRATION_MANAGER] SPRINT 10 — Arranque con auto-restore:
- *   BackupService.autoRestoreIfNeeded() antes de setIsReady(true).
- *   Si MMKV vacío y hay backup en FileSystem.documentDirectory,
- *   restaura automáticamente con splash visual de 1.8s.
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ * [SPRINT 14] Añadido Stack.Screen 'Intelligence' → BusinessIntelligenceScreen
+ * [Sprint 10.1] Navegación canónica restaurada (tab Importar, no Logs)
+ * [Sprint 10]   autoRestoreIfNeeded() en arranque
  */
 
 import 'react-native-gesture-handler';
@@ -40,27 +15,28 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 
-import DashboardScreen      from './screens/DashboardScreen';
-import ProductsScreen       from './screens/ProductsScreen';
-import SoldHistoryScreen    from './screens/SoldHistoryScreen';
-import ProductDetailScreen  from './screens/ProductDetailScreen';
-import LogsScreen           from './screens/LogsScreen';
-import SoldEditDetailView   from './screens/SoldEditDetailView';
-import AdvancedStatsScreen  from './screens/AdvancedStatsScreen';
-import SettingsScreen       from './screens/SettingsScreen';
-import LoginScreen          from './src/screens/LoginScreen';
-import AuthService          from './src/services/authService';
-// Sprint 8: VintedImportScreen ocupa la posición del tab "Logs"
-import VintedImportScreen   from './screens/VintedImportScreen';
+import DashboardScreen           from './screens/DashboardScreen';
+import ProductsScreen            from './screens/ProductsScreen';
+import SoldHistoryScreen         from './screens/SoldHistoryScreen';
+import ProductDetailScreen       from './screens/ProductDetailScreen';
+import LogsScreen                from './screens/LogsScreen';
+import SoldEditDetailView        from './screens/SoldEditDetailView';
+import AdvancedStatsScreen       from './screens/AdvancedStatsScreen';
+import SettingsScreen            from './screens/SettingsScreen';
+import LoginScreen               from './src/screens/LoginScreen';
+import AuthService               from './src/services/authService';
+import VintedImportScreen        from './screens/VintedImportScreen';
+// [Sprint 14] Motor de Business Intelligence
+import BusinessIntelligenceScreen from './screens/BusinessIntelligenceScreen';
+import DeduplicationScreen      from './screens/DeduplicationScreen';
 
-// [Sprint 10] Capa de persistencia ante rebuilds de APK
-import { BackupService }    from './services/BackupService';
-import { DatabaseService }  from './services/DatabaseService';
+import { BackupService }  from './services/BackupService';
+import { DatabaseService } from './services/DatabaseService';
 
 const Tab   = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
-// ─── MainTabs ─────────────────────────────────────────────────────────────────
+// ─── MainTabs — 6 tabs canónicas (Regla 11 v4.2) ─────────────────────────────
 function MainTabs() {
   return (
     <Tab.Navigator
@@ -103,7 +79,7 @@ function MainTabs() {
         component={SettingsScreen}
         options={{ tabBarLabel: 'Config', tabBarIcon: ({ color }) => <Icon name="settings" size={22} color={color} /> }}
       />
-      {/* Sprint 8: "Importar" reemplaza a "Logs" en la barra de tabs */}
+      {/* Sprint 8: "Importar" reemplaza a "Logs" — Tab 6 canónica (Regla 11) */}
       <Tab.Screen
         name="Import"
         component={VintedImportScreen}
@@ -122,11 +98,10 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        // 1. Autenticación
         const token = AuthService.getToken();
         setIsAuthenticated(!!token);
 
-        // 2. [Sprint 10] Auto-restore si MMKV está vacío (rebuild / reinstalación)
+        // [Sprint 10] Auto-restore si MMKV está vacío (rebuild / reinstalación)
         const restoreResult = await BackupService.autoRestoreIfNeeded(
           () => DatabaseService.getAllProducts().length,
           (payload) => DatabaseService.importFullDatabase(payload),
@@ -138,7 +113,6 @@ export default function App() {
           setRestoreMsg(null);
         }
       } catch (e) {
-        // Nunca bloquear el arranque por un error de backup
         console.warn('[App] Error en autoRestore:', e.message);
       } finally {
         setIsReady(true);
@@ -146,7 +120,6 @@ export default function App() {
     })();
   }, []);
 
-  // ── Splash / Loading ──────────────────────────────────────────────────────
   if (!isReady) {
     return (
       <View style={styles.splash}>
@@ -163,7 +136,6 @@ export default function App() {
     );
   }
 
-  // ── Navegación ────────────────────────────────────────────────────────────
   return (
     <SafeAreaProvider>
       <NavigationContainer>
@@ -174,11 +146,14 @@ export default function App() {
             </Stack.Screen>
           ) : (
             <>
-              <Stack.Screen name="Main"          component={MainTabs} />
-              <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
-              <Stack.Screen name="SoldEditDetail"component={SoldEditDetailView} />
-              {/* Sprint 8: LogsScreen como Stack.Screen — accesible desde Settings o Importar */}
-              <Stack.Screen name="Logs"          component={LogsScreen} />
+              <Stack.Screen name="Main"           component={MainTabs} />
+              <Stack.Screen name="ProductDetail"  component={ProductDetailScreen} />
+              <Stack.Screen name="SoldEditDetail" component={SoldEditDetailView} />
+              <Stack.Screen name="Deduplication" component={DeduplicationScreen} />
+              {/* LogsScreen como Stack.Screen — accesible desde Settings o Importar (Regla 11) */}
+              <Stack.Screen name="Logs"           component={LogsScreen} />
+              {/* [Sprint 14] Motor de Business Intelligence */}
+              <Stack.Screen name="Intelligence"   component={BusinessIntelligenceScreen} />
             </>
           )}
         </Stack.Navigator>
@@ -187,7 +162,6 @@ export default function App() {
   );
 }
 
-// ─── Estilos splash ───────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   splash: {
     flex: 1,

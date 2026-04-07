@@ -894,6 +894,17 @@ export default function SettingsScreen({ navigation }) {
           </Text>
         </TouchableOpacity>
       </SettingCard>
+      <SettingCard label="Deduplicar" desc="Deduplica repetidoss al importar desde Vinted">
+        <TouchableOpacity
+            style={styles.deduplicateBtn}
+            onPress={() => navigation.navigate('Deduplication')}
+            activeOpacity={0.7}
+          >
+            <Icon name="copy" size={14} color={C.primary}/>
+            <Text style={styles.deduplicateBtnTxt}>Buscar y eliminar duplicados</Text>
+          </TouchableOpacity>
+    </SettingCard>
+
       <SaveBtn onPress={handleSave} />
     </View>
   );
@@ -1127,4 +1138,8 @@ const styles = StyleSheet.create({
   toggleBtnOn:     {backgroundColor: C.success, borderColor: C.success},
   toggleTxt:       {fontSize:12, fontWeight:'700', color: C.gray500},
   toggleTxtOn:     {color:'#FFF'},
+  deduplicateBtn:    { flexDirection:'row', alignItems:'center', justifyContent:'center',
+                     gap:6, padding:12, borderRadius:12, marginTop:8,
+                     backgroundColor: C.primaryBg, borderWidth:1, borderColor: C.primary+'30' },
+deduplicateBtnTxt: { fontSize:13, fontWeight:'700', color: C.primary }
 });

@@ -90,7 +90,12 @@ const scriptResellHub = (() => {
 
             products.push({
                 id:          id,
-                title:       title,
+                title: (
+				item.querySelector('[data-testid="item-title"]')?.textContent?.trim() ||
+				item.querySelector('.web_ui__Text__title')?.textContent?.trim() ||
+				item.querySelector('h2')?.textContent?.trim() ||
+				''  ← nunca dejar vacío, pero si no hay título real es mejor saberlo
+								 ),
                 brand:       brand,
                 price:       price,
                 description: description,

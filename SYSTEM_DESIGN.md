@@ -4224,3 +4224,17 @@ Fix: 2 espacios de indentación en los tres casos → hooks dentro del component
 
 git checkout main && git merge --no-ff fix/sprint12-useeffect-scope
 ```
+
+[DEBUGGER]
+- detectRepost: títulos genéricos ('Producto sin título') ya no hacen match
+  Root cause: 5 productos sin título se enlazaron como resubidas del Conector TypeC
+  Fix: GENERIC_TITLES set + longitud mínima 15 chars + ratio precio ±50%
+
+[ARCHITECT]
+- VintedParserService.parseJsonProducts: extrae título real de description
+  cuando el script de escaparate no pudo leerlo del DOM
+- DeduplicationScreen: pantalla para detectar y eliminar duplicados manualmente
+
+[QA_ENGINEER]
+- backup limpio aplicado: 365→359 productos, 6 duplicados eliminados
+- repostOf corruptos limpiados en 5 productos"

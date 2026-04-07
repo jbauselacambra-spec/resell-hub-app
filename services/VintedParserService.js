@@ -182,7 +182,19 @@ export function parseJsonProducts(text) {
       .map(p => ({
         ...p,
         id:            p.id || `vinted_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        title:         (p.title       || 'Sin título').trim(),
+        title: (() => {
+                        const t = (p.title || '').trim();
+                        if (t && t !== 'Producto sin título' && t !== 'Sin título') return t;
+                        // Extraer título real de la description (formato: "Título real. Marca: X")
+                        const desc = (p.description || '').trim();
+                        if (desc) {
+                          const firstPart = desc.split('. Marca:')[0].trim();
+                          if (firstPart.length > 5) return firstPart;
+                          const firstSentence = desc.split('.')[0].trim();
+                          if (firstSentence.length > 5) return firstSentence;
+                        }
+                        return 'Sin título';
+                      })(),
         brand:         (p.brand       || 'Genérico').trim(),
         price:         Math.max(0, parseFloat(p.price) || 0),
         description:   (p.description || p.title || '').trim(),
