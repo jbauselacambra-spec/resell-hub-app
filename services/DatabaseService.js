@@ -173,18 +173,35 @@ export function getProductSeverity(daysOld, views, favorites, config) {
   return null;
 }
 
+const GENERIC_TITLES = new Set([
+  'producto sin título', 'sin título', 'artículo', 'product', 'item', '',
+]);
+
 function detectRepost(existingProducts, newProduct) {
   const norm = (s) => (s || '').toLowerCase().trim();
-  const t1 = norm(newProduct.title);
-  const b1 = norm(newProduct.brand);
-  if (!t1 || t1 === 'producto') return null;
-  return existingProducts.find(p =>
-    String(p.id) !== String(newProduct.id) &&
-    norm(p.title) === t1 && norm(p.brand) === b1 &&
-    p.status !== 'sold',
-  ) || null;
-}
+  const t1   = norm(newProduct.title);
+  const b1   = norm(newProduct.brand);
 
+  // No hacer match en títulos genéricos o muy cortos
+  if (GENERIC_TITLES.has(t1) || t1.length < 15) return null;
+  const hasLetters = /[a-záéíóúüñ]{3}/i.test(t1);
+  if (!hasLetters) return null;
+
+  const newPrice = parseFloat(newProduct.price) || 0;
+
+  return existingProducts.find(p => {
+    if (p.status === 'sold') return false;
+    if (String(p.id) === String(newProduct.id)) return false;
+    if (norm(p.title) !== t1 || norm(p.brand) !== b1) return false;
+    // Precio similar (±50%) para evitar falsos positivos
+    const existPrice = parseFloat(p.price) || 0;
+    if (newPrice > 0 && existPrice > 0) {
+      const ratio = newPrice / existPrice;
+      if (ratio < 0.5 || ratio > 2.0) return false;
+    }
+    return true;
+  }) || null;
+}
 // ─────────────────────────────────────────────────────────────────────────────
 // DATABASE SERVICE
 // ─────────────────────────────────────────────────────────────────────────────
