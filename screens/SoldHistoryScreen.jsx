@@ -1,29 +1,19 @@
 /**
- * SoldHistoryScreen.jsx — Sprint 11
+ * SoldHistoryScreen.jsx — Sprint 11 + Feature: Eliminar + Ordenar
  *
- * [UI_SPECIALIST] Sprint 11:
- * - Filtro de 2 niveles: Categoría → Subcategoría
- *   Fila 1: chips de categoría (igual que antes)
- *   Fila 2: FlatList horizontal de subcats (aparece si cat seleccionada tiene >= 2 subs)
- * - +filterSub state
- * - sorted useMemo añade filtro por filterSub
- * - Reset sub al cambiar cat
+ * [UI_SPECIALIST] Nuevas features:
+ * - Eliminar producto vendido: confirmación Alert + deleteProduct()
+ * - Ordenar vendidos: por fecha de venta, precio de venta, TTS
+ *   Panel desplegable con opciones asc/desc
  *
- * [QA_ENGINEER] Sprint 11:
- * - filterSub siempre se resetea al cambiar filterCat
- * - Fila 2 solo aparece si hay >= 2 subcats distintas en la selección
- * - Los 7 Campos Sagrados intactos: filtros son solo lectura
- *
- * Bugfixes heredados:
- * - BUG-A: imagen desde p.images[0] (campo canónico Vinted)
- * - BUG-B: TouchableOpacity envuelve toda la tarjeta
- * - Hooks antes de early returns (Regla 12)
+ * [QA_ENGINEER] Hooks antes de early returns (Regla 12).
+ * Los 7 Campos Sagrados intactos — eliminar no los toca.
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Image, ActivityIndicator,
+  Image, ActivityIndicator, Alert,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { DatabaseService } from '../services/DatabaseService';
@@ -33,12 +23,16 @@ import LogService from '../services/LogService';
 const C = {
   bg:      '#F8F9FA',
   white:   '#FFFFFF',
+  surface2:'#F0F2F5',
   primary: '#FF6B35',
+  primaryBg:'#FFF2EE',
   blue:    '#004E89',
   blueBg:  '#EAF2FB',
   success: '#00D9A3',
+  successBg:'#E8FBF6',
   warning: '#FFB800',
   danger:  '#E63946',
+  dangerBg:'#FFEBEC',
   purple:  '#6C63FF',
   text:    '#1A1A2E',
   textMed: '#5C6070',
@@ -46,7 +40,16 @@ const C = {
   border:  '#EAEDF0',
 };
 
-// ─── Componente principal ─────────────────────────────────────────────────────
+// ─── Opciones de ordenación ────────────────────────────────────────────────────
+const SORT_OPTIONS = [
+  { id: 'date_desc',  label: 'Más reciente',  icon: 'calendar',      field: 'soldDateReal', dir: 'desc' },
+  { id: 'date_asc',   label: 'Más antiguo',   icon: 'calendar',      field: 'soldDateReal', dir: 'asc'  },
+  { id: 'price_desc', label: 'Mayor precio',  icon: 'trending-up',   field: 'soldPrice',    dir: 'desc' },
+  { id: 'price_asc',  label: 'Menor precio',  icon: 'trending-down', field: 'soldPrice',    dir: 'asc'  },
+  { id: 'tts_asc',    label: 'Más rápido',    icon: 'zap',           field: 'tts',          dir: 'asc'  },
+  { id: 'tts_desc',   label: 'Más lento',     icon: 'anchor',        field: 'tts',          dir: 'desc' },
+];
+
 export default function SoldHistoryScreen({ navigation }) {
 
   // ── HOOKS primero — antes de cualquier early return (Regla 12) ──────────────
@@ -54,7 +57,9 @@ export default function SoldHistoryScreen({ navigation }) {
   const [soldProducts, setSold]       = useState([]);
   const [filterType,   setFilterType] = useState('date');
   const [filterCat,    setFilterCat]  = useState(null);
-  const [filterSub,    setFilterSub]  = useState(null);  // ← Sprint 11
+  const [filterSub,    setFilterSub]  = useState(null);
+  const [sortId,       setSortId]     = useState('date_desc');
+  const [showSort,     setShowSort]   = useState(false);
   const [loading,      setLoading]    = useState(true);
 
   const loadData = () => {
@@ -77,7 +82,6 @@ export default function SoldHistoryScreen({ navigation }) {
     return unsub;
   }, [navigation]);
 
-  // Umbrales dinámicos desde config
   const ttsLightning = parseInt(config?.ttsLightning || 7);
   const ttsAnchor    = parseInt(config?.ttsAnchor    || 30);
 
@@ -89,27 +93,23 @@ export default function SoldHistoryScreen({ navigation }) {
       (s, p) => s + Math.max(0, Number(p.soldPriceReal || p.soldPrice || p.price || 0)), 0,
     );
     const avgPrecio = count ? +(recaudacion / count).toFixed(0) : 0;
-
     const ttsList = soldProducts.map(p => {
       const s = p.firstUploadDate || p.createdAt;
-      const e = p.soldDateReal || p.soldDate || p.soldAt;
+      const e = p.soldDateReal    || p.soldDate || p.soldAt;
       if (!s || !e) return null;
       return Math.max(1, Math.round((new Date(e) - new Date(s)) / 86_400_000));
     }).filter(v => v !== null);
-
     const avgTTS = ttsList.length
       ? Math.round(ttsList.reduce((a, b) => a + b, 0) / ttsList.length)
       : 0;
     return { count, recaudacion, avgPrecio, avgTTS };
   }, [soldProducts]);
 
-  // Categorías únicas para filtro fila 1
   const allCats = useMemo(
     () => [...new Set(soldProducts.map(p => p.category).filter(Boolean))].sort(),
     [soldProducts],
   );
 
-  // Sprint 11: Subcategorías disponibles para la categoría seleccionada
   const availSubs = useMemo(() => {
     if (!filterCat) return [];
     return [...new Set(
@@ -119,48 +119,68 @@ export default function SoldHistoryScreen({ navigation }) {
     )].sort();
   }, [soldProducts, filterCat]);
 
-  // Lista ordenada + filtrada (Sprint 11: añade filterSub)
+  // Calcular TTS para cada producto (helper)
+  const calcItemTTS = (p) => {
+    const s = p.firstUploadDate || p.createdAt;
+    const e = p.soldDateReal    || p.soldDate || p.soldAt;
+    if (!s || !e) return null;
+    return Math.max(1, Math.round((new Date(e) - new Date(s)) / 86_400_000));
+  };
+
+  // Lista ordenada + filtrada
   const sorted = useMemo(() => {
     let arr = filterCat
       ? soldProducts.filter(p => p.category === filterCat)
       : soldProducts;
-
-    // Sprint 11: segundo nivel de filtro
     if (filterSub) arr = arr.filter(p => p.subcategory === filterSub);
 
-    if (filterType === 'precio') {
-      return [...arr].sort((a, b) => {
-        const aP = Math.max(0, Number(a.soldPriceReal || a.soldPrice || a.price || 0));
-        const bP = Math.max(0, Number(b.soldPriceReal || b.soldPrice || b.price || 0));
-        return bP - aP;
-      });
-    }
-    if (filterType === 'tts') {
-      return [...arr].sort((a, b) => {
-        const ttsOf = p => {
-          const s = p.firstUploadDate || p.createdAt;
-          const e = p.soldDateReal    || p.soldDate || p.soldAt;
-          return (s && e) ? Math.max(1, Math.round((new Date(e) - new Date(s)) / 86_400_000)) : 9999;
-        };
-        return ttsOf(a) - ttsOf(b);
-      });
-    }
-    // default: por fecha más reciente
+    const opt = SORT_OPTIONS.find(o => o.id === sortId) || SORT_OPTIONS[0];
     return [...arr].sort((a, b) => {
-      const dA = new Date(a.soldDateReal || a.soldDate || a.soldAt || 0);
-      const dB = new Date(b.soldDateReal || b.soldDate || b.soldAt || 0);
-      return dB - dA;
+      let vA, vB;
+      if (opt.field === 'soldDateReal') {
+        vA = new Date(a.soldDateReal || a.soldDate || a.soldAt || 0).getTime();
+        vB = new Date(b.soldDateReal || b.soldDate || b.soldAt || 0).getTime();
+      } else if (opt.field === 'soldPrice') {
+        vA = Math.max(0, Number(a.soldPriceReal || a.soldPrice || a.price || 0));
+        vB = Math.max(0, Number(b.soldPriceReal || b.soldPrice || b.price || 0));
+      } else {
+        // tts
+        vA = calcItemTTS(a) ?? 9999;
+        vB = calcItemTTS(b) ?? 9999;
+      }
+      return opt.dir === 'desc' ? vB - vA : vA - vB;
     });
-  }, [soldProducts, filterType, filterCat, filterSub]);
+  }, [soldProducts, filterCat, filterSub, sortId]);
 
   const avgTtsColor = kpis.avgTTS > 0 && kpis.avgTTS <= ttsLightning
     ? C.success
     : kpis.avgTTS > 0 && kpis.avgTTS <= ttsAnchor ? C.warning : C.danger;
 
+  const currentSort = SORT_OPTIONS.find(o => o.id === sortId) || SORT_OPTIONS[0];
+
+  // ── Eliminar vendido ───────────────────────────────────────────────────────
+  const handleDelete = (item) => {
+    Alert.alert(
+      'Eliminar registro de venta',
+      `¿Seguro que quieres eliminar "${item.title}" del historial?\n\nEsta acción no se puede deshacer.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: () => {
+            DatabaseService.deleteProduct(item.id);
+            LogService.add(`🗑️ Vendido eliminado: ${item.title}`, 'info');
+            loadData();
+          },
+        },
+      ],
+    );
+  };
+
   // ── renderItem ─────────────────────────────────────────────────────────────
   const renderItem = ({ item: p }) => {
     const soldAmt = Math.max(0, Number(p.soldPriceReal || p.soldPrice || p.price || 0));
-
     const soldDateStr = (() => {
       const d = p.soldDateReal || p.soldDate || p.soldAt;
       if (!d) return '—';
@@ -168,25 +188,15 @@ export default function SoldHistoryScreen({ navigation }) {
         day: '2-digit', month: 'short', year: 'numeric',
       });
     })();
-
-    const tts = (() => {
-      const s = p.firstUploadDate || p.createdAt;
-      const e = p.soldDateReal    || p.soldDate || p.soldAt;
-      if (!s || !e) return null;
-      return Math.max(1, Math.round((new Date(e) - new Date(s)) / 86_400_000));
-    })();
-
+    const tts = calcItemTTS(p);
     const ttsColor = !tts ? '#999'
       : tts <= ttsLightning ? C.success
       : tts <= ttsAnchor    ? C.warning
-      :                       C.danger;
+      : C.danger;
     const ttsEmoji = !tts ? '' : tts <= ttsLightning ? '⚡' : tts <= ttsAnchor ? '🟡' : '⚓';
-
-    // FIX: imagen correcta desde p.images[0] (campo canónico Vinted)
     const imageUri = p.images?.[0] || p.thumbnail || p.image || null;
 
     return (
-      // FIX: TouchableOpacity envuelve toda la tarjeta
       <TouchableOpacity
         style={styles.card}
         onPress={() => {
@@ -195,13 +205,9 @@ export default function SoldHistoryScreen({ navigation }) {
         }}
         activeOpacity={0.75}
       >
-        {/* Imagen del producto */}
+        {/* Imagen */}
         {imageUri ? (
-          <Image
-            source={{ uri: imageUri }}
-            style={styles.thumbnail}
-            resizeMode="cover"
-          />
+          <Image source={{ uri: imageUri }} style={styles.thumbnail} resizeMode="cover" />
         ) : (
           <View style={[styles.thumbnail, styles.thumbnailPlaceholder]}>
             <Icon name="package" size={22} color="#CCC" />
@@ -213,16 +219,12 @@ export default function SoldHistoryScreen({ navigation }) {
           <Text style={styles.cardTitle} numberOfLines={2}>
             {p.title || 'Sin título'}
           </Text>
-
-          {/* Categoría + subcategoría + marca */}
           {(p.category || p.subcategory || p.brand) && (
             <Text style={styles.cardMeta} numberOfLines={1}>
               {p.category}{p.subcategory ? ` › ${p.subcategory}` : ''}
               {p.brand ? ` · ${p.brand}` : ''}
             </Text>
           )}
-
-          {/* Precio + TTS + Bundle */}
           <View style={styles.cardRow}>
             <Text style={styles.cardPrice}>{soldAmt.toFixed(0)}€</Text>
             {tts !== null && (
@@ -238,31 +240,85 @@ export default function SoldHistoryScreen({ navigation }) {
               </View>
             )}
           </View>
-
           <Text style={styles.cardDate}>{soldDateStr}</Text>
         </View>
 
-        <Icon name="chevron-right" size={16} color={C.textLow} style={{ alignSelf: 'center' }} />
+        {/* Acciones: editar + eliminar */}
+        <View style={styles.cardActions}>
+          <Icon name="chevron-right" size={15} color={C.textLow} />
+          <TouchableOpacity
+            style={styles.deleteBtn}
+            onPress={() => handleDelete(p)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.7}
+          >
+            <Icon name="trash-2" size={14} color={C.danger} />
+          </TouchableOpacity>
+        </View>
       </TouchableOpacity>
     );
   };
 
-  // ── RENDER ─────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
 
       {/* HEADER */}
       <View style={styles.header}>
-        <View style={styles.headerRow}>
+        {/* Fila título + botón sort */}
+        <View style={styles.headerTop}>
           <Text style={styles.headerTitle}>Historial de Ventas</Text>
-          <TouchableOpacity
-            style={styles.importBtn}
-            onPress={() => navigation.navigate('Import')}
-          >
-            <Icon name="download" size={13} color={C.purple} />
-            <Text style={styles.importBtnTxt}>Importar</Text>
-          </TouchableOpacity>
+          <View style={styles.headerRight}>
+            <TouchableOpacity
+              style={styles.importBtn}
+              onPress={() => navigation.navigate('Import')}
+            >
+              <Icon name="download" size={13} color={C.purple} />
+              <Text style={styles.importBtnTxt}>Importar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sortToggleBtn, showSort && { backgroundColor: C.primary }]}
+              onPress={() => setShowSort(s => !s)}
+              activeOpacity={0.7}
+            >
+              <Icon name="sliders" size={13} color={showSort ? '#FFF' : C.textMed} />
+              <Icon
+                name={showSort ? 'chevron-up' : 'chevron-down'}
+                size={11}
+                color={showSort ? '#FFF' : C.textLow}
+              />
+            </TouchableOpacity>
+          </View>
         </View>
+
+        {/* Panel de ordenación desplegable */}
+        {showSort && (
+          <View style={styles.sortPanel}>
+            <Text style={styles.sortPanelTitle}>ORDENAR POR</Text>
+            <View style={styles.sortGrid}>
+              {SORT_OPTIONS.map(opt => {
+                const active = sortId === opt.id;
+                return (
+                  <TouchableOpacity
+                    key={opt.id}
+                    style={[styles.sortChip, active && { backgroundColor: C.primary, borderColor: C.primary }]}
+                    onPress={() => { setSortId(opt.id); setShowSort(false); }}
+                    activeOpacity={0.7}
+                  >
+                    <Icon name={opt.icon} size={11} color={active ? '#FFF' : C.textMed} />
+                    <Text style={[styles.sortChipTxt, active && { color: '#FFF', fontWeight: '800' }]}>
+                      {opt.label}
+                    </Text>
+                    <Icon
+                      name={opt.dir === 'desc' ? 'arrow-down' : 'arrow-up'}
+                      size={9}
+                      color={active ? 'rgba(255,255,255,0.7)' : C.textLow}
+                    />
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
 
         {/* KPI PANEL */}
         <View style={styles.kpiPanel}>
@@ -294,10 +350,9 @@ export default function SoldHistoryScreen({ navigation }) {
         </Text>
       </View>
 
-      {/* ── Sprint 11: FILTRO CATEGORÍA + SUBCATEGORÍA en 2 niveles ─────────── */}
+      {/* ── Filtro Categoría + Subcategoría 2 niveles ─────────────────────── */}
       {allCats.length >= 2 && (
         <View style={{ marginBottom: 4 }}>
-          {/* Fila 1: Categorías */}
           <FlatList
             horizontal
             data={[null, ...allCats]}
@@ -308,10 +363,7 @@ export default function SoldHistoryScreen({ navigation }) {
             renderItem={({ item: cat }) => (
               <TouchableOpacity
                 style={[styles.catChip, filterCat === cat && { backgroundColor: C.primary }]}
-                onPress={() => {
-                  setFilterCat(cat);
-                  setFilterSub(null); // reset sub al cambiar cat
-                }}
+                onPress={() => { setFilterCat(cat); setFilterSub(null); }}
               >
                 <Text style={[styles.catChipTxt, filterCat === cat && { color: '#FFF' }]}>
                   {cat ?? 'Todas'}
@@ -319,8 +371,6 @@ export default function SoldHistoryScreen({ navigation }) {
               </TouchableOpacity>
             )}
           />
-
-          {/* Fila 2: Subcategorías (solo si hay cat seleccionada y >= 2 subs) */}
           {filterCat && availSubs.length >= 2 && (
             <FlatList
               horizontal
@@ -344,23 +394,15 @@ export default function SoldHistoryScreen({ navigation }) {
         </View>
       )}
 
-      {/* FILTRO ORDEN */}
-      <View style={styles.filterBar}>
-        {[
-          { id: 'date',   label: '🗓 Por Fecha'    },
-          { id: 'precio', label: '💰 Por Precio'   },
-          { id: 'tts',    label: '⚡ Por Velocidad' },
-        ].map(f => (
-          <TouchableOpacity
-            key={f.id}
-            style={[styles.filterBtn, filterType === f.id && styles.filterBtnActive]}
-            onPress={() => setFilterType(f.id)}
-          >
-            <Text style={[styles.filterText, filterType === f.id && styles.filterTextActive]}>
-              {f.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+      {/* Contador + orden activo */}
+      <View style={styles.resultsBar}>
+        <Text style={styles.resultsCount}>
+          {sorted.length} venta{sorted.length !== 1 ? 's' : ''}
+        </Text>
+        <View style={styles.activeSortBadge}>
+          <Icon name={currentSort.icon} size={10} color={C.primary} />
+          <Text style={styles.activeSortTxt}>{currentSort.label}</Text>
+        </View>
       </View>
 
       {/* LISTA */}
@@ -387,71 +429,66 @@ export default function SoldHistoryScreen({ navigation }) {
   );
 }
 
-// ─── Estilos ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
 
-  // Header
-  header:      { backgroundColor: C.white, paddingTop: 52, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: C.border },
-  headerRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  header:      { backgroundColor: C.white, paddingTop: 52, paddingHorizontal: 16,
+                 paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: C.border },
+  headerTop:   { flexDirection: 'row', alignItems: 'center',
+                 justifyContent: 'space-between', marginBottom: 12 },
   headerTitle: { fontSize: 22, fontWeight: '900', color: C.text },
-  importBtn:   { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, backgroundColor: '#F0EEFF', borderWidth: 1, borderColor: '#DDD8FF' },
-  importBtnTxt:{ fontSize: 12, fontWeight: '700', color: '#6C63FF' },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
 
-  // KPIs
-  kpiPanel:  { flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: 12, padding: 10, marginBottom: 8 },
+  importBtn:    { flexDirection: 'row', alignItems: 'center', gap: 4,
+                  paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
+                  backgroundColor: '#F0EEFF', borderWidth: 1, borderColor: '#DDD8FF' },
+  importBtnTxt: { fontSize: 12, fontWeight: '700', color: '#6C63FF' },
+
+  sortToggleBtn: { flexDirection: 'row', alignItems: 'center', gap: 4,
+                   paddingHorizontal: 10, paddingVertical: 7, borderRadius: 20,
+                   backgroundColor: C.surface2, borderWidth: 1, borderColor: C.border },
+
+  // Sort panel
+  sortPanel:      { backgroundColor: C.bg, borderRadius: 14, padding: 12,
+                    marginBottom: 10, borderWidth: 1, borderColor: C.border },
+  sortPanelTitle: { fontSize: 9, fontWeight: '900', color: C.textLow,
+                    letterSpacing: 1.5, marginBottom: 8 },
+  sortGrid:       { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  sortChip:       { flexDirection: 'row', alignItems: 'center', gap: 4,
+                    paddingHorizontal: 9, paddingVertical: 6, borderRadius: 20,
+                    backgroundColor: C.white, borderWidth: 1, borderColor: C.border },
+  sortChipTxt:    { fontSize: 11, fontWeight: '600', color: C.textMed },
+
+  kpiPanel:  { flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg,
+               borderRadius: 12, padding: 10, marginBottom: 8 },
   kpiItem:   { flex: 1, alignItems: 'center' },
   kpiVal:    { fontSize: 18, fontWeight: '900', color: C.text },
   kpiLab:    { fontSize: 9, color: C.textLow, fontWeight: '600', marginTop: 1 },
   kpiDivider:{ width: 1, height: 28, backgroundColor: C.border, marginHorizontal: 4 },
   ttsLegend: { fontSize: 10, color: C.textLow, textAlign: 'center', marginTop: 2, marginBottom: 4 },
 
-  // Filtro cat fila 1
-  catChip:    { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: C.white, borderWidth: 1, borderColor: C.border },
+  catChip:    { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20,
+                backgroundColor: C.white, borderWidth: 1, borderColor: C.border },
   catChipTxt: { fontSize: 12, fontWeight: '600', color: C.textMed },
+  subChip:    { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 14,
+                backgroundColor: C.blueBg, borderWidth: 1, borderColor: C.blue + '28' },
+  subChipTxt: { fontSize: 10, fontWeight: '700', color: C.blue },
 
-  // Sprint 11: filtro sub fila 2
-  subChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 14,
-    backgroundColor: C.blueBg,
-    borderWidth: 1,
-    borderColor: C.blue + '28',
-  },
-  subChipTxt: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: C.blue,
-  },
+  resultsBar:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+                     paddingHorizontal: 16, paddingVertical: 6 },
+  resultsCount:    { fontSize: 11, color: C.textLow, fontWeight: '600' },
+  activeSortBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  activeSortTxt:   { fontSize: 10, color: C.primary, fontWeight: '700' },
 
-  // Filtro orden
-  filterBar:      { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
-  filterBtn:      { flex: 1, alignItems: 'center', paddingVertical: 6, borderRadius: 8, backgroundColor: C.white, borderWidth: 1, borderColor: C.border },
-  filterBtnActive:{ backgroundColor: C.primary, borderColor: C.primary },
-  filterText:     { fontSize: 11, fontWeight: '600', color: C.textMed },
-  filterTextActive:{ color: '#FFF' },
-
-  // Tarjeta
   list: { padding: 12, gap: 8 },
-  card: {
-    flexDirection: 'row',
-    backgroundColor: C.white,
-    borderRadius: 14,
-    padding: 10,
-    alignItems: 'flex-start',
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
+  card: { flexDirection: 'row', backgroundColor: C.white, borderRadius: 14,
+          padding: 10, alignItems: 'flex-start',
+          shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4,
+          shadowOffset: { width: 0, height: 2 }, elevation: 2 },
 
-  // Imagen desde images[0]
   thumbnail:            { width: 72, height: 72, borderRadius: 10, marginRight: 10, backgroundColor: C.bg },
   thumbnailPlaceholder: { justifyContent: 'center', alignItems: 'center' },
 
-  // Contenido tarjeta
   cardBody:  { flex: 1, gap: 3 },
   cardTitle: { fontSize: 13, fontWeight: '700', color: C.text, lineHeight: 17 },
   cardMeta:  { fontSize: 10, color: C.textMed, fontWeight: '500' },
@@ -459,14 +496,20 @@ const styles = StyleSheet.create({
   cardPrice: { fontSize: 15, fontWeight: '900', color: C.text },
   cardDate:  { fontSize: 10, color: C.textLow, marginTop: 2 },
 
-  // Chips TTS / bundle
   ttsChip:    { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
   ttsChipTxt: { fontSize: 11, fontWeight: '700' },
-  bundleChip: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: '#EAE8FF' },
+  bundleChip: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
+                backgroundColor: '#EAE8FF' },
   bundleChipTxt: { fontSize: 10, fontWeight: '700', color: '#6C63FF' },
 
-  // Empty
+  // Acciones de la tarjeta (columna derecha)
+  cardActions: { flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between',
+                 paddingLeft: 4, gap: 12, alignSelf: 'stretch' },
+  deleteBtn:   { backgroundColor: C.dangerBg, borderRadius: 8, padding: 6,
+                 borderWidth: 1, borderColor: C.danger + '40' },
+
   empty:    { alignItems: 'center', paddingTop: 60 },
   emptyText:{ fontSize: 16, fontWeight: '700', color: C.textMed, marginTop: 12 },
-  emptySub: { fontSize: 13, color: C.textLow, textAlign: 'center', marginTop: 4, paddingHorizontal: 40 },
+  emptySub: { fontSize: 13, color: C.textLow, textAlign: 'center',
+              marginTop: 4, paddingHorizontal: 40 },
 });
