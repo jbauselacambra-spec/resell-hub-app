@@ -1017,7 +1017,20 @@ static saveFullDictionary(dict) {
       }
       if (payload.dictionary && Object.keys(payload.dictionary).length > 0) storage.set(KEYS.DICTIONARY, JSON.stringify(payload.dictionary));
       if (payload.dictionaryFull && Object.keys(payload.dictionaryFull).length > 0) storage.set(KEYS.FULL_DICTIONARY, JSON.stringify(payload.dictionaryFull));
-      if (payload.config && result.products > 0) { this.saveConfig(payload.config); result.configRestored = true; }
+      
+      // [FIX] Restaurar config, dictionary y dictionaryFull siempre,
+        // independientemente de si se crearon productos nuevos.
+        if (payload.config) {
+          this.saveConfig(payload.config);
+          result.configRestored = true;
+        }
+        if (payload.dictionary && Object.keys(payload.dictionary).length > 0) {
+          storage.set(KEYS.DICTIONARY, JSON.stringify(payload.dictionary));
+        }
+        if (payload.dictionaryFull && Object.keys(payload.dictionaryFull).length > 0) {
+          storage.set(KEYS.FULL_DICTIONARY, JSON.stringify(payload.dictionaryFull));
+        }
+      
       if (Array.isArray(payload.salesHistory) && payload.salesHistory.length > 0) {
         try { const { VintedSalesDB } = require('./VintedParserService'); const r = VintedSalesDB.saveRecords(payload.salesHistory); result.salesRecords = r.inserted || 0; }
         catch (e) { result.errors.push('salesHistory: ' + e.message); }
