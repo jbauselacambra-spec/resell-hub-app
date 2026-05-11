@@ -1,6 +1,8 @@
 /**
  * DeduplicationScreen.jsx — Sprint 14
  *
+ * REFACTORIZADO para usar theme.js (ResellHub Design System v2)
+ * 
  * [DEBUGGER] Pantalla para detectar y eliminar duplicados del inventario.
  * Accesible desde Settings → BBDD → "Buscar duplicados".
  *
@@ -19,21 +21,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Alert, ActivityIndicator, ScrollView, Platform,
+  Alert, ActivityIndicator, ScrollView,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { DatabaseService } from '../services/DatabaseService';
 import LogService, { LOG_CTX } from '../services/LogService';
 
-const DS = {
-  bg:       '#F8F9FA', white:    '#FFFFFF', surface2: '#F0F2F5',
-  border:   '#EAEDF0', primary:  '#FF6B35', primaryBg:'#FFF2EE',
-  success:  '#00D9A3', successBg:'#E8FBF6', danger:   '#E63946',
-  dangerBg: '#FFEBEC', blue:     '#004E89', blueBg:   '#EAF2FB',
-  warning:  '#FFB800', warningBg:'#FFF8E0',
-  text:     '#1A1A2E', textMed:  '#5C6070', textLow:  '#A0A5B5',
-  mono:     Platform.OS === 'android' ? 'monospace' : 'Courier New',
-};
+// ── Importar Design System ───────────────────────────────────────────────────
+import {
+  DS, SPACE, RADIUS, SHADOW, TXT, BTN, BTN_TEXT, CARD,
+  LAYOUT, FONT_SIZE, FONT_FAMILY,
+} from '../theme';
 
 // ─── Normalización de título ──────────────────────────────────────────────────
 function normTitle(s) {
@@ -127,7 +125,7 @@ function DuplicateGroup({ group, onKeepChange, onRemove }) {
             <View style={{ flex: 1 }}>
               <View style={styles.productRowTop}>
                 <View style={[styles.statusChip, {
-                  backgroundColor: p.status === 'sold' ? DS.successBg : DS.blueBg,
+                  backgroundColor: p.status === 'sold' ? DS.successLight : DS.blueLight,
                 }]}>
                   <Text style={[styles.statusChipTxt, {
                     color: p.status === 'sold' ? DS.success : DS.blue,
@@ -135,7 +133,7 @@ function DuplicateGroup({ group, onKeepChange, onRemove }) {
                     {p.status === 'sold' ? 'VENDIDO' : 'ACTIVO'}
                   </Text>
                 </View>
-                <Text style={[styles.priceText, { fontFamily: DS.mono }]}>
+                <Text style={[styles.priceText, { fontFamily: FONT_FAMILY.mono }]}>
                   {price}€
                 </Text>
               </View>
@@ -190,8 +188,9 @@ export default function DeduplicationScreen({ navigation }) {
       const initialKeep = {};
       groups.forEach(g => { initialKeep[g.duplicates.join('|')] = g.keep; });
       setKeepMap(initialKeep);
+      LogService.debug(`Deduplication: ${groups.length} grupos, ${corrupt.length} corruptos`, LOG_CTX.UI);
     } catch (e) {
-      LogService.error('DeduplicationScreen.loadData', LOG_CTX.DB, e);
+      LogService.error('Deduplication.loadData', LOG_CTX.DB, e.message);
     } finally {
       setLoading(false);
     }
@@ -201,20 +200,16 @@ export default function DeduplicationScreen({ navigation }) {
     loadData();
   }, []);
 
-  const totalDuplicates = duplicateGroups.reduce(
-    (sum, g) => sum + g.products.length - 1, 0
-  );
-
-  const handleKeepChange = (dupIds, newKeepId) => {
-    const key = dupIds.join('|');
-    setKeepMap(prev => ({ ...prev, [key]: newKeepId }));
+  const handleKeepChange = (duplicateIds, keepId) => {
+    const key = duplicateIds.join('|');
+    setKeepMap(prev => ({ ...prev, [key]: keepId }));
   };
 
-  const handleRemoveGroup = (dupIds, keepId) => {
-    const removeIds = dupIds.filter(id => id !== keepId);
+  const handleRemoveGroup = (duplicateIds, keepId) => {
+    const toDelete = duplicateIds.filter(id => id !== keepId);
     Alert.alert(
-      '¿Eliminar duplicados?',
-      `Se eliminarán ${removeIds.length} producto${removeIds.length > 1 ? 's' : ''} y se conservará 1.`,
+      'Eliminar duplicados',
+      `¿Eliminar ${toDelete.length} producto${toDelete.length > 1 ? 's' : ''} duplicado${toDelete.length > 1 ? 's' : ''}?\n\nSe conservará el producto con ID ${keepId}.`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -223,14 +218,12 @@ export default function DeduplicationScreen({ navigation }) {
           onPress: () => {
             setProcessing(true);
             try {
-              removeIds.forEach(id => DatabaseService.deleteProduct(id));
-              LogService.add(
-                `🗑️ Dedup: eliminados ${removeIds.length} duplicados, conservado ${keepId}`,
-                'success',
-              );
+              toDelete.forEach(id => DatabaseService.deleteProduct(id));
+              LogService.add(`🗑️ Dedup: eliminados ${toDelete.length} duplicados`, 'success');
               loadData();
             } catch (e) {
-              Alert.alert('Error', e.message);
+              LogService.error('Deduplication.handleRemoveGroup', LOG_CTX.DB, e.message);
+              Alert.alert('Error', 'No se pudieron eliminar los duplicados.');
             } finally {
               setProcessing(false);
             }
@@ -241,33 +234,33 @@ export default function DeduplicationScreen({ navigation }) {
   };
 
   const handleRemoveAllDuplicates = () => {
-    if (duplicateGroups.length === 0) return;
-    const allToRemove = [];
+    let totalToRemove = 0;
     duplicateGroups.forEach(g => {
-      const key    = g.duplicates.join('|');
-      const keepId = keepMap[key] || g.keep;
-      g.duplicates.filter(id => id !== keepId).forEach(id => allToRemove.push(id));
+      const keep = keepMap[g.duplicates.join('|')] || g.keep;
+      totalToRemove += g.duplicates.filter(id => id !== keep).length;
     });
 
     Alert.alert(
-      '¿Eliminar TODOS los duplicados?',
-      `Se eliminarán ${allToRemove.length} productos duplicados de toda la base de datos.`,
+      'Eliminar todos los duplicados',
+      `Se eliminarán ${totalToRemove} productos duplicados.\n\n¿Continuar?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
-          text: `Eliminar ${allToRemove.length}`,
+          text: 'Eliminar',
           style: 'destructive',
           onPress: () => {
             setProcessing(true);
             try {
-              allToRemove.forEach(id => DatabaseService.deleteProduct(id));
-              LogService.add(
-                `🗑️ Dedup masiva: ${allToRemove.length} duplicados eliminados`,
-                'success',
-              );
+              duplicateGroups.forEach(g => {
+                const keep = keepMap[g.duplicates.join('|')] || g.keep;
+                const toDelete = g.duplicates.filter(id => id !== keep);
+                toDelete.forEach(id => DatabaseService.deleteProduct(id));
+              });
+              LogService.add(`🗑️ Dedup: eliminados ${totalToRemove} duplicados masivamente`, 'success');
               loadData();
             } catch (e) {
-              Alert.alert('Error', e.message);
+              LogService.error('Deduplication.handleRemoveAllDuplicates', LOG_CTX.DB, e.message);
+              Alert.alert('Error', 'No se pudieron eliminar todos los duplicados.');
             } finally {
               setProcessing(false);
             }
@@ -278,10 +271,9 @@ export default function DeduplicationScreen({ navigation }) {
   };
 
   const handleFixCorruptRepostOf = () => {
-    if (corruptRepostOf.length === 0) return;
     Alert.alert(
       'Limpiar repostOf corruptos',
-      `${corruptRepostOf.length} productos apuntan a productos que ya no existen. ¿Limpiar el enlace?`,
+      `Se limpiará el campo repostOf de ${corruptRepostOf.length} productos.\n\n¿Continuar?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -289,25 +281,14 @@ export default function DeduplicationScreen({ navigation }) {
           onPress: () => {
             setProcessing(true);
             try {
-              const all = DatabaseService.getAllProducts();
-              const allIds = new Set(all.map(p => String(p.id)));
-              let fixed = 0;
-              const updated = all.map(p => {
-                if (p.repostOf && !allIds.has(String(p.repostOf))) {
-                  const { repostOf, repostedAt, ...rest } = p;
-                  fixed++;
-                  return rest;
-                }
-                return p;
+              corruptRepostOf.forEach(p => {
+                DatabaseService.updateProduct(p.id, { repostOf: null });
               });
-              DatabaseService.saveAllProducts(updated);
-              LogService.add(
-                `✅ Limpiados ${fixed} repostOf corruptos`,
-                'success',
-              );
+              LogService.add(`🔗 Dedup: limpiados ${corruptRepostOf.length} repostOf corruptos`, 'success');
               loadData();
             } catch (e) {
-              Alert.alert('Error', e.message);
+              LogService.error('Deduplication.handleFixCorruptRepostOf', LOG_CTX.DB, e.message);
+              Alert.alert('Error', 'No se pudieron limpiar los enlaces corruptos.');
             } finally {
               setProcessing(false);
             }
@@ -317,36 +298,54 @@ export default function DeduplicationScreen({ navigation }) {
     );
   };
 
+  const totalDuplicates = useMemo(() => {
+    return duplicateGroups.reduce((acc, g) => {
+      const keep = keepMap[g.duplicates.join('|')] || g.keep;
+      return acc + g.duplicates.filter(id => id !== keep).length;
+    }, 0);
+  }, [duplicateGroups, keepMap]);
+
   if (loading) {
     return (
-      <View style={styles.loadingWrap}>
-        <ActivityIndicator color={DS.primary} size="large"/>
-        <Text style={styles.loadingTxt}>Analizando inventario...</Text>
+      <View style={styles.root}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+            <Icon name="arrow-left" size={18} color={DS.text}/>
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headerTitle}>Deduplicación</Text>
+            <Text style={styles.headerSub}>Limpieza de inventario</Text>
+          </View>
+        </View>
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={DS.brand}/>
+          <Text style={styles.loadingTxt}>Analizando inventario...</Text>
+        </View>
       </View>
     );
   }
 
   return (
     <View style={styles.root}>
-      {/* Header */}
+      {/* HEADER */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Icon name="arrow-left" size={20} color={DS.text}/>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <Icon name="arrow-left" size={18} color={DS.text}/>
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>Deduplicar inventario</Text>
-          <Text style={styles.headerSub}>Detecta y elimina productos repetidos</Text>
+          <Text style={styles.headerTitle}>Deduplicación</Text>
+          <Text style={styles.headerSub}>Limpieza de inventario</Text>
         </View>
       </View>
 
-      {/* Resumen */}
+      {/* SUMMARY BAR */}
       <View style={styles.summaryBar}>
         <View style={[styles.summaryChip, {
-          backgroundColor: totalDuplicates > 0 ? DS.dangerBg : DS.successBg,
+          backgroundColor: totalDuplicates > 0 ? DS.dangerLight : DS.successLight,
         }]}>
           <Icon
-            name={totalDuplicates > 0 ? 'alert-circle' : 'check-circle'}
-            size={14}
+            name={totalDuplicates > 0 ? 'copy' : 'check-circle'}
+            size={13}
             color={totalDuplicates > 0 ? DS.danger : DS.success}
           />
           <Text style={[styles.summaryChipTxt, {
@@ -358,7 +357,7 @@ export default function DeduplicationScreen({ navigation }) {
           </Text>
         </View>
         {corruptRepostOf.length > 0 && (
-          <View style={[styles.summaryChip, { backgroundColor: DS.warningBg }]}>
+          <View style={[styles.summaryChip, { backgroundColor: DS.warningLight }]}>
             <Icon name="link" size={13} color={DS.warning}/>
             <Text style={[styles.summaryChipTxt, { color: DS.warning }]}>
               {corruptRepostOf.length} repostOf corruptos
@@ -369,7 +368,7 @@ export default function DeduplicationScreen({ navigation }) {
 
       {processing && (
         <View style={styles.processingBar}>
-          <ActivityIndicator color={DS.white} size="small"/>
+          <ActivityIndicator color="#FFF" size="small"/>
           <Text style={styles.processingTxt}>Procesando...</Text>
         </View>
       )}
@@ -467,78 +466,75 @@ export default function DeduplicationScreen({ navigation }) {
 
 // ─── Estilos ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root:           { flex: 1, backgroundColor: DS.bg },
-  loadingWrap:    { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  loadingTxt:     { fontSize: 14, color: DS.textMed },
+  root:           { flex: 1, backgroundColor: DS.surface2 },
+  loadingWrap:    { flex: 1, justifyContent: 'center', alignItems: 'center', gap: SPACE[3] },
+  loadingTxt:     { ...TXT.body, color: DS.text2 },
 
-  header:         { flexDirection: 'row', alignItems: 'center', gap: 10,
-                    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 14,
+  header:         { flexDirection: 'row', alignItems: 'center', gap: SPACE[2] + 2,
+                    paddingHorizontal: LAYOUT.screenPadH, paddingTop: LAYOUT.headerPadT, paddingBottom: SPACE[3] + 2,
                     backgroundColor: DS.white, borderBottomWidth: 1, borderBottomColor: DS.border },
-  backBtn:        { width: 40, height: 40, borderRadius: 20,
-                    backgroundColor: DS.surface2, justifyContent: 'center', alignItems: 'center' },
-  headerTitle:    { fontSize: 18, fontWeight: '900', color: DS.text },
-  headerSub:      { fontSize: 11, color: DS.textLow, marginTop: 1 },
+  backBtn:        { width: 40, height: 40, borderRadius: RADIUS.full,
+                    backgroundColor: DS.surface3, justifyContent: 'center', alignItems: 'center' },
+  headerTitle:    { ...TXT.heading },
+  headerSub:      { ...TXT.caption, marginTop: 1 },
 
-  summaryBar:     { flexDirection: 'row', gap: 8, padding: 12,
+  summaryBar:     { flexDirection: 'row', gap: SPACE[2], padding: SPACE[3],
                     backgroundColor: DS.white, borderBottomWidth: 1, borderBottomColor: DS.border,
                     flexWrap: 'wrap' },
-  summaryChip:    { flexDirection: 'row', alignItems: 'center', gap: 6,
-                    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
+  summaryChip:    { flexDirection: 'row', alignItems: 'center', gap: SPACE[1] + 2,
+                    paddingHorizontal: SPACE[2] + 2, paddingVertical: SPACE[1] + 2, borderRadius: RADIUS.full },
   summaryChipTxt: { fontSize: 12, fontWeight: '700' },
 
-  processingBar:  { flexDirection: 'row', alignItems: 'center', gap: 8,
-                    backgroundColor: DS.blue, padding: 10, justifyContent: 'center' },
+  processingBar:  { flexDirection: 'row', alignItems: 'center', gap: SPACE[2],
+                    backgroundColor: DS.blue, padding: SPACE[2] + 2, justifyContent: 'center' },
   processingTxt:  { color: '#FFF', fontSize: 13, fontWeight: '700' },
 
   scroll:         { flex: 1 },
-  scrollContent:  { padding: 16 },
+  scrollContent:  { padding: LAYOUT.screenPadH },
 
-  actionsRow:     { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  actionsRow:     { flexDirection: 'row', gap: SPACE[2], marginBottom: SPACE[4] },
   actionBtn:      { flex: 1, flexDirection: 'row', alignItems: 'center',
-                    justifyContent: 'center', gap: 6, padding: 12, borderRadius: 14 },
+                    justifyContent: 'center', gap: SPACE[1] + 2, padding: SPACE[3], borderRadius: RADIUS.lg },
   actionBtnTxt:   { color: '#FFF', fontWeight: '800', fontSize: 12 },
 
-  emptyBox:       { alignItems: 'center', paddingVertical: 60, gap: 10 },
-  emptyTitle:     { fontSize: 18, fontWeight: '900', color: DS.text },
-  emptySub:       { fontSize: 13, color: DS.textMed, textAlign: 'center' },
+  emptyBox:       { alignItems: 'center', paddingVertical: 60, gap: SPACE[2] + 2 },
+  emptyTitle:     { ...TXT.heading, color: DS.text },
+  emptySub:       { ...TXT.caption, color: DS.text2, textAlign: 'center' },
 
-  section:        { marginBottom: 20 },
-  sectionTitle:   { fontSize: 10, fontWeight: '900', color: DS.textLow,
-                    letterSpacing: 1.5, marginBottom: 6 },
-  sectionDesc:    { fontSize: 12, color: DS.textMed, lineHeight: 17, marginBottom: 12 },
+  section:        { marginBottom: SPACE[5] },
+  sectionTitle:   { ...TXT.label, marginBottom: SPACE[1] + 2 },
+  sectionDesc:    { ...TXT.caption, lineHeight: 17, marginBottom: SPACE[3] },
 
-  groupCard:      { backgroundColor: DS.white, borderRadius: 16, padding: 14,
-                    marginBottom: 12, borderWidth: 1, borderColor: DS.border,
-                    elevation: 2 },
-  groupTitle:     { fontSize: 14, fontWeight: '800', color: DS.text, marginBottom: 2 },
-  groupSub:       { fontSize: 11, color: DS.textLow, marginBottom: 10 },
+  groupCard:      { ...CARD.default, marginBottom: SPACE[3], ...SHADOW.sm },
+  groupTitle:     { ...TXT.title, marginBottom: 2 },
+  groupSub:       { ...TXT.caption, color: DS.text3, marginBottom: SPACE[2] + 2 },
 
-  productRow:     { flexDirection: 'row', alignItems: 'center', gap: 10,
-                    paddingVertical: 10, paddingHorizontal: 8, borderRadius: 10,
-                    backgroundColor: DS.surface2, marginBottom: 6 },
-  productRowKeep: { backgroundColor: DS.blueBg, borderWidth: 1.5, borderColor: DS.blue+'50' },
+  productRow:     { flexDirection: 'row', alignItems: 'center', gap: SPACE[2] + 2,
+                    paddingVertical: SPACE[2] + 2, paddingHorizontal: SPACE[2],
+                    borderRadius: RADIUS.md, backgroundColor: DS.surface2, marginBottom: SPACE[1] + 2 },
+  productRowKeep: { backgroundColor: DS.blueLight, borderWidth: 1.5, borderColor: DS.blue + '50' },
   radioOuter:     { width: 20, height: 20, borderRadius: 10, borderWidth: 2,
-                    borderColor: DS.textLow, justifyContent: 'center', alignItems: 'center' },
+                    borderColor: DS.text3, justifyContent: 'center', alignItems: 'center' },
   radioOuterOn:   { borderColor: DS.blue },
   radioInner:     { width: 10, height: 10, borderRadius: 5, backgroundColor: DS.blue },
-  productRowTop:  { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 },
-  statusChip:     { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  productRowTop:  { flexDirection: 'row', alignItems: 'center', gap: SPACE[1] + 2, marginBottom: 3 },
+  statusChip:     { paddingHorizontal: SPACE[1] + 2, paddingVertical: 2, borderRadius: RADIUS.sm - 2 },
   statusChipTxt:  { fontSize: 9, fontWeight: '900' },
   priceText:      { fontSize: 13, fontWeight: '900', color: DS.text },
-  productRowId:   { fontSize: 10, color: DS.textLow },
-  productRowDate: { fontSize: 10, color: DS.textMed, marginTop: 1 },
-  keepBadge:      { backgroundColor: DS.blue, paddingHorizontal: 6, paddingVertical: 3,
-                    borderRadius: 8 },
+  productRowId:   { fontSize: 10, color: DS.text3 },
+  productRowDate: { fontSize: 10, color: DS.text2, marginTop: 1 },
+  keepBadge:      { backgroundColor: DS.blue, paddingHorizontal: SPACE[1] + 2, paddingVertical: 3,
+                    borderRadius: RADIUS.sm },
   keepBadgeTxt:   { fontSize: 8, fontWeight: '900', color: '#FFF' },
 
   removeGroupBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                    gap: 6, marginTop: 10, padding: 10, borderRadius: 10,
-                    backgroundColor: DS.dangerBg, borderWidth: 1, borderColor: DS.danger+'30' },
+                    gap: SPACE[1] + 2, marginTop: SPACE[2] + 2, padding: SPACE[2] + 2, borderRadius: RADIUS.md,
+                    backgroundColor: DS.dangerLight, borderWidth: 1, borderColor: DS.danger + '30' },
   removeGroupBtnTxt: { fontSize: 13, fontWeight: '700', color: DS.danger },
 
-  corruptCard:    { flexDirection: 'row', alignItems: 'center', gap: 10,
-                    backgroundColor: DS.warningBg, borderRadius: 12, padding: 12,
-                    marginBottom: 6 },
+  corruptCard:    { flexDirection: 'row', alignItems: 'center', gap: SPACE[2] + 2,
+                    backgroundColor: DS.warningLight, borderRadius: RADIUS.md, padding: SPACE[3],
+                    marginBottom: SPACE[1] + 2 },
   corruptTitle:   { fontSize: 13, fontWeight: '700', color: DS.text },
-  corruptSub:     { fontSize: 10, color: DS.textMed, marginTop: 2 },
+  corruptSub:     { fontSize: 10, color: DS.text2, marginTop: 2 },
 });

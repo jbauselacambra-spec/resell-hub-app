@@ -1,3 +1,10 @@
+/**
+ * ProductDetailScreen.jsx — Detalle de Producto
+ * 
+ * REFACTORIZADO para usar theme.js (ResellHub Design System v2)
+ * Incluye edición inline, marcar como vendido, histórico de cambios
+ */
+
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, ScrollView, Image, StyleSheet, Dimensions,
@@ -7,45 +14,18 @@ import Icon from 'react-native-vector-icons/Feather';
 import { DatabaseService } from '../services/DatabaseService';
 import LogService, { LOG_CTX } from '../services/LogService';
 
+// ── Importar Design System ───────────────────────────────────────────────────
+import {
+  DS, SPACE, RADIUS, SHADOW, TXT, BTN, BTN_TEXT, CARD, BADGE, BADGE_TEXT,
+  LAYOUT, FONT_SIZE, MONTH_NAMES, FONT_FAMILY,
+  ttsColor, ttsEmoji, fmtPrice, fmtDate, fmtDateLong,
+} from '../theme';
+
 const { width } = Dimensions.get('window');
 
-// ─── Design System Light Canónico v4.2 ───────────────────────────────────────
-const DS = {
-  bg:        '#F8F9FA',
-  white:     '#FFFFFF',
-  surface2:  '#F0F2F5',
-  border:    '#EAEDF0',
-  primary:   '#FF6B35',
-  primaryBg: '#FFF2EE',
-  success:   '#00D9A3',
-  successBg: '#E8FBF6',
-  warning:   '#FFB800',
-  warningBg: '#FFF8E0',
-  danger:    '#E63946',
-  dangerBg:  '#FFEBEC',
-  blue:      '#004E89',
-  blueBg:    '#EAF2FB',
-  purple:    '#6C63FF',
-  purpleBg:  '#F0EFFE',
-  text:      '#1A1A2E',
-  textMed:   '#5C6070',
-  textLow:   '#A0A5B5',
-  mono:      Platform.OS === 'android' ? 'monospace' : 'Courier New',
-};
-
-const fmt  = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('es-ES', { day:'2-digit', month:'long', year:'numeric' }); } catch { return '—'; } };
-const fmtS = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('es-ES', { day:'2-digit', month:'short', year:'numeric' }); } catch { return '—'; } };
-
 // ─── Helper: cargar diccionario completo con fallbacks ────────────────────────
-// [FIX Sprint 12+] Función centralizada para cargar el diccionario.
-// Intenta 3 fuentes en orden de prioridad:
-//   1. getFullDictionary() — nuevo formato con subcategorías
-//   2. getDictionary()     — formato legacy (sin subcategorías)
-//   3. {} vacío            — fallback seguro
-// Normaliza siempre al formato { cat: { tags[], subcategories: { sub: { tags[] } } } }
 function loadDictionaryWithFallbacks() {
   try {
-    // Prioridad 1: diccionario completo con subcategorías
     const full = DatabaseService.getFullDictionary();
     if (full && typeof full === 'object' && Object.keys(full).length > 0) {
       LogService.debug(
@@ -55,7 +35,6 @@ function loadDictionaryWithFallbacks() {
       return full;
     }
 
-    // Prioridad 2: diccionario legacy (puede tener sólo arrays de tags)
     const legacy = DatabaseService.getDictionary();
     if (legacy && typeof legacy === 'object' && Object.keys(legacy).length > 0) {
       LogService.debug(
@@ -71,7 +50,6 @@ function loadDictionaryWithFallbacks() {
       return normalized;
     }
 
-    // Sin diccionario configurado
     LogService.warn(
       'CatModal: diccionario vacío — configura categorías en Ajustes → Categorías',
       LOG_CTX.UI,
@@ -84,14 +62,13 @@ function loadDictionaryWithFallbacks() {
 }
 
 // ─── CalPicker canónico ───────────────────────────────────────────────────────
-function CalPicker({ visible, onClose, value, onChange, accent = DS.primary, label }) {
+function CalPicker({ visible, onClose, value, onChange, accent = DS.brand, label }) {
   const [nav, setNav]           = useState(value ? new Date(value) : new Date());
   const [yearMode, setYearMode] = useState(false);
   React.useEffect(() => {
     if (visible) { setNav(value ? new Date(value) : new Date()); setYearMode(false); }
   }, [visible]);
   const yr    = nav.getFullYear(), mo = nav.getMonth(), today = new Date();
-  const MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
   const WD     = ['L','M','X','J','V','S','D'];
   const firstWD = (new Date(yr, mo, 1).getDay() + 6) % 7;
   const days    = new Date(yr, mo + 1, 0).getDate();
@@ -108,16 +85,16 @@ function CalPicker({ visible, onClose, value, onChange, accent = DS.primary, lab
           <View style={[cS.hdr, {backgroundColor: accent}]}>
             {label && <Text style={cS.hdrLbl}>{label}</Text>}
             <Text style={cS.hdrY}>{yr}</Text>
-            <Text style={cS.hdrM}>{MONTHS[mo]}</Text>
-            {sel && <Text style={cS.hdrD}>{sel.getDate()} de {MONTHS[sel.getMonth()]}</Text>}
+            <Text style={cS.hdrM}>{MONTH_NAMES[mo]}</Text>
+            {sel && <Text style={cS.hdrD}>{sel.getDate()} de {MONTH_NAMES[sel.getMonth()]}</Text>}
           </View>
           <View style={cS.nav}>
             <TouchableOpacity style={cS.navBtn} onPress={() => setNav(new Date(yr, mo-1, 1))}>
               <Icon name="chevron-left" size={18} color={DS.text}/>
             </TouchableOpacity>
             <TouchableOpacity style={cS.navTitleRow} onPress={() => setYearMode(!yearMode)}>
-              <Text style={cS.navT}>{MONTHS[mo].toUpperCase()}</Text>
-              <Icon name={yearMode ? 'chevron-up' : 'chevron-down'} size={13} color={DS.textMed}/>
+              <Text style={cS.navT}>{MONTH_NAMES[mo].toUpperCase()}</Text>
+              <Icon name={yearMode ? 'chevron-up' : 'chevron-down'} size={13} color={DS.text2}/>
             </TouchableOpacity>
             <TouchableOpacity style={cS.navBtn} onPress={() => setNav(new Date(yr, mo+1, 1))}>
               <Icon name="chevron-right" size={18} color={DS.text}/>
@@ -133,26 +110,25 @@ function CalPicker({ visible, onClose, value, onChange, accent = DS.primary, lab
               ))}
             </View>
           )}
-          <View style={cS.wdRow}>{WD.map(d => <Text key={d} style={cS.wdTxt}>{d}</Text>)}</View>
+          <View style={cS.weekRow}>{WD.map(d => <Text key={d} style={cS.wTxt}>{d}</Text>)}</View>
           <View style={cS.grid}>
-            {cells.map((d, i) => {
-              if (!d) return <View key={`b${i}`} style={cS.cell}/>;
-              const s = isSel(d), t = isTod(d);
-              return (
-                <TouchableOpacity key={d}
-                  style={[cS.cell, s && [cS.cellS, {backgroundColor: accent}], !s&&t&&[cS.cellT,{borderColor:accent}]]}
-                  onPress={() => { onChange(new Date(yr,mo,d,12).toISOString()); onClose(); }}>
-                  <Text style={[cS.dTxt, s&&cS.dTxtS, !s&&t&&{color:accent,fontWeight:'800'}]}>{d}</Text>
-                </TouchableOpacity>
-              );
-            })}
+            {cells.map((d, i) => d ? (
+              <TouchableOpacity key={i} style={[cS.dCell, isSel(d) && {backgroundColor: accent}]}
+                onPress={() => { onChange(new Date(yr, mo, d).toISOString().split('T')[0]); onClose(); }}>
+                <Text style={[cS.dTxt, isSel(d) && {color:'#FFF', fontWeight:'900'},
+                              isTod(d) && !isSel(d) && {color: accent, fontWeight:'700'}]}>
+                  {d}
+                </Text>
+              </TouchableOpacity>
+            ) : <View key={i} style={cS.dCell}/>)}
           </View>
-          <View style={cS.foot}>
-            <TouchableOpacity onPress={() => { onChange(new Date().toISOString()); onClose(); }} style={[cS.todayBtn,{borderColor:accent}]}>
-              <Text style={[cS.todayTxt,{color:accent}]}>HOY</Text>
+          <View style={cS.act}>
+            <TouchableOpacity style={[cS.aBtn, {backgroundColor:'#FFF'}]} onPress={onClose}>
+              <Text style={[cS.aTxt, {color: DS.text2}]}>Cancelar</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={onClose} style={cS.cancelBtn}>
-              <Text style={cS.cancelTxt}>CANCELAR</Text>
+            <TouchableOpacity style={[cS.aBtn, {backgroundColor: accent}]}
+              onPress={() => { onChange(new Date().toISOString().split('T')[0]); onClose(); }}>
+              <Text style={[cS.aTxt, {color:'#FFF'}]}>Hoy</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -161,766 +137,785 @@ function CalPicker({ visible, onClose, value, onChange, accent = DS.primary, lab
   );
 }
 const cS = StyleSheet.create({
-  overlay:      {flex:1,backgroundColor:'#00000055',justifyContent:'center',alignItems:'center',padding:20},
-  card:         {backgroundColor:DS.white,borderRadius:24,width:'100%',overflow:'hidden',elevation:16},
-  hdr:          {padding:20,paddingBottom:14},
-  hdrLbl:       {fontSize:10,color:'rgba(255,255,255,0.75)',fontWeight:'900',letterSpacing:1.5,textTransform:'uppercase',marginBottom:4},
-  hdrY:         {fontSize:12,color:'rgba(255,255,255,0.75)',fontWeight:'700'},
-  hdrM:         {fontSize:24,color:'#FFF',fontWeight:'900',lineHeight:28},
-  hdrD:         {fontSize:12,color:'rgba(255,255,255,0.85)',marginTop:4},
-  nav:          {flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:16,paddingVertical:10},
-  navBtn:       {width:34,height:34,borderRadius:17,backgroundColor:DS.bg,justifyContent:'center',alignItems:'center'},
-  navTitleRow:  {flexDirection:'row',alignItems:'center',gap:5},
-  navT:         {fontSize:13,fontWeight:'900',color:DS.text},
-  yearRow:      {flexDirection:'row',flexWrap:'wrap',gap:6,paddingHorizontal:14,paddingBottom:8},
-  yChip:        {paddingHorizontal:11,paddingVertical:5,borderRadius:20,backgroundColor:DS.surface2},
-  yTxt:         {fontSize:12,color:DS.textMed,fontWeight:'700'},
-  wdRow:        {flexDirection:'row',paddingHorizontal:8,marginBottom:4},
-  wdTxt:        {flex:1,textAlign:'center',fontSize:10,fontWeight:'900',color:DS.textLow},
-  grid:         {flexDirection:'row',flexWrap:'wrap',paddingHorizontal:8},
-  cell:         {width:`${100/7}%`,aspectRatio:1,justifyContent:'center',alignItems:'center'},
-  cellS:        {borderRadius:20},
-  cellT:        {borderRadius:20,borderWidth:1.5},
-  dTxt:         {fontSize:13,color:DS.text},
-  dTxtS:        {color:'#FFF',fontWeight:'900'},
-  foot:         {flexDirection:'row',justifyContent:'flex-end',gap:12,padding:14,borderTopWidth:1,borderTopColor:DS.border},
-  todayBtn:     {paddingHorizontal:16,paddingVertical:7,borderRadius:20,borderWidth:1.5},
-  todayTxt:     {fontSize:11,fontWeight:'900'},
-  cancelBtn:    {paddingHorizontal:14,paddingVertical:7},
-  cancelTxt:    {fontSize:11,fontWeight:'700',color:DS.textMed},
+  overlay: {flex:1, backgroundColor:'#00000070', justifyContent:'center', alignItems:'center', padding: SPACE[5]},
+  card:    {backgroundColor: DS.white, borderRadius: RADIUS.xl, overflow:'hidden', width:'100%', maxWidth:400, ...SHADOW.lg},
+  hdr:     {padding: SPACE[5], paddingTop: SPACE[6]},
+  hdrLbl:  {...TXT.label, color:'#FFF', marginBottom: SPACE[2]},
+  hdrY:    {fontSize: FONT_SIZE['3xl'], fontWeight:'900', color:'#FFF', opacity:0.85, lineHeight: FONT_SIZE['3xl'] * 1.1},
+  hdrM:    {fontSize: FONT_SIZE.xl, fontWeight:'600', color:'#FFF', marginBottom: SPACE[1]},
+  hdrD:    {fontSize: FONT_SIZE.base, fontWeight:'500', color:'#FFF', opacity:0.9},
+  nav:     {flexDirection:'row', alignItems:'center', paddingHorizontal: SPACE[4], paddingVertical: SPACE[3],
+            backgroundColor: DS.surface2, borderBottomWidth:1, borderBottomColor: DS.border},
+  navBtn:  {padding: SPACE[2]},
+  navTitleRow: {flex:1, flexDirection:'row', alignItems:'center', justifyContent:'center', gap: SPACE[1]},
+  navT:    {...TXT.label, fontSize: FONT_SIZE.sm, color: DS.text},
+  yearRow: {flexDirection:'row', flexWrap:'wrap', gap: SPACE[2], padding: SPACE[4], backgroundColor: DS.surface2},
+  yChip:   {paddingHorizontal: SPACE[3], paddingVertical: SPACE[2], borderRadius: RADIUS.md, backgroundColor: DS.white,
+            borderWidth:1, borderColor: DS.border},
+  yTxt:    {fontSize: FONT_SIZE.sm, fontWeight:'600', color: DS.text},
+  weekRow: {flexDirection:'row', paddingHorizontal: SPACE[3], paddingVertical: SPACE[2], backgroundColor: DS.surface3},
+  wTxt:    {flex:1, textAlign:'center', fontSize: FONT_SIZE.xs, fontWeight:'900', color: DS.text3},
+  grid:    {flexDirection:'row', flexWrap:'wrap', padding: SPACE[3]},
+  dCell:   {width:'14.28%', aspectRatio:1, justifyContent:'center', alignItems:'center', borderRadius: RADIUS.sm},
+  dTxt:    {fontSize: FONT_SIZE.base, fontWeight:'500', color: DS.text},
+  act:     {flexDirection:'row', gap: SPACE[2], padding: SPACE[4], backgroundColor: DS.surface2},
+  aBtn:    {flex:1, paddingVertical: SPACE[3], borderRadius: RADIUS.md, alignItems:'center'},
+  aTxt:    {fontSize: FONT_SIZE.sm, fontWeight:'700'},
 });
 
-// ─── Modal Categoría con subcategorías ───────────────────────────────────────
-// [FIX Sprint 12+]
-// ROOT CAUSE del bug: el useEffect cargaba el diccionario solo cuando `visible` cambiaba,
-// pero si getFullDictionary() devolvía null (porque las categorías nunca se guardaron en
-// el MMKV correcto — bug Hotfix 5 BUG-C), el modal mostraba un dict vacío.
-//
-// SOLUCIÓN:
-//   1. loadDictionaryWithFallbacks() intenta 3 fuentes antes de rendirse
-//   2. useState inicializa con el diccionario ya cargado (no espera al useEffect)
-//   3. useEffect actualiza si el dict cambia mientras el modal está visible
-//   4. Logs de diagnóstico ayudan a identificar el origen del problema
-function CatModal({ visible, onClose, onSelect, currentCat, currentSub }) {
-  // [FIX] Inicializar con el diccionario ya cargado — no esperar al useEffect
-  const [dict, setDict]     = useState(() => loadDictionaryWithFallbacks());
-  const [selCat, setSelCat] = useState(currentCat || null);
-  const [step, setStep]     = useState('cat');
+// ─── Modal de Categoría ───────────────────────────────────────────────────────
+function CategoryModal({ visible, onClose, dict, currentCat, currentSub, onSelect }) {
+  const [selCat, setSelCat] = useState(currentCat || '');
+  const [selSub, setSelSub] = useState(currentSub || null);
 
   React.useEffect(() => {
-  if (!visible) return;
- 
-  const full = DatabaseService.getFullDictionary();
-  const catCount = full ? Object.keys(full).length : 0;
-  const subCount = full
-    ? Object.values(full).reduce((acc, cat) => {
-        return acc + Object.keys(cat?.subcategories || {}).length;
-      }, 0)
-    : 0;
- 
-  console.log(`🔍 CatModal useEffect: full=${JSON.stringify(full)}`);
-  console.log(`🔍 CatModal: ${catCount} cats, ${subCount} subcats`);
- 
-  if (full && catCount > 0) {
-    setDict(full);
-  } else {
-    // Fallback a diccionario legacy
-    const leg = DatabaseService.getDictionary();
-    const b = {};
-    Object.keys(leg || {}).forEach(k => {
-      const val = leg[k];
-      b[k] = Array.isArray(val)
-        ? { tags: val, subcategories: {} }
-        : { tags: val?.tags || [], subcategories: val?.subcategories || {} };
-    });
-    setDict(Object.keys(b).length > 0 ? b : {});
-  }
- 
-  setSelCat(currentCat || null);
-  setStep('cat');
-}, [visible, currentCat]);
+    if (visible) { setSelCat(currentCat || ''); setSelSub(currentSub || null); }
+  }, [visible, currentCat, currentSub]);
 
-  const cats    = Object.keys(dict);
-  const catData = selCat ? dict[selCat] : null;
-  const subs    = catData ? Object.keys(catData.subcategories || {}) : [];
-  const hasSubs = (cat) => {
-  const subs = dict[cat]?.subcategories;
-  const count = Object.keys(subs || {}).length;
-  // Log solo la primera vez que se evalúa para no saturar
-  // console.log(`hasSubs(${cat}): ${count} subcats`, subs);
-  return count > 0;
-};
+  const cats = Object.keys(dict);
+  const subs = selCat && dict[selCat]?.subcategories
+    ? Object.keys(dict[selCat].subcategories)
+    : [];
 
-  const pickCat = (cat) => {
-    if (hasSubs(cat)) {
-      setSelCat(cat);
-      setStep('sub');
-    } else {
-      onSelect(cat, null);
-      onClose();
-    }
-  };
-
-  const pickSub = (sub) => {
-    const isNone = sub === '__none__';
-    onSelect(selCat, isNone ? null : sub);
+  const handleConfirm = () => {
+    onSelect(selCat, selSub);
     onClose();
   };
 
-  const listData = step === 'cat'
-    ? cats
-    : ['__none__', ...subs];
-
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={mS.overlay} activeOpacity={1} onPress={onClose}>
+      <View style={mS.overlay}>
+        <TouchableOpacity style={{flex:1}} onPress={onClose}/>
         <View style={mS.sheet}>
           <View style={mS.handle}/>
+          <View style={mS.hdr}>
+            <View>
+              <Text style={mS.hdrTitle}>Seleccionar categoría</Text>
+              <Text style={mS.hdrSub}>
+                {selCat ? (selSub ? `${selCat} › ${selSub}` : selCat) : 'Elige una categoría'}
+              </Text>
+            </View>
+            <TouchableOpacity style={mS.closeBtn} onPress={onClose}>
+              <Icon name="x" size={18} color={DS.text2}/>
+            </TouchableOpacity>
+          </View>
 
-          {/* Cabecera del modal */}
-          <View style={mS.header}>
-            {step === 'sub' && (
-              <TouchableOpacity onPress={() => setStep('cat')} style={mS.backBtn}>
-                <Icon name="arrow-left" size={16} color={DS.text}/>
+          <ScrollView style={mS.body} showsVerticalScrollIndicator={false}>
+            <Text style={mS.sectionLbl}>CATEGORÍA PRINCIPAL</Text>
+            {cats.map(cat => (
+              <TouchableOpacity
+                key={cat}
+                style={[mS.catRow, selCat === cat && {backgroundColor: DS.brandLight, borderColor: DS.brand}]}
+                onPress={() => { setSelCat(cat); setSelSub(null); }}
+              >
+                <Icon name="tag" size={18} color={selCat === cat ? DS.brand : DS.text2}/>
+                <Text style={[mS.catTxt, selCat === cat && {color: DS.brand, fontWeight:'700'}]}>{cat}</Text>
+                {selCat === cat && <Icon name="check" size={16} color={DS.brand} style={{marginLeft:'auto'}}/>}
               </TouchableOpacity>
-            )}
-            <View style={{flex:1}}>
-              <Text style={mS.title}>
-                {step === 'cat' ? 'Categoría' : selCat}
-              </Text>
-              {step === 'sub' && (
-                <Text style={mS.subtitle}>Selecciona una subcategoría</Text>
-              )}
-            </View>
-            <TouchableOpacity onPress={onClose} style={mS.closeBtn}>
-              <Icon name="x" size={16} color={DS.textMed}/>
-            </TouchableOpacity>
-          </View>
+            ))}
 
-          {/* Selección activa (breadcrumb) */}
-          {(currentCat || currentSub) && (
-            <View style={mS.currentRow}>
-              <Icon name="check-circle" size={12} color={DS.success}/>
-              <Text style={mS.currentTxt}>
-                Actual: {currentCat}{currentSub ? ` › ${currentSub}` : ''}
-              </Text>
-            </View>
-          )}
-
-          {/* Lista vacía — mensaje de ayuda */}
-          {cats.length === 0 && step === 'cat' && (
-            <View style={mS.emptyBox}>
-              <Icon name="tag" size={32} color={DS.textLow}/>
-              <Text style={mS.emptyTitle}>Sin categorías configuradas</Text>
-              <Text style={mS.emptySub}>
-                Ve a Ajustes → Categorías para añadir tus categorías y subcategorías.
-              </Text>
-            </View>
-          )}
-
-          <FlatList
-            data={listData}
-            keyExtractor={item => item}
-            style={{flexGrow: 0, maxHeight: cats.length === 0 ? 0 : 420}}
-            renderItem={({item}) => {
-              const isNone    = item === '__none__';
-              const label     = isNone ? 'Sin subcategoría' : item;
-              const subCount  = step === 'cat' ? Object.keys(dict[item]?.subcategories || {}).length : 0;
-              const hasSubsNow= step === 'cat' && subCount > 0;
-              const isCurrent = step === 'cat'
-                ? item === currentCat
-                : (!isNone && item === currentSub) || (isNone && !currentSub);
-
-              const previewTags = step === 'cat' && dict[item]?.tags?.slice(0,4) || [];
-
-              return (
-                <TouchableOpacity
-                  style={[mS.item, isCurrent && mS.itemActive]}
-                  onPress={() => step === 'cat' ? pickCat(item) : pickSub(item)}
-                  activeOpacity={0.7}
-                >
-                  <View style={{flex:1}}>
-                    <View style={{flexDirection:'row', alignItems:'center', gap:6}}>
-                      {isNone && <Icon name="x-circle" size={14} color={DS.textLow}/>}
-                      <Text style={[mS.itemTxt, isCurrent && {color:DS.blue, fontWeight:'800'}]}>
-                        {label}
-                      </Text>
-                    </View>
-
-                    {/* Preview de tags (solo en paso cat) */}
-                    {previewTags.length > 0 && (
-                      <Text style={mS.itemSub} numberOfLines={1}>
-                        {previewTags.join(' · ')}
-                      </Text>
-                    )}
-
-                    {/* Indicador de subcategorías disponibles */}
-                    {hasSubsNow && (
-                      <Text style={[mS.itemSub, {color: DS.blue}]}>
-                        {subCount} subcategor{subCount === 1 ? 'ía' : 'ías'}
-                      </Text>
-                    )}
-                  </View>
-
-                  {/* Indicadores de estado */}
-                  {isCurrent && <Icon name="check" size={15} color={DS.blue}/>}
-                  {!isCurrent && hasSubsNow && <Icon name="chevron-right" size={15} color={DS.textLow}/>}
-                </TouchableOpacity>
-              );
-            }}
-          />
-        </View>
-      </TouchableOpacity>
-    </Modal>
-  );
-}
-
-const mS = StyleSheet.create({
-  overlay:    {flex:1,backgroundColor:'#00000060',justifyContent:'flex-end'},
-  sheet:      {backgroundColor:DS.white,borderTopLeftRadius:28,borderTopRightRadius:28,
-               paddingHorizontal:20,paddingTop:12,maxHeight:'82%',paddingBottom:34},
-  handle:     {width:40,height:4,backgroundColor:DS.border,borderRadius:2,alignSelf:'center',marginBottom:14},
-  header:     {flexDirection:'row',alignItems:'center',gap:10,marginBottom:8},
-  backBtn:    {width:36,height:36,borderRadius:18,backgroundColor:DS.surface2,
-               justifyContent:'center',alignItems:'center'},
-  closeBtn:   {width:30,height:30,borderRadius:15,backgroundColor:DS.surface2,
-               justifyContent:'center',alignItems:'center'},
-  title:      {fontSize:18,fontWeight:'900',color:DS.text},
-  subtitle:   {fontSize:11,color:DS.textMed,marginTop:2},
-  currentRow: {flexDirection:'row',alignItems:'center',gap:6,backgroundColor:DS.successBg,
-               borderRadius:10,padding:8,marginBottom:10},
-  currentTxt: {fontSize:11,fontWeight:'700',color:DS.success},
-  item:       {flexDirection:'row',alignItems:'center',paddingVertical:13,
-               borderBottomWidth:1,borderBottomColor:DS.bg,gap:10},
-  itemActive: {backgroundColor:DS.blueBg,paddingHorizontal:10,marginHorizontal:-10,borderRadius:10},
-  itemTxt:    {fontSize:15,color:DS.text,fontWeight:'600'},
-  itemSub:    {fontSize:10,color:DS.textMed,marginTop:3},
-  // Estado vacío
-  emptyBox:   {alignItems:'center',padding:24,gap:10},
-  emptyTitle: {fontSize:15,fontWeight:'800',color:DS.textMed,textAlign:'center'},
-  emptySub:   {fontSize:12,color:DS.textLow,textAlign:'center',lineHeight:18},
-});
-
-// ─── Modal Vendido ────────────────────────────────────────────────────────────
-function SoldModal({ visible, onClose, product, onConfirm }) {
-  const [price, setPrice] = useState('');
-  const [date, setDate]   = useState(new Date().toISOString());
-  const [showCal, setCal] = useState(false);
-  React.useEffect(() => {
-    if (visible) { setPrice(String(product?.price || '')); setDate(new Date().toISOString()); }
-  }, [visible]);
-  const listed = Number(product?.price || 0);
-  const final_ = Number(price) || 0;
-  const profit = final_ > 0 ? (final_ - listed).toFixed(2) : null;
-  const confirm = () => {
-    const p = parseFloat(price);
-    if (!price || isNaN(p) || p <= 0) { Alert.alert('Precio requerido', 'Introduce el precio real de venta.'); return; }
-    onConfirm(p, date);
-  };
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} style={styles.soldSheet}>
-          <View style={styles.handle}/>
-          <View style={styles.soldHdr}>
-            <View style={styles.soldIconWrap}><Icon name="check-circle" size={22} color={DS.success}/></View>
-            <View style={{flex:1}}>
-              <Text style={styles.soldHdrTitle}>Marcar como Vendido</Text>
-              <Text style={styles.soldHdrSub} numberOfLines={1}>{product?.title}</Text>
-            </View>
-            <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
-              <Icon name="x" size={16} color={DS.textMed}/>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.soldBody}>
-            <View style={styles.soldPriceRow}>
-              <View style={[styles.soldPriceCard, {backgroundColor: DS.surface2}]}>
-                <Text style={styles.soldPriceLbl}>PRECIO PUBLICADO</Text>
-                <Text style={styles.soldPriceVal}>{listed}€</Text>
-              </View>
-              {profit !== null && (
-                <View style={[styles.soldPriceCard, {backgroundColor: Number(profit) >= 0 ? DS.successBg : DS.dangerBg}]}>
-                  <Text style={styles.soldPriceLbl}>DIFERENCIA</Text>
-                  <Text style={[styles.soldPriceVal, {color: Number(profit) >= 0 ? DS.success : DS.danger}]}>
-                    {Number(profit) >= 0 ? '+' : ''}{profit}€
-                  </Text>
-                </View>
-              )}
-            </View>
-            <Text style={styles.soldFieldLbl}>PRECIO REAL DE VENTA (€) *</Text>
-            <View style={[styles.soldInputRow, price && {borderColor: DS.success}]}>
-              <TextInput
-                value={price} onChangeText={setPrice}
-                placeholder={String(listed)} placeholderTextColor={DS.textLow}
-                keyboardType="decimal-pad" style={styles.soldInput} autoFocus
-              />
-              <Text style={styles.soldInputEuro}>€</Text>
-            </View>
-            <Text style={styles.soldFieldLbl}>FECHA DE VENTA</Text>
-            <TouchableOpacity style={styles.soldDateRow} onPress={() => setCal(true)}>
-              <Icon name="calendar" size={15} color={DS.success}/>
-              <Text style={styles.soldDateTxt}>{fmtS(date)}</Text>
-              <Icon name="edit-2" size={12} color={DS.textLow}/>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.soldConfirm, !price && {backgroundColor: DS.textLow}]}
-              onPress={confirm} disabled={!price}
-            >
-              <Icon name="check" size={17} color="#FFF"/>
-              <Text style={styles.soldConfirmTxt}>CONFIRMAR VENTA</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </TouchableOpacity>
-      <CalPicker visible={showCal} onClose={() => setCal(false)} value={date}
-        onChange={setDate} accent={DS.success} label="FECHA DE VENTA"/>
-    </Modal>
-  );
-}
-
-// ─── Pantalla Principal ───────────────────────────────────────────────────────
-export default function ProductDetailScreen({ route, navigation }) {
-  const { product: init } = route.params || {};
-  const [product, setProduct]         = useState(init);
-  const [isEditing, setEditing]       = useState(false);
-  const [showCal, setShowCal]         = useState(false);
-  const [showCatModal, setCatModal]   = useState(false);
-  const [showSoldModal, setSoldModal] = useState(false);
-
-  const [editForm, setEditForm] = useState(() => ({
-    ...init,
-    category:        init?.category        || 'Otros',
-    subcategory:     init?.subcategory     || null,
-    firstUploadDate: init?.firstUploadDate || init?.createdAt || new Date().toISOString(),
-    priceHistory:    init?.priceHistory    || [],
-  }));
-
-  const cfg = DatabaseService.getConfig();
-
-  const statusInfo = useMemo(() => {
-    const now = new Date(), up = new Date(product.firstUploadDate || product.createdAt);
-    const d   = Math.max(0, Math.floor((now - up) / 86400000));
-    return {
-      daysOld: d,
-      isHot:   (product.views > parseInt(cfg.hotViews || 50) || product.favorites > parseInt(cfg.hotFavs || 10)) && d < parseInt(cfg.hotDays || 30),
-      isCold:  d >= parseInt(cfg.daysDesinterest || 45),
-      isCrit:  d >= parseInt(cfg.daysCritical    || 90),
-    };
-  }, [product]);
-
-  // Tags de categoría (combina cat + subcat del diccionario)
-  const catTags = useMemo(() => {
-    const full = DatabaseService.getFullDictionary() || {};
-    const catD = full[editForm.category || product.category];
-    if (!catD) return [];
-    const sk  = editForm.subcategory || product.subcategory;
-    const st  = sk ? (catD.subcategories?.[sk]?.tags || []) : [];
-    return [...new Set([...(catD.tags || []), ...st])].slice(0, 12);
-  }, [editForm.category, editForm.subcategory, product.category, product.subcategory]);
-
-  const handleSave = useCallback(() => {
-    const span = LogService.span(`Guardar ${product.id}`, LOG_CTX.UI);
-    const up   = {...editForm};
-    if (!up.firstUploadDate) up.firstUploadDate = product.createdAt || new Date().toISOString();
-    if (DatabaseService.updateProduct(up)) {
-      setProduct(up);
-      setEditing(false);
-      span.end({});
-    } else {
-      span.fail(new Error('false'));
-      Alert.alert('Error', 'No se pudo guardar.');
-    }
-  }, [editForm, product]);
-
-  const handleSold = (soldPrice, soldDateReal) => {
-    if (DatabaseService.markAsSold(product.id, soldPrice, soldDateReal, false)) {
-      const up = {...product, status:'sold', soldPriceReal: soldPrice, soldDateReal};
-      setProduct(up);
-      setSoldModal(false);
-      LogService.success(`Vendido: "${product.title}" por ${soldPrice}€`, LOG_CTX.UI, {id: product.id});
-      Alert.alert('¡Vendido! 🎉', `"${product.title}" marcado por ${soldPrice}€.`, [
-        {text: 'Ver historial', onPress: () => navigation.navigate('History')},
-        {text: 'OK'},
-      ]);
-    }
-  };
-
-  const sC = statusInfo.isCrit ? DS.danger : statusInfo.isCold ? DS.warning : statusInfo.isHot ? DS.danger : DS.success;
-  const sL = statusInfo.isCrit ? '🔥 CRÍTICO' : statusInfo.isCold ? '⏱️ FRÍO' : statusInfo.isHot ? '⚡ HOT' : '✅ OK';
-
-  // ─── Vista de producto ────────────────────────────────────────────────────
-  const renderView = () => (
-    <>
-      <View style={styles.topRow}>
-        <Text style={styles.brandTxt}>{product.brand || 'Sin marca'}</Text>
-        {(product.category || product.subcategory) && (
-          <View style={styles.catPill}>
-            <Icon name="tag" size={9} color={DS.blue}/>
-            <Text style={styles.catPillTxt}>{product.category || ''}</Text>
-            {product.subcategory && (
+            {subs.length > 0 && (
               <>
-                <Text style={styles.catSep}>›</Text>
-                <Text style={[styles.catPillTxt, {color: DS.textMed}]}>{product.subcategory}</Text>
+                <Text style={[mS.sectionLbl, {marginTop: SPACE[5]}]}>SUBCATEGORÍA</Text>
+                <TouchableOpacity
+                  style={[mS.subRow, !selSub && selCat && {backgroundColor: DS.blueLight, borderColor: DS.blue}]}
+                  onPress={() => setSelSub(null)}
+                >
+                  <Text style={[mS.subTxt, !selSub && selCat && {color: DS.blue, fontWeight:'700'}]}>
+                    Sin subcategoría
+                  </Text>
+                </TouchableOpacity>
+                {subs.map(sub => (
+                  <TouchableOpacity
+                    key={sub}
+                    style={[mS.subRow, selSub === sub && {backgroundColor: DS.blueLight, borderColor: DS.blue}]}
+                    onPress={() => setSelSub(sub)}
+                  >
+                    <Text style={[mS.subTxt, selSub === sub && {color: DS.blue, fontWeight:'700'}]}>{sub}</Text>
+                    {selSub === sub && <Icon name="check" size={14} color={DS.blue} style={{marginLeft:'auto'}}/>}
+                  </TouchableOpacity>
+                ))}
               </>
             )}
-          </View>
-        )}
-      </View>
+          </ScrollView>
 
-      <View style={styles.titleRow}>
-        <Text style={styles.titleTxt} numberOfLines={3}>{product.title}</Text>
-        <View style={styles.pricePill}>
-          <Text style={styles.pricePillTxt}>{product.price}€</Text>
-        </View>
-      </View>
-
-      {product.isBundle && (
-        <View style={styles.bundleBadge}>
-          <Icon name="package" size={11} color={DS.purple}/>
-          <Text style={styles.bundleTxt}>VENTA EN LOTE</Text>
-        </View>
-      )}
-
-      <View style={[styles.statusBar, {borderColor: sC+'40', backgroundColor: sC+'0E'}]}>
-        <View style={[styles.statusDot, {backgroundColor: sC}]}/>
-        <Text style={[styles.statusLbl, {color: sC}]}>{sL}</Text>
-        <Text style={styles.statusDays}>{statusInfo.daysOld} días en Vinted</Text>
-        {product.repostCount > 0 && (
-          <View style={styles.repostChip}>
-            <Icon name="refresh-cw" size={9} color={DS.blue}/>
-            <Text style={styles.repostTxt}>{product.repostCount}× resubido</Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.statsRow}>
-        {[
-          {icon:'eye',   lbl:'VISTAS',   val: product.views     || 0, c: DS.blue},
-          {icon:'heart', lbl:'FAVS',     val: product.favorites || 0, c: DS.danger},
-          {icon:'clock', lbl:'DÍAS',     val: statusInfo.daysOld,     c: sC},
-        ].map(s => (
-          <View key={s.lbl} style={styles.statCard}>
-            <Icon name={s.icon} size={16} color={s.c}/>
-            <Text style={[styles.statVal, {color: s.c}]}>{s.val}</Text>
-            <Text style={styles.statLbl}>{s.lbl}</Text>
-          </View>
-        ))}
-      </View>
-
-      {product.priceHistory?.length > 0 && (
-        <View style={styles.histBox}>
-          <View style={styles.histHdr}>
-            <Icon name="trending-down" size={11} color={DS.primary}/>
-            <Text style={styles.histLbl}>HISTORIAL DE PRECIO</Text>
-          </View>
-          {product.priceHistory.slice(-3).map((h, i) => (
-            <View key={i} style={styles.histRow}>
-              <Text style={styles.histTxt}>{h.oldPrice}€ → {h.newPrice || h.price}€</Text>
-              <Text style={styles.histDate}>{fmtS(h.date)}</Text>
-            </View>
-          ))}
-        </View>
-      )}
-
-      <View style={styles.dateBar}>
-        <View style={[styles.dateIcon, {backgroundColor: DS.primaryBg}]}>
-          <Icon name="upload" size={13} color={DS.primary}/>
-        </View>
-        <View>
-          <Text style={styles.dateLbl}>Fecha de subida original</Text>
-          <Text style={styles.dateVal}>{fmt(product.firstUploadDate || product.createdAt)}</Text>
-        </View>
-      </View>
-
-      {catTags.length > 0 && (
-        <View style={styles.tagsSection}>
-          <Text style={styles.sectionLabel}>TAGS DE CATEGORÍA</Text>
-          <View style={styles.tagsCloud}>
-            {catTags.map(t => (
-              <View key={t} style={styles.tag}>
-                <Text style={styles.tagTxt}>{t}</Text>
-              </View>
-            ))}
+          <View style={mS.actions}>
+            <TouchableOpacity style={[BTN.secondary, {flex:1}]} onPress={onClose}>
+              <Text style={BTN_TEXT.secondary}>Cancelar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[BTN.primary, {flex:2}]} onPress={handleConfirm}>
+              <Icon name="check" size={16} color="#FFF"/>
+              <Text style={BTN_TEXT.primary}>Confirmar</Text>
+            </TouchableOpacity>
           </View>
         </View>
-      )}
-
-      <Text style={styles.sectionLabel}>DESCRIPCIÓN</Text>
-      <Text style={styles.descTxt}>{product.description || 'Sin descripción'}</Text>
-
-      <View style={styles.actionsRow}>
-        <TouchableOpacity style={styles.btnEdit} onPress={() => setEditing(true)}>
-          <Icon name="edit-3" size={16} color={DS.text}/>
-          <Text style={styles.btnEditTxt}>Editar</Text>
-        </TouchableOpacity>
-        {product.status !== 'sold' ? (
-          <TouchableOpacity style={styles.btnVendido} onPress={() => setSoldModal(true)}>
-            <Icon name="check-circle" size={16} color="#FFF"/>
-            <Text style={styles.btnVendidoTxt}>VENDIDO</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={[styles.btnEdit, {backgroundColor: DS.successBg, flex:2, borderColor: DS.success+'40'}]}>
-            <Icon name="check-circle" size={16} color={DS.success}/>
-            <Text style={[styles.btnEditTxt, {color: DS.success}]}>Ya vendido</Text>
-          </View>
-        )}
       </View>
-    </>
+    </Modal>
   );
+}
+const mS = StyleSheet.create({
+  overlay: {flex:1, backgroundColor:'#00000060', justifyContent:'flex-end'},
+  sheet:   {backgroundColor: DS.white, borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl,
+            maxHeight:'85%', paddingBottom: SPACE[8]},
+  handle:  {width:40, height:4, backgroundColor: DS.border, borderRadius: RADIUS.sm, alignSelf:'center', marginTop: SPACE[3]},
+  hdr:     {flexDirection:'row', alignItems:'center', justifyContent:'space-between', padding: SPACE[5],
+            borderBottomWidth:1, borderBottomColor: DS.border},
+  hdrTitle:{...TXT.heading},
+  hdrSub:  {...TXT.caption, marginTop: SPACE[1]},
+  closeBtn:{width:36, height:36, borderRadius: RADIUS.md, backgroundColor: DS.surface3,
+            justifyContent:'center', alignItems:'center'},
+  body:    {paddingHorizontal: SPACE[5], maxHeight:400},
+  sectionLbl: {...TXT.label, marginTop: SPACE[4], marginBottom: SPACE[2]},
+  catRow:  {flexDirection:'row', alignItems:'center', gap: SPACE[3], backgroundColor: DS.white,
+            borderRadius: RADIUS.md, padding: SPACE[3] + 2, borderWidth:1, borderColor: DS.border, marginBottom: SPACE[2]},
+  catTxt:  {...TXT.body, fontWeight:'600'},
+  subRow:  {flexDirection:'row', alignItems:'center', backgroundColor: DS.surface3,
+            borderRadius: RADIUS.sm, padding: SPACE[2] + 2, borderWidth:1, borderColor: DS.border, marginBottom: SPACE[1] + 2},
+  subTxt:  {...TXT.caption, fontWeight:'600'},
+  actions: {flexDirection:'row', gap: SPACE[2] + 2, padding: SPACE[5], paddingTop: SPACE[4],
+            borderTopWidth:1, borderTopColor: DS.border},
+});
 
-  // ─── Formulario de edición ────────────────────────────────────────────────
-  const renderEdit = () => (
-    <>
-      <View style={styles.editBanner}>
-        <Icon name="edit-3" size={16} color={DS.primary}/>
-        <View style={{flex:1}}>
-          <Text style={styles.editTitle}>Editar datos permanentes</Text>
-          <Text style={styles.editSub}>Se conservan al importar JSON de Vinted</Text>
-        </View>
-      </View>
+// ─── PANTALLA PRINCIPAL ───────────────────────────────────────────────────────
+export default function ProductDetailScreen({ route, navigation }) {
+  const { product: initialProd } = route.params;
+  const [product, setProduct] = useState(initialProd);
+  const [edit, setEdit] = useState(false);
+  const [soldModal, setSoldModal] = useState(false);
+  const [soldPrice, setSoldPrice] = useState('');
+  const [soldDate, setSoldDate] = useState(new Date().toISOString().split('T')[0]);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showSoldDatePicker, setShowSoldDatePicker] = useState(false);
+  const [catModal, setCatModal] = useState(false);
 
-      <Text style={styles.sectionLabel}>CATEGORÍA / SUBCATEGORÍA</Text>
-      <TouchableOpacity style={styles.catSelector} onPress={() => setCatModal(true)}>
-        <View style={[styles.catSelIcon, {backgroundColor: DS.blueBg}]}>
-          <Icon name="tag" size={14} color={DS.blue}/>
-        </View>
-        <View style={{flex:1}}>
-          <Text style={styles.catSelVal}>{editForm.category || 'Sin categoría'}</Text>
-          {editForm.subcategory && (
-            <Text style={styles.catSelSub}>
-              <Icon name="corner-down-right" size={10} color={DS.textLow}/> {editForm.subcategory}
-            </Text>
+  const [editData, setEditData] = useState({
+    category: product.category || '',
+    subcategory: product.subcategory || null,
+    firstUploadDate: product.firstUploadDate || new Date().toISOString().split('T')[0],
+  });
+
+  const dict = useMemo(() => loadDictionaryWithFallbacks(), []);
+
+  const refreshProduct = useCallback(() => {
+    try {
+      const fresh = DatabaseService.getActiveProductsWithDiagnostic().find(p => p.id === product.id);
+      if (fresh) {
+        setProduct(fresh);
+        LogService.debug(`ProductDetail: producto ${product.id} refrescado`, LOG_CTX.UI);
+      }
+    } catch (e) {
+      LogService.error('ProductDetail.refreshProduct', LOG_CTX.UI, e);
+    }
+  }, [product.id]);
+
+  React.useEffect(() => {
+    const unsub = navigation.addListener('focus', refreshProduct);
+    return unsub;
+  }, [navigation, refreshProduct]);
+
+  const handleCategorySelect = (cat, sub) => {
+    setEditData(prev => ({ ...prev, category: cat, subcategory: sub }));
+  };
+
+  const handleSaveEdit = () => {
+    try {
+      const { category, subcategory, firstUploadDate } = editData;
+      DatabaseService.updateProduct(product.id, { category, subcategory, firstUploadDate });
+      LogService.add(`✏️ Editado: ${product.title}`, 'info');
+      setEdit(false);
+      refreshProduct();
+    } catch (e) {
+      LogService.error('ProductDetail.handleSaveEdit', LOG_CTX.UI, e);
+      Alert.alert('Error', 'No se pudo guardar la edición.');
+    }
+  };
+
+  const handleMarkSold = () => {
+    const sp = parseFloat(soldPrice);
+    if (!sp || sp <= 0) {
+      Alert.alert('Precio inválido', 'Introduce un precio de venta válido.');
+      return;
+    }
+    try {
+      DatabaseService.markProductAsSold(product.id, sp, soldDate);
+      LogService.add(`💰 Vendido: ${product.title} por ${sp}€`, 'success');
+      setSoldModal(false);
+      navigation.goBack();
+    } catch (e) {
+      LogService.error('ProductDetail.handleMarkSold', LOG_CTX.UI, e);
+      Alert.alert('Error', 'No se pudo marcar como vendido.');
+    }
+  };
+
+  const currentTags = useMemo(() => {
+    const cat = editData.category;
+    const sub = editData.subcategory;
+    if (!cat || !dict[cat]) return [];
+    const catData = dict[cat];
+    let tags = catData.tags || [];
+    if (sub && catData.subcategories?.[sub]?.tags) {
+      tags = [...tags, ...catData.subcategories[sub].tags];
+    }
+    return tags;
+  }, [editData.category, editData.subcategory, dict]);
+
+  const sev = product.severity;
+  const heroColor = sev ? sev.color : (product.isHot ? DS.danger : DS.brand);
+
+  return (
+    <View style={s.container}>
+      <ScrollView showsVerticalScrollIndicator={false}>
+        {/* HERO IMAGE */}
+        <View style={[s.hero, {backgroundColor: DS.surface3}]}>
+          {product.images?.[0] ? (
+            <Image source={{uri: product.images[0]}} style={s.heroImage} resizeMode="cover"/>
+          ) : (
+            <View style={s.heroPlaceholder}>
+              <Icon name="image" size={48} color={DS.border}/>
+            </View>
           )}
-          {!editForm.subcategory && (
-            <Text style={[styles.catSelSub, {color: DS.textLow}]}>Toca para seleccionar subcategoría</Text>
+          <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
+            <Icon name="arrow-left" size={20} color={DS.text}/>
+          </TouchableOpacity>
+          {sev && (
+            <View style={[s.heroBadge, {backgroundColor: heroColor}]}>
+              <Text style={s.heroBadgeTxt}>{sev.emoji} {sev.type}</Text>
+            </View>
           )}
         </View>
-        <Icon name="chevron-right" size={16} color={DS.textLow}/>
-      </TouchableOpacity>
 
-      {(() => {
-        const full = DatabaseService.getFullDictionary() || {};
-        const catD = full[editForm.category];
-        const subD = editForm.subcategory ? catD?.subcategories?.[editForm.subcategory] : null;
-        const tags = [...new Set([...(catD?.tags || []), ...(subD?.tags || [])])].slice(0, 10);
-        if (!tags.length) return null;
-        return (
-          <View style={styles.tagPreview}>
-            <Text style={styles.tagPreviewLbl}>
-              Tags de {editForm.category}{editForm.subcategory ? ` › ${editForm.subcategory}` : ''}:
+        {/* CONTENT CARD */}
+        <View style={s.contentCard}>
+          {/* Top row: brand + category */}
+          <View style={s.topRow}>
+            <Text style={s.brandTxt}>VINTED</Text>
+            {product.category && (
+              <View style={s.catPill}>
+                <Icon name="tag" size={10} color={DS.blue}/>
+                <Text style={s.catPillTxt}>
+                  {product.category}
+                  {product.subcategory && <Text style={s.catSep}> › {product.subcategory}</Text>}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Title + Price */}
+          <View style={s.titleRow}>
+            <Text style={s.titleTxt}>{product.title}</Text>
+            <View style={s.pricePill}>
+              <Text style={s.pricePillTxt}>{fmtPrice(product.price)}</Text>
+            </View>
+          </View>
+
+          {/* Bundle badge */}
+          {product.isBundle && (
+            <View style={s.bundleBadge}>
+              <Icon name="package" size={12} color={DS.purple}/>
+              <Text style={s.bundleTxt}>Pack de {product.bundleQty || 2} artículos</Text>
+            </View>
+          )}
+
+          {/* Status bar */}
+          <View style={[s.statusBar, {backgroundColor: heroColor + '10', borderColor: heroColor + '30'}]}>
+            <View style={[s.statusDot, {backgroundColor: heroColor}]}/>
+            <Text style={[s.statusLbl, {color: heroColor}]}>
+              {sev ? sev.type : product.isHot ? '🔥 HOT' : 'Activo'}
             </Text>
-            <View style={styles.tagsCloud}>
-              {tags.map(t => (
-                <View key={t} style={styles.tag}>
-                  <Text style={styles.tagTxt}>{t}</Text>
+            {product.daysOld > 0 && (
+              <Text style={s.statusDays}>{product.daysOld} días en stock</Text>
+            )}
+            {product.lastRepostedAt && (
+              <View style={s.repostChip}>
+                <Icon name="refresh-cw" size={8} color={DS.blue}/>
+                <Text style={s.repostTxt}>Resubido</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Stats row */}
+          <View style={s.statsRow}>
+            <View style={s.statCard}>
+              <Text style={[s.statVal, {color: DS.text}]}>{product.views || 0}</Text>
+              <Text style={s.statLbl}>VISTAS</Text>
+            </View>
+            <View style={s.statCard}>
+              <Text style={[s.statVal, {color: DS.text}]}>{product.likes || 0}</Text>
+              <Text style={s.statLbl}>LIKES</Text>
+            </View>
+            <View style={s.statCard}>
+              <Text style={[s.statVal, {color: DS.text}]}>{product.price}€</Text>
+              <Text style={s.statLbl}>PRECIO</Text>
+            </View>
+          </View>
+
+          {/* Change history */}
+          {product.history && product.history.length > 0 && (
+            <View style={s.histBox}>
+              <View style={s.histHdr}>
+                <Icon name="activity" size={14} color={DS.brand}/>
+                <Text style={s.histLbl}>HISTORIAL DE CAMBIOS</Text>
+              </View>
+              {product.history.slice(0, 3).map((h, i) => (
+                <View key={i} style={s.histRow}>
+                  <Text style={s.histTxt}>{h.field}: {h.oldValue} → {h.newValue}</Text>
+                  <Text style={s.histDate}>{fmtDate(h.timestamp)}</Text>
                 </View>
               ))}
             </View>
+          )}
+
+          {/* Upload date */}
+          <View style={s.dateBar}>
+            <View style={[s.dateIcon, {backgroundColor: DS.brandLight}]}>
+              <Icon name="calendar" size={16} color={DS.brand}/>
+            </View>
+            <View>
+              <Text style={s.dateLbl}>Primera subida</Text>
+              <Text style={s.dateVal}>{fmtDate(product.firstUploadDate)}</Text>
+            </View>
           </View>
-        );
-      })()}
 
-      <Text style={[styles.sectionLabel, {marginTop:16}]}>FECHA DE SUBIDA ORIGINAL</Text>
-      <TouchableOpacity style={styles.datePickBtn} onPress={() => setShowCal(true)}>
-        <View style={[styles.datePickIcon, {backgroundColor: DS.primaryBg}]}>
-          <Icon name="calendar" size={16} color={DS.primary}/>
-        </View>
-        <View style={{flex:1}}>
-          <Text style={styles.datePickVal}>{fmt(editForm.firstUploadDate)}</Text>
-          <Text style={styles.datePickHint}>Usada para calcular el TTS</Text>
-        </View>
-        <Icon name="chevron-right" size={16} color={DS.textLow}/>
-      </TouchableOpacity>
-
-      <View style={styles.editActions}>
-        <TouchableOpacity style={styles.btnSave} onPress={handleSave}>
-          <Icon name="save" size={15} color="#FFF"/>
-          <Text style={styles.btnSaveTxt}>Guardar cambios</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.btnCancel} onPress={() => setEditing(false)}>
-          <Text style={styles.btnCancelTxt}>Cancelar</Text>
-        </TouchableOpacity>
-      </View>
-    </>
-  );
-
-  return (
-    <View style={styles.container}>
-      {/* Modales */}
-      <SoldModal visible={showSoldModal} onClose={() => setSoldModal(false)}
-        product={product} onConfirm={handleSold}/>
-      <CatModal visible={showCatModal} onClose={() => setCatModal(false)}
-        currentCat={editForm.category} currentSub={editForm.subcategory}
-        onSelect={(cat, sub) => setEditForm(f => ({...f, category: cat, subcategory: sub}))}/>
-      <CalPicker visible={showCal} onClose={() => setShowCal(false)}
-        value={editForm.firstUploadDate}
-        onChange={iso => setEditForm(f => ({...f, firstUploadDate: iso}))}
-        accent={DS.primary} label="FECHA DE SUBIDA ORIGINAL"/>
-
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Hero */}
-        <View style={styles.hero}>
-          {product.images?.[0]
-            ? <Image source={{uri: product.images[0]}} style={styles.heroImg} resizeMode="cover"/>
-            : <View style={[styles.heroImg, styles.heroPlaceholder]}>
-                <Icon name="image" size={52} color={DS.textLow}/>
+          {/* Tags */}
+          {product.tags && product.tags.length > 0 && (
+            <View style={s.tagsSection}>
+              <Text style={s.sectionLabel}>ETIQUETAS</Text>
+              <View style={s.tagsCloud}>
+                {product.tags.map((tag, i) => (
+                  <View key={i} style={s.tag}>
+                    <Text style={s.tagTxt}>{tag}</Text>
+                  </View>
+                ))}
               </View>
-          }
-          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Icon name="arrow-left" size={20} color={DS.text}/>
-          </TouchableOpacity>
-          <View style={[styles.heroBadge, {backgroundColor: sC}]}>
-            <Text style={styles.heroBadgeTxt}>{sL}</Text>
-          </View>
-        </View>
+            </View>
+          )}
 
-        {/* Contenido */}
-        <View style={styles.contentCard}>
-          {isEditing ? renderEdit() : renderView()}
-          <View style={{height: 60}}/>
+          {/* Description */}
+          {product.description && (
+            <>
+              <Text style={s.sectionLabel}>DESCRIPCIÓN</Text>
+              <Text style={s.descTxt}>{product.description}</Text>
+            </>
+          )}
+
+          {/* Actions */}
+          {!edit && (
+            <View style={s.actionsRow}>
+              <TouchableOpacity style={s.btnEdit} onPress={() => setEdit(true)}>
+                <Icon name="edit-2" size={16} color={DS.text}/>
+                <Text style={s.btnEditTxt}>Editar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.btnVendido} onPress={() => setSoldModal(true)}>
+                <Icon name="check-circle" size={16} color="#FFF"/>
+                <Text style={s.btnVendidoTxt}>Marcar vendido</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* EDIT MODE */}
+          {edit && (
+            <>
+              <View style={s.editBanner}>
+                <Icon name="edit-3" size={20} color={DS.brand}/>
+                <View style={{flex:1}}>
+                  <Text style={s.editTitle}>Modo edición</Text>
+                  <Text style={s.editSub}>Actualiza categoría y fecha de primera subida</Text>
+                </View>
+              </View>
+
+              {/* Category selector */}
+              <TouchableOpacity style={s.catSelector} onPress={() => setCatModal(true)}>
+                <View style={[s.catSelIcon, {backgroundColor: DS.blueLight}]}>
+                  <Icon name="tag" size={16} color={DS.blue}/>
+                </View>
+                <View style={{flex:1}}>
+                  <Text style={s.catSelVal}>
+                    {editData.category || 'Sin categoría'}
+                    {editData.subcategory && ` › ${editData.subcategory}`}
+                  </Text>
+                  <Text style={s.catSelSub}>Toca para cambiar</Text>
+                </View>
+                <Icon name="chevron-right" size={18} color={DS.text3}/>
+              </TouchableOpacity>
+
+              {/* Tag preview */}
+              {currentTags.length > 0 && (
+                <View style={s.tagPreview}>
+                  <Text style={s.tagPreviewLbl}>Etiquetas que se aplicarán:</Text>
+                  <View style={s.tagsCloud}>
+                    {currentTags.map((tag, i) => (
+                      <View key={i} style={s.tag}>
+                        <Text style={s.tagTxt}>{tag}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Date picker */}
+              <TouchableOpacity style={s.datePickBtn} onPress={() => setShowDatePicker(true)}>
+                <View style={[s.datePickIcon, {backgroundColor: DS.brandLight}]}>
+                  <Icon name="calendar" size={18} color={DS.brand}/>
+                </View>
+                <View style={{flex:1}}>
+                  <Text style={s.datePickVal}>{fmtDate(editData.firstUploadDate)}</Text>
+                  <Text style={s.datePickHint}>Primera fecha de subida</Text>
+                </View>
+                <Icon name="chevron-right" size={18} color={DS.text3}/>
+              </TouchableOpacity>
+
+              {/* Edit actions */}
+              <View style={s.editActions}>
+                <TouchableOpacity style={s.btnCancel} onPress={() => setEdit(false)}>
+                  <Text style={s.btnCancelTxt}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.btnSave} onPress={handleSaveEdit}>
+                  <Icon name="check" size={16} color="#FFF"/>
+                  <Text style={s.btnSaveTxt}>Guardar</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
         </View>
       </ScrollView>
+
+      {/* MODALS */}
+      <CalPicker
+        visible={showDatePicker}
+        onClose={() => setShowDatePicker(false)}
+        value={editData.firstUploadDate}
+        onChange={(d) => setEditData(prev => ({...prev, firstUploadDate: d}))}
+        accent={DS.brand}
+        label="PRIMERA SUBIDA"
+      />
+
+      <CategoryModal
+        visible={catModal}
+        onClose={() => setCatModal(false)}
+        dict={dict}
+        currentCat={editData.category}
+        currentSub={editData.subcategory}
+        onSelect={handleCategorySelect}
+      />
+
+      {/* SOLD MODAL */}
+      <Modal visible={soldModal} transparent animationType="slide" onRequestClose={() => setSoldModal(false)}>
+        <View style={s.modalOverlay}>
+          <TouchableOpacity style={{flex:1}} onPress={() => setSoldModal(false)}/>
+          <View style={s.soldSheet}>
+            <View style={s.soldHdr}>
+              <View style={s.soldIconWrap}>
+                <Icon name="check-circle" size={22} color={DS.success}/>
+              </View>
+              <View style={{flex:1}}>
+                <Text style={s.soldHdrTitle}>Marcar como vendido</Text>
+                <Text style={s.soldHdrSub}>{product.title}</Text>
+              </View>
+              <TouchableOpacity style={s.modalCloseBtn} onPress={() => setSoldModal(false)}>
+                <Icon name="x" size={16} color={DS.text2}/>
+              </TouchableOpacity>
+            </View>
+            <View style={s.soldBody}>
+              {/* Original vs Sale price */}
+              <View style={s.soldPriceRow}>
+                <View style={[s.soldPriceCard, {backgroundColor: DS.surface3}]}>
+                  <Text style={s.soldPriceLbl}>PRECIO ORIGINAL</Text>
+                  <Text style={s.soldPriceVal}>{fmtPrice(product.price)}</Text>
+                </View>
+                <View style={[s.soldPriceCard, {backgroundColor: DS.successLight}]}>
+                  <Text style={s.soldPriceLbl}>PRECIO VENTA</Text>
+                  <Text style={[s.soldPriceVal, {color: DS.success}]}>
+                    {soldPrice ? `${soldPrice}€` : '—'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Sold price input */}
+              <Text style={s.soldFieldLbl}>PRECIO DE VENTA</Text>
+              <View style={s.soldInputRow}>
+                <TextInput
+                  style={s.soldInput}
+                  keyboardType="numeric"
+                  placeholder="0"
+                  placeholderTextColor={DS.text3}
+                  value={soldPrice}
+                  onChangeText={setSoldPrice}
+                  autoFocus
+                />
+                <Text style={s.soldInputEuro}>€</Text>
+              </View>
+
+              {/* Sold date */}
+              <Text style={s.soldFieldLbl}>FECHA DE VENTA</Text>
+              <TouchableOpacity style={s.soldDateRow} onPress={() => setShowSoldDatePicker(true)}>
+                <Icon name="calendar" size={16} color={DS.text2}/>
+                <Text style={s.soldDateTxt}>{fmtDate(soldDate)}</Text>
+                <Icon name="chevron-right" size={16} color={DS.text3}/>
+              </TouchableOpacity>
+
+              {/* Confirm */}
+              <TouchableOpacity style={s.soldConfirm} onPress={handleMarkSold}>
+                <Icon name="check" size={18} color="#FFF"/>
+                <Text style={s.soldConfirmTxt}>Confirmar venta</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <CalPicker
+        visible={showSoldDatePicker}
+        onClose={() => setShowSoldDatePicker(false)}
+        value={soldDate}
+        onChange={setSoldDate}
+        accent={DS.success}
+        label="FECHA DE VENTA"
+      />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container:      {flex:1, backgroundColor: DS.bg},
+const s = StyleSheet.create({
+  container: {flex:1, backgroundColor: DS.surface2},
+  
+  // Hero
+  hero: {width, height: width, position:'relative'},
+  heroImage: {width:'100%', height:'100%'},
+  heroPlaceholder: {width:'100%', height:'100%', backgroundColor: DS.border, justifyContent:'center', alignItems:'center'},
+  backBtn: {
+    position:'absolute', top: LAYOUT.headerPadT, left: SPACE[5],
+    backgroundColor: DS.white, width:44, height:44, borderRadius: 22,
+    justifyContent:'center', alignItems:'center', ...SHADOW.lg,
+  },
+  heroBadge: {
+    position:'absolute', bottom: SPACE[5], right: SPACE[5],
+    paddingHorizontal: SPACE[3] + 2, paddingVertical: SPACE[2] - 1,
+    borderRadius: RADIUS.full,
+  },
+  heroBadgeTxt: {color:'#FFF', fontWeight:'900', fontSize: 12, letterSpacing:0.4},
 
-  hero:           {height:320, position:'relative'},
-  heroImg:        {width, height:320},
-  heroPlaceholder:{backgroundColor: DS.border, justifyContent:'center', alignItems:'center'},
-  backBtn:        {position:'absolute', top:52, left:20, backgroundColor: DS.white,
-                   width:44, height:44, borderRadius:22, justifyContent:'center',
-                   alignItems:'center', elevation:6},
-  heroBadge:      {position:'absolute', bottom:20, right:20, paddingHorizontal:14,
-                   paddingVertical:7, borderRadius:20},
-  heroBadgeTxt:   {color:'#FFF', fontWeight:'900', fontSize:12, letterSpacing:0.4},
+  // Content card
+  contentCard: {
+    backgroundColor: DS.white,
+    borderTopLeftRadius: RADIUS.xl,
+    borderTopRightRadius: RADIUS.xl,
+    padding: SPACE[6],
+    marginTop: -RADIUS.xl - 4,
+    minHeight: 500,
+  },
 
-  contentCard:    {backgroundColor: DS.white, borderTopLeftRadius:28, borderTopRightRadius:28,
-                   padding:24, marginTop:-28, minHeight:500},
+  // Top row
+  topRow: {flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom: SPACE[2] + 2},
+  brandTxt: {...TXT.label, color: DS.brand},
+  catPill: {
+    flexDirection:'row', alignItems:'center', gap: SPACE[1],
+    backgroundColor: DS.blueLight, paddingHorizontal: SPACE[2] + 2,
+    paddingVertical: SPACE[1] + 1, borderRadius: RADIUS.sm,
+  },
+  catPillTxt: {fontSize: 10, fontWeight:'800', color: DS.blue},
+  catSep: {fontSize: 10, color: DS.text3},
 
-  topRow:         {flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:10},
-  brandTxt:       {fontSize:11, fontWeight:'900', color: DS.primary, letterSpacing:1.2, textTransform:'uppercase'},
-  catPill:        {flexDirection:'row', alignItems:'center', gap:4, backgroundColor: DS.blueBg,
-                   paddingHorizontal:10, paddingVertical:5, borderRadius:10},
-  catPillTxt:     {fontSize:10, fontWeight:'800', color: DS.blue},
-  catSep:         {fontSize:10, color: DS.textLow},
+  // Title row
+  titleRow: {flexDirection:'row', alignItems:'flex-start', gap: SPACE[2] + 2, marginBottom: SPACE[2] + 2},
+  titleTxt: {...TXT.display, fontSize: 21, lineHeight: 27, flex:1},
+  pricePill: {
+    backgroundColor: DS.brand,
+    paddingHorizontal: SPACE[3] + 2,
+    paddingVertical: SPACE[2],
+    borderRadius: RADIUS.md,
+  },
+  pricePillTxt: {...TXT.priceSm, color:'#FFF', fontSize: 16},
 
-  titleRow:       {flexDirection:'row', alignItems:'flex-start', gap:10, marginBottom:10},
-  titleTxt:       {flex:1, fontSize:21, fontWeight:'900', color: DS.text, lineHeight:27},
-  pricePill:      {backgroundColor: DS.primary, paddingHorizontal:14, paddingVertical:8, borderRadius:14},
-  pricePillTxt:   {color:'#FFF', fontWeight:'900', fontSize:16},
+  // Bundle
+  bundleBadge: {
+    flexDirection:'row', alignItems:'center', gap: SPACE[2] - 2,
+    backgroundColor: DS.purpleLight, paddingHorizontal: SPACE[2] + 2,
+    paddingVertical: SPACE[1] + 1, borderRadius: RADIUS.sm,
+    alignSelf:'flex-start', marginBottom: SPACE[2] + 2,
+  },
+  bundleTxt: {fontSize: 10, fontWeight:'900', color: DS.purple},
 
-  bundleBadge:    {flexDirection:'row', alignItems:'center', gap:6, backgroundColor: DS.purpleBg,
-                   paddingHorizontal:10, paddingVertical:5, borderRadius:10,
-                   alignSelf:'flex-start', marginBottom:10},
-  bundleTxt:      {fontSize:10, fontWeight:'900', color: DS.purple},
+  // Status bar
+  statusBar: {
+    flexDirection:'row', alignItems:'center', gap: SPACE[2],
+    borderWidth:1, borderRadius: RADIUS.md, padding: SPACE[3],
+    marginBottom: SPACE[3] + 2,
+  },
+  statusDot: {width:8, height:8, borderRadius: 4},
+  statusLbl: {fontSize: 12, fontWeight:'900'},
+  statusDays: {fontSize: 11, color: DS.text2, marginLeft:'auto'},
+  repostChip: {
+    flexDirection:'row', alignItems:'center', gap: SPACE[1],
+    backgroundColor: DS.blueLight, paddingHorizontal: SPACE[2] - 1,
+    paddingVertical: 3, borderRadius: RADIUS.sm,
+  },
+  repostTxt: {fontSize: 9, fontWeight:'800', color: DS.blue},
 
-  statusBar:      {flexDirection:'row', alignItems:'center', gap:8, borderWidth:1,
-                   borderRadius:14, padding:12, marginBottom:14},
-  statusDot:      {width:8, height:8, borderRadius:4},
-  statusLbl:      {fontSize:12, fontWeight:'900'},
-  statusDays:     {fontSize:11, color: DS.textMed, marginLeft:'auto'},
-  repostChip:     {flexDirection:'row', alignItems:'center', gap:4, backgroundColor: DS.blueBg,
-                   paddingHorizontal:7, paddingVertical:3, borderRadius:8},
-  repostTxt:      {fontSize:9, fontWeight:'800', color: DS.blue},
+  // Stats
+  statsRow: {flexDirection:'row', gap: SPACE[2] + 2, marginBottom: SPACE[3] + 2},
+  statCard: {
+    flex:1, backgroundColor: DS.surface2, borderRadius: RADIUS.lg,
+    padding: SPACE[3], alignItems:'center', gap: SPACE[1],
+  },
+  statVal: {...TXT.price, fontSize: 20, fontFamily: FONT_FAMILY.mono},
+  statLbl: {...TXT.label, fontSize: 8},
 
-  statsRow:       {flexDirection:'row', gap:10, marginBottom:14},
-  statCard:       {flex:1, backgroundColor: DS.bg, borderRadius:16, padding:12,
-                   alignItems:'center', gap:4},
-  statVal:        {fontSize:20, fontWeight:'900', fontFamily: DS.mono},
-  statLbl:        {fontSize:8, fontWeight:'900', color: DS.textLow, letterSpacing:1},
+  // History
+  histBox: {
+    backgroundColor: DS.brandLight, borderRadius: RADIUS.md,
+    padding: SPACE[3] + 2, marginBottom: SPACE[3] + 2,
+    borderWidth:1, borderColor: DS.brand + '25',
+  },
+  histHdr: {flexDirection:'row', alignItems:'center', gap: SPACE[2] - 2, marginBottom: SPACE[2]},
+  histLbl: {...TXT.label, fontSize: 9, color: DS.brand},
+  histRow: {flexDirection:'row', justifyContent:'space-between', paddingVertical: 3},
+  histTxt: {fontSize: 12, fontWeight:'700', color: DS.text},
+  histDate: {fontSize: 10, color: DS.text2},
 
-  histBox:        {backgroundColor: DS.primaryBg, borderRadius:14, padding:14,
-                   marginBottom:14, borderWidth:1, borderColor: DS.primary+'25'},
-  histHdr:        {flexDirection:'row', alignItems:'center', gap:6, marginBottom:8},
-  histLbl:        {fontSize:9, fontWeight:'900', color: DS.primary, letterSpacing:1.2},
-  histRow:        {flexDirection:'row', justifyContent:'space-between', paddingVertical:3},
-  histTxt:        {fontSize:12, fontWeight:'700', color: DS.text},
-  histDate:       {fontSize:10, color: DS.textMed},
+  // Date bar
+  dateBar: {
+    flexDirection:'row', alignItems:'center', gap: SPACE[3],
+    backgroundColor: DS.surface2, borderRadius: RADIUS.md,
+    padding: SPACE[3], marginBottom: SPACE[3] + 2,
+  },
+  dateIcon: {
+    width:36, height:36, borderRadius: RADIUS.sm,
+    justifyContent:'center', alignItems:'center',
+  },
+  dateLbl: {fontSize: 10, color: DS.text2, marginBottom: 2},
+  dateVal: {fontSize: 13, fontWeight:'800', color: DS.text},
 
-  dateBar:        {flexDirection:'row', alignItems:'center', gap:12, backgroundColor: DS.bg,
-                   borderRadius:14, padding:12, marginBottom:14},
-  dateIcon:       {width:36, height:36, borderRadius:10, justifyContent:'center', alignItems:'center'},
-  dateLbl:        {fontSize:10, color: DS.textMed, marginBottom:2},
-  dateVal:        {fontSize:13, fontWeight:'800', color: DS.text},
+  // Tags
+  tagsSection: {marginBottom: SPACE[3] + 2},
+  tagsCloud: {flexDirection:'row', flexWrap:'wrap', gap: SPACE[2] - 1, marginTop: SPACE[2] - 2},
+  tag: {backgroundColor: DS.blueLight, paddingHorizontal: SPACE[2] + 2, paddingVertical: SPACE[1] + 1, borderRadius: RADIUS.sm},
+  tagTxt: {fontSize: 11, color: DS.blue, fontWeight:'700'},
 
-  tagsSection:    {marginBottom:14},
-  tagsCloud:      {flexDirection:'row', flexWrap:'wrap', gap:7, marginTop:6},
-  tag:            {backgroundColor: DS.blueBg, paddingHorizontal:10, paddingVertical:5, borderRadius:10},
-  tagTxt:         {fontSize:11, color: DS.blue, fontWeight:'700'},
+  // Section
+  sectionLabel: {...TXT.label, marginBottom: SPACE[2] - 2, marginTop: SPACE[3] + 2},
+  descTxt: {...TXT.body, lineHeight: 22, marginBottom: SPACE[4]},
 
-  sectionLabel:   {fontSize:10, fontWeight:'900', color: DS.textLow, letterSpacing:1.5,
-                   textTransform:'uppercase', marginBottom:6, marginTop:14},
-  descTxt:        {fontSize:14, color: DS.textMed, lineHeight:22, marginBottom:16},
+  // Actions
+  actionsRow: {flexDirection:'row', gap: SPACE[2] + 2, marginTop: SPACE[4]},
+  btnEdit: {
+    flex:1, flexDirection:'row', alignItems:'center', justifyContent:'center',
+    gap: SPACE[2], backgroundColor: DS.surface2, borderWidth:1,
+    borderColor: DS.border, paddingVertical: SPACE[4] - 1, borderRadius: RADIUS.lg,
+  },
+  btnEditTxt: {fontSize: 13, fontWeight:'800', color: DS.text},
+  btnVendido: {
+    flex:2, flexDirection:'row', alignItems:'center', justifyContent:'center',
+    gap: SPACE[2], backgroundColor: DS.success, paddingVertical: SPACE[4] - 1,
+    borderRadius: RADIUS.lg,
+  },
+  btnVendidoTxt: {fontSize: 13, fontWeight:'900', color:'#FFF', letterSpacing:0.5},
 
-  actionsRow:     {flexDirection:'row', gap:10, marginTop:16},
-  btnEdit:        {flex:1, flexDirection:'row', alignItems:'center', justifyContent:'center',
-                   gap:8, backgroundColor: DS.bg, borderWidth:1, borderColor: DS.border,
-                   paddingVertical:15, borderRadius:18},
-  btnEditTxt:     {fontSize:13, fontWeight:'800', color: DS.text},
-  btnVendido:     {flex:2, flexDirection:'row', alignItems:'center', justifyContent:'center',
-                   gap:8, backgroundColor: DS.success, paddingVertical:15, borderRadius:18},
-  btnVendidoTxt:  {fontSize:13, fontWeight:'900', color:'#FFF', letterSpacing:0.5},
+  // Edit mode
+  editBanner: {
+    flexDirection:'row', alignItems:'center', gap: SPACE[3],
+    backgroundColor: DS.brandLight, borderRadius: RADIUS.lg,
+    padding: SPACE[3] + 2, marginBottom: SPACE[4],
+    borderWidth:1, borderColor: DS.brand + '20',
+  },
+  editTitle: {fontSize: 15, fontWeight:'900', color: DS.text},
+  editSub: {fontSize: 11, color: DS.text2, marginTop: 2},
+  catSelector: {
+    flexDirection:'row', alignItems:'center', gap: SPACE[3],
+    backgroundColor: DS.white, borderRadius: RADIUS.lg,
+    padding: SPACE[3] + 2, borderWidth:1, borderColor: DS.border,
+    marginBottom: SPACE[1],
+  },
+  catSelIcon: {
+    width:36, height:36, borderRadius: RADIUS.sm,
+    justifyContent:'center', alignItems:'center',
+  },
+  catSelVal: {fontSize: 15, fontWeight:'800', color: DS.text},
+  catSelSub: {fontSize: 11, color: DS.text2, marginTop: 2},
+  tagPreview: {
+    backgroundColor: DS.surface2, borderRadius: RADIUS.md,
+    padding: SPACE[3], marginTop: SPACE[1], marginBottom: SPACE[1],
+  },
+  tagPreviewLbl: {fontSize: 10, color: DS.text2, fontWeight:'700', marginBottom: SPACE[2] - 2},
+  datePickBtn: {
+    flexDirection:'row', alignItems:'center', gap: SPACE[3],
+    backgroundColor: DS.white, borderRadius: RADIUS.lg,
+    padding: SPACE[3] + 2, borderWidth:1, borderColor: DS.border,
+    marginBottom: SPACE[1],
+  },
+  datePickIcon: {
+    width:40, height:40, borderRadius: RADIUS.md,
+    justifyContent:'center', alignItems:'center',
+  },
+  datePickVal: {fontSize: 15, fontWeight:'700', color: DS.text},
+  datePickHint: {fontSize: 10, color: DS.text3, marginTop: 2},
+  editActions: {flexDirection:'row', gap: SPACE[2] + 2, marginTop: SPACE[6]},
+  btnSave: {
+    flex:2, flexDirection:'row', justifyContent:'center', alignItems:'center',
+    gap: SPACE[2], backgroundColor: DS.text, padding: SPACE[4],
+    borderRadius: RADIUS.lg,
+  },
+  btnSaveTxt: {color:'#FFF', fontWeight:'900', fontSize: 14},
+  btnCancel: {
+    flex:1, justifyContent:'center', alignItems:'center',
+    backgroundColor: DS.surface2, borderWidth:1, borderColor: DS.border,
+    padding: SPACE[4], borderRadius: RADIUS.lg,
+  },
+  btnCancelTxt: {color: DS.text2, fontWeight:'800'},
 
-  editBanner:     {flexDirection:'row', alignItems:'center', gap:12, backgroundColor: DS.primaryBg,
-                   borderRadius:16, padding:14, marginBottom:16, borderWidth:1, borderColor: DS.primary+'20'},
-  editTitle:      {fontSize:15, fontWeight:'900', color: DS.text},
-  editSub:        {fontSize:11, color: DS.textMed, marginTop:2},
-  catSelector:    {flexDirection:'row', alignItems:'center', gap:12, backgroundColor: DS.white,
-                   borderRadius:16, padding:14, borderWidth:1, borderColor: DS.border, marginBottom:4},
-  catSelIcon:     {width:36, height:36, borderRadius:10, justifyContent:'center', alignItems:'center'},
-  catSelVal:      {fontSize:15, fontWeight:'800', color: DS.text},
-  catSelSub:      {fontSize:11, color: DS.textMed, marginTop:2},
-  tagPreview:     {backgroundColor: DS.bg, borderRadius:14, padding:12, marginTop:4, marginBottom:4},
-  tagPreviewLbl:  {fontSize:10, color: DS.textMed, fontWeight:'700', marginBottom:6},
-  datePickBtn:    {flexDirection:'row', alignItems:'center', gap:12, backgroundColor: DS.white,
-                   borderRadius:16, padding:14, borderWidth:1, borderColor: DS.border, marginBottom:4},
-  datePickIcon:   {width:40, height:40, borderRadius:12, justifyContent:'center', alignItems:'center'},
-  datePickVal:    {fontSize:15, fontWeight:'700', color: DS.text},
-  datePickHint:   {fontSize:10, color: DS.textLow, marginTop:2},
-  editActions:    {flexDirection:'row', gap:10, marginTop:24},
-  btnSave:        {flex:2, flexDirection:'row', justifyContent:'center', alignItems:'center',
-                   gap:8, backgroundColor: DS.text, padding:16, borderRadius:18},
-  btnSaveTxt:     {color:'#FFF', fontWeight:'900', fontSize:14},
-  btnCancel:      {flex:1, justifyContent:'center', alignItems:'center', backgroundColor: DS.bg,
-                   borderWidth:1, borderColor: DS.border, padding:16, borderRadius:18},
-  btnCancelTxt:   {color: DS.textMed, fontWeight:'800'},
+  // Modals
+  modalOverlay: {flex:1, backgroundColor:'#00000060', justifyContent:'flex-end'},
+  modalCloseBtn: {
+    width:30, height:30, borderRadius: RADIUS.md,
+    backgroundColor: DS.surface3, justifyContent:'center', alignItems:'center',
+  },
 
-  modalOverlay:   {flex:1, backgroundColor:'#00000060', justifyContent:'flex-end'},
-  modalCloseBtn:  {width:30, height:30, borderRadius:15, backgroundColor: DS.bg,
-                   justifyContent:'center', alignItems:'center'},
-  handle:         {width:40, height:4, backgroundColor: DS.border, borderRadius:2,
-                   alignSelf:'center', marginBottom:14},
-
-  soldSheet:      {backgroundColor: DS.white, borderTopLeftRadius:28, borderTopRightRadius:28,
-                   paddingBottom:30},
-  soldHdr:        {flexDirection:'row', alignItems:'center', gap:12, padding:20,
-                   backgroundColor: DS.successBg, borderTopLeftRadius:28, borderTopRightRadius:28,
-                   borderBottomWidth:1, borderBottomColor: DS.success+'25'},
-  soldIconWrap:   {width:44, height:44, borderRadius:22, backgroundColor:'#FFF',
-                   justifyContent:'center', alignItems:'center'},
-  soldHdrTitle:   {fontSize:17, fontWeight:'900', color: DS.text},
-  soldHdrSub:     {fontSize:12, color: DS.textMed, marginTop:2},
-  soldBody:       {padding:20},
-  soldPriceRow:   {flexDirection:'row', gap:10, marginBottom:20},
-  soldPriceCard:  {flex:1, borderRadius:14, padding:12},
-  soldPriceLbl:   {fontSize:8, fontWeight:'900', color: DS.textLow, letterSpacing:1, marginBottom:4},
-  soldPriceVal:   {fontSize:20, fontWeight:'900', color: DS.text, fontFamily: DS.mono},
-  soldFieldLbl:   {fontSize:9, fontWeight:'900', color: DS.textLow, letterSpacing:1.5,
-                   textTransform:'uppercase', marginBottom:8},
-  soldInputRow:   {flexDirection:'row', alignItems:'center', gap:8, backgroundColor: DS.bg,
-                   borderWidth:2, borderColor: DS.border, borderRadius:16,
-                   paddingHorizontal:16, paddingVertical:10, marginBottom:16},
-  soldInput:      {flex:1, fontSize:28, fontWeight:'900', color: DS.text,
-                   fontFamily: DS.mono, textAlign:'center'},
-  soldInputEuro:  {fontSize:22, fontWeight:'900', color: DS.textMed},
-  soldDateRow:    {flexDirection:'row', alignItems:'center', gap:10, backgroundColor: DS.bg,
-                   borderRadius:14, padding:14, marginBottom:20,
-                   borderWidth:1, borderColor: DS.border},
-  soldDateTxt:    {flex:1, fontSize:14, fontWeight:'700', color: DS.text},
-  soldConfirm:    {flexDirection:'row', alignItems:'center', justifyContent:'center',
-                   gap:10, backgroundColor: DS.success, borderRadius:18, padding:18},
-  soldConfirmTxt: {color:'#FFF', fontWeight:'900', fontSize:15, letterSpacing:0.5},
+  // Sold sheet
+  soldSheet: {
+    backgroundColor: DS.white,
+    borderTopLeftRadius: RADIUS.xl,
+    borderTopRightRadius: RADIUS.xl,
+    paddingBottom: SPACE[8],
+  },
+  soldHdr: {
+    flexDirection:'row', alignItems:'center', gap: SPACE[3],
+    padding: SPACE[5], backgroundColor: DS.successLight,
+    borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl,
+    borderBottomWidth:1, borderBottomColor: DS.success + '25',
+  },
+  soldIconWrap: {
+    width:44, height:44, borderRadius: 22, backgroundColor:'#FFF',
+    justifyContent:'center', alignItems:'center',
+  },
+  soldHdrTitle: {fontSize: 17, fontWeight:'900', color: DS.text},
+  soldHdrSub: {fontSize: 12, color: DS.text2, marginTop: 2},
+  soldBody: {padding: SPACE[5]},
+  soldPriceRow: {flexDirection:'row', gap: SPACE[2] + 2, marginBottom: SPACE[5]},
+  soldPriceCard: {flex:1, borderRadius: RADIUS.md, padding: SPACE[3]},
+  soldPriceLbl: {...TXT.label, fontSize: 8, marginBottom: SPACE[1]},
+  soldPriceVal: {...TXT.price, fontSize: 20, fontFamily: FONT_FAMILY.mono},
+  soldFieldLbl: {...TXT.label, fontSize: 9, marginBottom: SPACE[2]},
+  soldInputRow: {
+    flexDirection:'row', alignItems:'center', gap: SPACE[2],
+    backgroundColor: DS.surface2, borderWidth:2, borderColor: DS.border,
+    borderRadius: RADIUS.lg, paddingHorizontal: SPACE[4], paddingVertical: SPACE[2] + 2,
+    marginBottom: SPACE[4],
+  },
+  soldInput: {
+    flex:1, fontSize: 28, fontWeight:'900', color: DS.text,
+    fontFamily: FONT_FAMILY.mono, textAlign:'center',
+  },
+  soldInputEuro: {fontSize: 22, fontWeight:'900', color: DS.text2},
+  soldDateRow: {
+    flexDirection:'row', alignItems:'center', gap: SPACE[2] + 2,
+    backgroundColor: DS.surface2, borderRadius: RADIUS.md,
+    padding: SPACE[3] + 2, marginBottom: SPACE[5],
+    borderWidth:1, borderColor: DS.border,
+  },
+  soldDateTxt: {flex:1, fontSize: 14, fontWeight:'700', color: DS.text},
+  soldConfirm: {
+    flexDirection:'row', alignItems:'center', justifyContent:'center',
+    gap: SPACE[2] + 2, backgroundColor: DS.success,
+    borderRadius: RADIUS.lg, padding: SPACE[4] + 2,
+  },
+  soldConfirmTxt: {color:'#FFF', fontWeight:'900', fontSize: 15, letterSpacing:0.5},
 });

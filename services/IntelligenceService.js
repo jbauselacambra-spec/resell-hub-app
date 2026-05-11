@@ -526,6 +526,92 @@ export class IntelligenceService {
       marketBenchmark: Math.round((m.sales || 0) * 8.5), // precio medio mercado ~8.5€
     }));
   }
+
+
+/**
+ * Punto de entrada único para la pantalla BusinessIntelligenceScreen.
+ * Orquesta todos los sub-análisis y devuelve el objeto `intel` completo.
+ */
+static async generateFullIntelligence() {
+  // ── Datos base ──────────────────────────────────────────────────────────────
+  const learnings       = IntelligenceService.getPersonalLearnings();
+  const opportunities   = IntelligenceService.getProductOpportunities();
+  const catAnalysis     = IntelligenceService.getCategoryAnalysis();
+  const catComparison   = IntelligenceService.getCategoryComparisonData();
+  const monthlyData     = IntelligenceService.getMonthlyTrendData();
+
+  // ── publishWindow: ventana para la categoría con mayor oportunidad ──────────
+  const topCat          = catAnalysis[0]?.name || 'Otros';
+  const pwRaw           = IntelligenceService.getPublishWindowStatus(topCat);
+  const publishWindow   = {
+    next:    pwRaw.nextWindow,
+    bestDay: pwRaw.label,
+  };
+
+  // ── categoryComparison: re-mapear al shape que espera el gráfico de barras ──
+  // getCategoryComparisonData() devuelve: { name, myTTS, globalTTS, myPrice, globalPrice, soldCount }
+  // El gráfico necesita: { category, mySold, myAvgPrice, marketSold, marketAvgPrice }
+  const categoryComparison = catComparison.map(c => ({
+    category:      c.fullName || c.name,
+    mySold:        c.soldCount         || 0,
+    myAvgPrice:    Math.round(c.myPrice)    || 0,
+    marketSold:    null,                          // no disponible en benchmarks globales
+    marketAvgPrice:Math.round(c.globalPrice) || 0,
+  }));
+
+  // ── monthlyTrend: re-mapear al shape de la tabla ────────────────────────────
+  // getMonthlyTrendData() devuelve: { label, key, recaudacion, sales, marketBenchmark }
+  const monthlyTrend = monthlyData.map(m => ({
+    month:   m.label,
+    sold:    m.sales       || 0,
+    revenue: (m.recaudacion || 0).toFixed(0),
+    avgTTS:  '—',          // no disponible en el agregado mensual
+  }));
+
+  // ── categoryIntel: re-mapear al shape de la pestaña Categorías ─────────────
+  // getCategoryAnalysis() devuelve el análisis completo por categoría
+  const categoryIntel = catAnalysis.map(cat => ({
+    category:        cat.name,
+    opportunityScore:cat.opportunityScore,
+    isHotThisMonth:  cat.isHotThisMonth,
+    activeListing:   0,              // no expuesto por getCategoryAnalysis; se puede enriquecer
+    totalSold:       cat.personalSoldCount || 0,
+    avgTTS:          cat.blendedTTS  != null ? Math.round(cat.blendedTTS) : '—',
+    avgPrice:        cat.personalAvgPrice  != null ? cat.personalAvgPrice.toFixed(1) : '—',
+    avgMargin:       '—',            // no calculado en este servicio
+    strategy:        cat.priceStrategy?.label || '—',
+    priceDelta:      cat.priceDeltaPct || null,
+    subcategories:   (cat.subcategoryStats || []).map(s => ({
+      name:   s.name,
+      avgTTS: s.avgTTS < 999 ? s.avgTTS : '—',
+      count:  s.count || 0,
+    })),
+  }));
+
+  // ── kpis del strip superior ─────────────────────────────────────────────────
+  const highOpp  = opportunities.filter(o => o.opportunityScore >= 70);
+  const avgScore = opportunities.length > 0
+    ? Math.round(opportunities.reduce((s, o) => s + o.opportunityScore, 0) / opportunities.length)
+    : 0;
+
+  const kpis = {
+    totalInsights:    learnings.length,
+    topOpportunities: highOpp.length,
+    avgScore,
+  };
+
+  return {
+    learnings,
+    publishWindow,
+    opportunities,
+    categoryComparison,
+    monthlyTrend,
+    categoryIntel,
+    kpis,
+  };
+}
+
+
 }
 
 // ─── HELPER PRIVADO ────────────────────────────────────────────────────────────
@@ -541,3 +627,5 @@ function _buildPriceStrategy(personalPrice, globalPrice, personalTTS, globalTTS,
   if (personalTTS <= anchor)    return { action: 'HOLD',  label: 'Mantén precio',  delta: 0 };
   return                               { action: 'CUT',   label: `Baja -${cut}%`,   delta: -cut };
 }
+
+

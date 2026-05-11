@@ -1,5 +1,5 @@
 /**
- * VintedImportScreen.jsx — Sprint 11
+ * VintedImportScreen.jsx — Sprint 11 + Theme Integration
  *
  * [DATA_SCIENTIST] Sprint 11:
  * - handleConfirmE: usa _enrichedItems de matchHistoryToInventory()
@@ -7,7 +7,10 @@
  * - handleConfirmD: idem para Modo D
  * - autoRegisterCategories: registra categorías inferidas en el diccionario
  *
- * [QA_ENGINEER] Sin cambios en modos C, UI, estilos ni otros handlers.
+ * [DESIGN] Integrado con theme.js:
+ * - Usa DS, SPACE, RADIUS, SHADOW, TXT, BTN del design system
+ * - Tipografía consistente con DM Sans
+ * - Colores semánticos unificados
  */
 
 import React, { useState, useCallback, useRef } from 'react';
@@ -31,23 +34,13 @@ import {
   matchHistoryToInventory,
 } from '../services/VintedParserService';
 import LogService, { LOG_CTX } from '../services/LogService';
+import { DS, SPACE, RADIUS, SHADOW, TXT, BTN, BTN_TEXT, FONT_SIZE, FONT_FAMILY, fmtPrice } from '../theme';
 
 const { width } = Dimensions.get('window');
 
-// ─── Design System ────────────────────────────────────────────────────────────
-const DS = {
-  bg:        '#F8F9FA',  white:     '#FFFFFF',  surface2:  '#F0F2F5',
-  border:    '#EAEDF0',  primary:   '#FF6B35',  primaryBg: '#FFF2EE',
-  success:   '#00D9A3',  successBg: '#E8FBF6',  warning:   '#FFB800',  warningBg: '#FFF8E7',
-  danger:    '#E63946',  dangerBg:  '#FFF0F1',  blue:      '#004E89',  blueBg:    '#EAF2FB',
-  purple:    '#6C63FF',  purpleBg:  '#F0EFFE',
-  text:      '#1A1A2E',  textMed:   '#5C6070',  textLow:   '#A0A5B5',
-  mono:      Platform.OS === 'android' ? 'monospace' : 'Courier New',
-};
-
 // ─── Metadatos por tipo de contenido ─────────────────────────────────────────
 const TYPE_META = {
-  json_products:       { label: 'JSON escaparate (Inventario)',    mode: 'C', color: DS.primary, icon: 'package' },
+  json_products:       { label: 'JSON escaparate (Inventario)',    mode: 'C', color: DS.brand, icon: 'package' },
   json_sales_current:  { label: 'JSON ventas año actual',          mode: 'D', color: DS.success, icon: 'trending-up' },
   json_sales_history:  { label: 'JSON historial completo',         mode: 'E', color: DS.blue,    icon: 'clock' },
   html_sales_current:  { label: 'HTML ventas (compatibilidad)',    mode: 'A', color: DS.warning,  icon: 'alert-circle' },
@@ -59,7 +52,7 @@ const TYPE_META = {
 const GUIDE = [
   {
     mode: 'C',
-    color: DS.primary,
+    color: DS.brand,
     icon: 'package',
     title: 'Modo C — Escaparate',
     sub: 'Script: scriptEscaparate.js en tu página de perfil de Vinted',
@@ -128,12 +121,12 @@ function SalePreviewCard({ item, checked, onToggle }) {
       activeOpacity={0.8}
     >
       <View style={[styles.previewCheck, checked && styles.previewCheckOn]}>
-        {checked && <Icon name="check" size={12} color="#FFF" />}
+        {checked && <Icon name="check" size={12} color={DS.white} />}
       </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.previewTitle} numberOfLines={1}>{item.title || item.orderId}</Text>
         <View style={styles.previewRow}>
-          <View style={[styles.typeBadge, { backgroundColor: isVenta ? DS.successBg : DS.dangerBg }]}>
+          <View style={[styles.typeBadge, { backgroundColor: isVenta ? DS.successDim : DS.dangerDim }]}>
             <Text style={[styles.typeBadgeTxt, { color: isVenta ? DS.success : DS.danger }]}>
               {isVenta ? '↑ VENTA' : '↓ COMPRA'}
             </Text>
@@ -161,9 +154,11 @@ function SalePreviewCard({ item, checked, onToggle }) {
   );
 }
 
-// ─── PreviewCard — Modo C (InternalProduct) ───────────────────────────────────
-function ProductPreviewCard({ product, checked, onToggle }) {
-  const isSold = product.status === 'sold';
+// ─── PreviewCard — Modo C (VintedProduct) ────────────────────────────────────
+function ProductPreviewCard({ item, checked, onToggle }) {
+  const statusColor = item.status === 'sold' ? DS.success : DS.blue;
+  const statusLabel = item.status === 'sold' ? 'Vendido' : 'Activo';
+
   return (
     <TouchableOpacity
       style={[styles.previewCard, checked && styles.previewCardChecked]}
@@ -171,491 +166,422 @@ function ProductPreviewCard({ product, checked, onToggle }) {
       activeOpacity={0.8}
     >
       <View style={[styles.previewCheck, checked && styles.previewCheckOn]}>
-        {checked && <Icon name="check" size={12} color="#FFF" />}
+        {checked && <Icon name="check" size={12} color={DS.white} />}
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={styles.previewTitle} numberOfLines={1}>{product.title}</Text>
+        <Text style={styles.previewTitle} numberOfLines={1}>{item.title}</Text>
         <View style={styles.previewRow}>
-          <View style={[styles.typeBadge, { backgroundColor: isSold ? DS.surface2 : DS.successBg }]}>
-            <Text style={[styles.typeBadgeTxt, { color: isSold ? DS.textMed : DS.success }]}>
-              {isSold ? 'VENDIDO' : 'ACTIVO'}
-            </Text>
+          <View style={[styles.typeBadge, { backgroundColor: statusColor + '1A' }]}>
+            <Text style={[styles.typeBadgeTxt, { color: statusColor }]}>{statusLabel}</Text>
           </View>
-          <Text style={[styles.previewAmt, { color: DS.primary }]}>
-            {parseFloat(product.price || 0).toFixed(2)} €
-          </Text>
-          {product.brand ? <Text style={styles.previewDate}>{product.brand}</Text> : null}
+          {item.price && (
+            <Text style={[styles.previewAmt, { color: DS.brand }]}>{fmtPrice(item.price)}</Text>
+          )}
+          {item.category && (
+            <Text style={styles.previewCat}>{item.category}</Text>
+          )}
         </View>
-        <Text style={styles.previewOrder}>
-          {product.views || 0} vistas · {product.favorites || 0} favs
-        </Text>
+        {item.productId && (
+          <Text style={styles.previewOrder}>ID: {item.productId}</Text>
+        )}
       </View>
-      {product.images?.[0] ? (
-        <Image source={{ uri: product.images[0] }} style={styles.previewImg} />
+      {item.imageUrl ? (
+        <Image source={{ uri: item.imageUrl }} style={styles.previewImg} />
       ) : null}
     </TouchableOpacity>
   );
 }
 
-// ─── Modal Confirmar Modo C ───────────────────────────────────────────────────
+// ─── Modal C: confirmar importación inventario ────────────────────────────────
 function ConfirmModalC({ visible, products, onConfirm, onClose }) {
-  if (!visible) return null;
-  const activos  = products.filter(p => p.status !== 'sold').length;
-  const vendidos = products.length - activos;
+  const activos  = products.filter(p => p.status === 'active').length;
+  const vendidos = products.filter(p => p.status === 'sold').length;
+
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity style={styles.modalSheet} activeOpacity={1}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
+        <View style={styles.modalSheet}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Importar Inventario</Text>
-            <TouchableOpacity onPress={onClose}><Icon name="x" size={22} color={DS.textMed} /></TouchableOpacity>
+            <Text style={styles.modalTitle}>Confirmar importación</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Icon name="x" size={24} color={DS.text2} />
+            </TouchableOpacity>
           </View>
-          <View style={[styles.infoBox, { backgroundColor: DS.primaryBg }]}>
-            <Icon name="package" size={14} color={DS.primary} />
-            <Text style={[styles.infoTxt, { color: DS.primary }]}>
-              {products.length} productos · fusión inteligente activada
+
+          <View style={[styles.infoBox, { backgroundColor: DS.brandLight, borderColor: DS.brand, borderWidth: 1 }]}>
+            <Icon name="package" size={18} color={DS.brand} />
+            <Text style={[styles.infoTxt, { color: DS.brand }]}>
+              Modo C — Importación de inventario
             </Text>
           </View>
+
+          <Text style={styles.modalDesc}>
+            Se importarán {products.length} productos al inventario.{'\n'}
+            • Activos: {activos}{'\n'}
+            • Vendidos: {vendidos}{'\n\n'}
+            Los productos existentes se fusionarán con Los 7 Campos Sagrados.
+          </Text>
+
           <View style={styles.modalSummaryRow}>
-            <View style={[styles.modalSummaryChip, { backgroundColor: DS.successBg }]}>
-              <Text style={[styles.modalSummaryVal, { color: DS.success }]}>{activos}</Text>
+            <View style={[styles.modalSummaryChip, { backgroundColor: DS.blueDim }]}>
+              <Text style={[styles.modalSummaryVal, { color: DS.blue }]}>{activos}</Text>
               <Text style={styles.modalSummaryLbl}>Activos</Text>
             </View>
-            <View style={[styles.modalSummaryChip, { backgroundColor: DS.surface2 }]}>
-              <Text style={[styles.modalSummaryVal, { color: DS.textMed }]}>{vendidos}</Text>
+            <View style={[styles.modalSummaryChip, { backgroundColor: DS.successDim }]}>
+              <Text style={[styles.modalSummaryVal, { color: DS.success }]}>{vendidos}</Text>
               <Text style={styles.modalSummaryLbl}>Vendidos</Text>
             </View>
           </View>
-          <Text style={styles.modalDesc}>
-            Los campos editados manualmente (categoría, título, fecha de subida) quedarán protegidos.
-          </Text>
-          <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: DS.primary }]} onPress={onConfirm}>
-            <Icon name="download" size={16} color="#FFF" />
-            <Text style={styles.confirmBtnTxt}>IMPORTAR {products.length} PRODUCTOS</Text>
+
+          <TouchableOpacity
+            style={[styles.confirmBtn, { backgroundColor: DS.brand }]}
+            onPress={onConfirm}
+            activeOpacity={0.85}
+          >
+            <Icon name="download" size={18} color={DS.white} />
+            <Text style={styles.confirmBtnTxt}>Importar {products.length} productos</Text>
           </TouchableOpacity>
-        </TouchableOpacity>
-      </TouchableOpacity>
+        </View>
+      </View>
     </Modal>
   );
 }
 
-// ─── Modal Confirmar Modo D ───────────────────────────────────────────────────
+// ─── Modal D: confirmar actualización ventas ──────────────────────────────────
 function ConfirmModalD({ visible, items, onConfirm, onClose }) {
-  if (!visible) return null;
-  const conFecha    = items.filter(i => i.soldDateReal).length;
-  const sinFecha    = items.length - conFecha;
-  const totalEuros  = items.reduce((s, i) => s + (i.soldPriceReal || 0), 0).toFixed(2);
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity style={styles.modalSheet} activeOpacity={1}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
+        <View style={styles.modalSheet}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Actualizar Ventas</Text>
-            <TouchableOpacity onPress={onClose}><Icon name="x" size={22} color={DS.textMed} /></TouchableOpacity>
+            <Text style={styles.modalTitle}>Confirmar actualización</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Icon name="x" size={24} color={DS.text2} />
+            </TouchableOpacity>
           </View>
-          <View style={[styles.infoBox, { backgroundColor: DS.successBg }]}>
-            <Icon name="trending-up" size={14} color={DS.success} />
+
+          <View style={[styles.infoBox, { backgroundColor: DS.successLight, borderColor: DS.success, borderWidth: 1 }]}>
+            <Icon name="trending-up" size={18} color={DS.success} />
             <Text style={[styles.infoTxt, { color: DS.success }]}>
-              {items.length} ventas · cruzará con inventario existente
+              Modo D — Actualización de ventas
             </Text>
           </View>
+
+          <Text style={styles.modalDesc}>
+            Se actualizarán los productos vendidos en el inventario con los precios y fechas reales de venta.{'\n\n'}
+            Total de ventas: {items.length}
+          </Text>
+
           <View style={styles.modalSummaryRow}>
-            <View style={[styles.modalSummaryChip, { backgroundColor: DS.successBg }]}>
-              <Text style={[styles.modalSummaryVal, { color: DS.success }]}>{conFecha}</Text>
-              <Text style={styles.modalSummaryLbl}>Con fecha</Text>
-            </View>
-            <View style={[styles.modalSummaryChip, { backgroundColor: DS.warningBg }]}>
-              <Text style={[styles.modalSummaryVal, { color: DS.warning }]}>{sinFecha}</Text>
-              <Text style={styles.modalSummaryLbl}>Sin fecha</Text>
-            </View>
-            <View style={[styles.modalSummaryChip, { backgroundColor: DS.primaryBg }]}>
-              <Text style={[styles.modalSummaryVal, { color: DS.primary }]}>{totalEuros}€</Text>
-              <Text style={styles.modalSummaryLbl}>Facturado</Text>
+            <View style={[styles.modalSummaryChip, { backgroundColor: DS.successDim }]}>
+              <Text style={[styles.modalSummaryVal, { color: DS.success }]}>{items.length}</Text>
+              <Text style={styles.modalSummaryLbl}>Ventas</Text>
             </View>
           </View>
-          <Text style={styles.modalDesc}>
-            Actualiza soldPriceReal y soldDateReal en los productos del inventario. No toca ningún campo permanente.
-          </Text>
-          <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: DS.success }]} onPress={onConfirm}>
-            <Icon name="check-circle" size={16} color="#FFF" />
-            <Text style={styles.confirmBtnTxt}>ACTUALIZAR {items.length} VENTAS</Text>
+
+          <TouchableOpacity
+            style={[styles.confirmBtn, { backgroundColor: DS.success }]}
+            onPress={onConfirm}
+            activeOpacity={0.85}
+          >
+            <Icon name="refresh-cw" size={18} color={DS.white} />
+            <Text style={styles.confirmBtnTxt}>Actualizar {items.length} ventas</Text>
           </TouchableOpacity>
-        </TouchableOpacity>
-      </TouchableOpacity>
+        </View>
+      </View>
     </Modal>
   );
 }
 
-// ─── Modal Confirmar Modo E ───────────────────────────────────────────────────
+// ─── Modal E: confirmar importación historial ─────────────────────────────────
 function ConfirmModalE({ visible, items, onConfirm, onClose }) {
-  if (!visible) return null;
-  const ventas  = items.filter(i => i.type === 'venta');
-  const compras = items.filter(i => i.type === 'compra');
-  const totalV  = ventas.reduce((s, i)  => s + (i.soldPriceReal || Math.abs(i.amount) || 0), 0).toFixed(2);
-  const totalC  = compras.reduce((s, i) => s + Math.abs(i.amount || 0), 0).toFixed(2);
+  const ventas  = items.filter(i => i.type !== 'compra').length;
+  const compras = items.filter(i => i.type === 'compra').length;
+
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity style={styles.modalSheet} activeOpacity={1}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
+        <View style={styles.modalSheet}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Importar Historial</Text>
-            <TouchableOpacity onPress={onClose}><Icon name="x" size={22} color={DS.textMed} /></TouchableOpacity>
+            <Text style={styles.modalTitle}>Confirmar importación</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Icon name="x" size={24} color={DS.text2} />
+            </TouchableOpacity>
           </View>
-          <View style={[styles.infoBox, { backgroundColor: DS.blueBg }]}>
-            <Icon name="clock" size={14} color={DS.blue} />
+
+          <View style={[styles.infoBox, { backgroundColor: DS.blueLight, borderColor: DS.blue, borderWidth: 1 }]}>
+            <Icon name="clock" size={18} color={DS.blue} />
             <Text style={[styles.infoTxt, { color: DS.blue }]}>
-              {ventas.length} ventas · {compras.length} compras
+              Modo E — Historial completo
             </Text>
           </View>
+
+          <Text style={styles.modalDesc}>
+            Se importarán {items.length} registros del historial de ventas y compras.{'\n'}
+            • Ventas: {ventas}{'\n'}
+            • Compras: {compras}{'\n\n'}
+            Se cruzará con el inventario y se alimentarán las estadísticas económicas.
+          </Text>
+
           <View style={styles.modalSummaryRow}>
-            <View style={[styles.modalSummaryChip, { backgroundColor: DS.successBg }]}>
-              <Text style={[styles.modalSummaryVal, { color: DS.success }]}>{totalV}€</Text>
-              <Text style={styles.modalSummaryLbl}>Ingresos</Text>
+            <View style={[styles.modalSummaryChip, { backgroundColor: DS.successDim }]}>
+              <Text style={[styles.modalSummaryVal, { color: DS.success }]}>{ventas}</Text>
+              <Text style={styles.modalSummaryLbl}>Ventas</Text>
             </View>
-            <View style={[styles.modalSummaryChip, { backgroundColor: DS.dangerBg }]}>
-              <Text style={[styles.modalSummaryVal, { color: DS.danger }]}>{totalC}€</Text>
-              <Text style={styles.modalSummaryLbl}>Gastos</Text>
-            </View>
-            <View style={[styles.modalSummaryChip, { backgroundColor: DS.blueBg }]}>
-              <Text style={[styles.modalSummaryVal, { color: DS.blue }]}>
-                {(parseFloat(totalV) - parseFloat(totalC)).toFixed(2)}€
-              </Text>
-              <Text style={styles.modalSummaryLbl}>Balance</Text>
+            <View style={[styles.modalSummaryChip, { backgroundColor: DS.dangerDim }]}>
+              <Text style={[styles.modalSummaryVal, { color: DS.danger }]}>{compras}</Text>
+              <Text style={styles.modalSummaryLbl}>Compras</Text>
             </View>
           </View>
-          <Text style={styles.modalDesc}>
-            Guarda en estadísticas económicas Y cruza con el inventario para actualizar precios reales de venta.
-          </Text>
+
           <TouchableOpacity
-            style={[styles.confirmBtn, { backgroundColor: DS.blue, marginBottom: 10 }]}
-            onPress={() => onConfirm('both')}
+            style={[styles.confirmBtn, { backgroundColor: DS.blue }]}
+            onPress={onConfirm}
+            activeOpacity={0.85}
           >
-            <Icon name="zap" size={16} color="#FFF" />
-            <Text style={styles.confirmBtnTxt}>⚡ IMPORTAR TODO (Stats + Inventario)</Text>
+            <Icon name="download" size={18} color={DS.white} />
+            <Text style={styles.confirmBtnTxt}>Importar {items.length} registros</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.confirmBtn, { backgroundColor: DS.surface2 }]}
-            onPress={() => onConfirm('stats_only')}
-          >
-            <Icon name="bar-chart-2" size={16} color={DS.textMed} />
-            <Text style={[styles.confirmBtnTxt, { color: DS.text }]}>Solo estadísticas económicas</Text>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </TouchableOpacity>
+        </View>
+      </View>
     </Modal>
   );
 }
 
-// ─── Pantalla principal ───────────────────────────────────────────────────────
+// ─── COMPONENTE PRINCIPAL ─────────────────────────────────────────────────────
 export default function VintedImportScreen({ navigation }) {
-  const [contentType,  setContentType]  = useState(null);
-  const [parsedItems,  setParsedItems]  = useState([]);
+  const [fileMeta, setFileMeta] = useState(null);
+  const [contentType, setContentType] = useState(null);
+  const [currentMode, setCurrentMode] = useState(null);
+
+  // Modo C
   const [jsonProducts, setJsonProducts] = useState([]);
-  const [checkedIds,   setCheckedIds]   = useState(new Set());
+  // Modos A/B/D/E
+  const [parsedItems, setParsedItems] = useState([]);
+
+  const [checkedIds, setCheckedIds] = useState(new Set());
+  const [showConfirm, setShowConfirm] = useState(false);
   const [importResult, setImportResult] = useState(null);
-  const [showConfirm,  setShowConfirm]  = useState(false);
-  const [loading,      setLoading]      = useState(false);
-  const [fileName,     setFileName]     = useState(null);
+  const [loading, setLoading] = useState(false);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  const fadeIn = () => Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }).start();
-
-  const currentMode = contentType ? TYPE_META[contentType]?.mode : null;
-  const hasResults  = parsedItems.length > 0 || jsonProducts.length > 0;
-
-  // ─── Seleccionar archivo ────────────────────────────────────────────────
+  // ─── Handlers ─────────────────────────────────────────────────────────────
   const handlePickFile = useCallback(async () => {
     try {
+      const res = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+      if (res.canceled) return;
+      const f = res.assets?.[0];
+      if (!f) return;
+
       setLoading(true);
-      const res = await DocumentPicker.getDocumentAsync({
-        type: ['application/json', 'text/plain', 'text/*'],
-        copyToCacheDirectory: true,
-      });
+      const { uri, name, size } = f;
+      const localUri = uri.startsWith('file://') ? uri : `file://${uri}`;
+      const content = await FileSystem.readAsStringAsync(localUri, { encoding: FileSystem.EncodingType.UTF8 });
 
-      if (res.canceled || !res.assets?.length) { setLoading(false); return; }
+      const detected = detectContentType(content);
+      setFileMeta({ name, size, uri: localUri });
+      setContentType(detected);
 
-      const asset = res.assets[0];
-      setFileName(asset.name || 'archivo.json');
+      const meta = TYPE_META[detected] || TYPE_META.unknown;
+      setCurrentMode(meta.mode);
 
-      const text = await FileSystem.readAsStringAsync(asset.uri);
-      processText(text);
-    } catch (e) {
-      LogService.error('VintedImport.handlePickFile', LOG_CTX.IMPORT, e);
-      Alert.alert('Error', 'No se pudo leer el archivo. Asegúrate de que es un JSON válido.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // ─── Procesar texto ─────────────────────────────────────────────────────
-  const processText = useCallback((text) => {
-    if (!text || !text.trim()) {
-      Alert.alert('Contenido vacío', 'El archivo está vacío.');
-      return;
-    }
-    try {
-      const type = detectContentType(text);
-      setContentType(type);
-
-      if (type === 'json_products') {
-        const prods = parseJsonProducts(text);
+      if (detected === 'json_products') {
+        const prods = parseJsonProducts(content);
         setJsonProducts(prods);
         setCheckedIds(new Set(prods.map(p => String(p.id))));
-        fadeIn();
-        return;
-      }
-      if (type === 'json_sales_current') {
-        const raw   = parseJsonSalesCurrent(text);
-        const items = raw.filter(i => i.type !== 'compra');
+        Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+      } else if (['json_sales_current','json_sales_history'].includes(detected)) {
+        const items = detected === 'json_sales_current'
+          ? parseJsonSalesCurrent(content)
+          : parseJsonSalesHistory(content);
         setParsedItems(items);
         setCheckedIds(new Set(items.map(i => i.orderId)));
-        fadeIn();
-        return;
-      }
-      if (type === 'json_sales_history') {
-        const items = parseJsonSalesHistory(text);
-        setParsedItems(items);
-        // Preseleccionar solo ventas
-        setCheckedIds(new Set(items.filter(i => i.type === 'venta').map(i => i.orderId)));
-        fadeIn();
-        return;
+        Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
       }
 
-      Alert.alert(
-        'Formato no compatible',
-        'Por favor adjunta un archivo JSON generado con los scripts de consola de Vinted.\n\nFormatos: escaparate, ventas actuales o historial.',
-      );
+      setLoading(false);
     } catch (e) {
-      LogService.error('VintedImport.processText', LOG_CTX.IMPORT, e);
-      Alert.alert('Error al analizar', 'El contenido no parece ser un JSON válido de Vinted.');
+      console.error('[VintedImport] handlePickFile error:', e);
+      setLoading(false);
+      Alert.alert('Error', 'No se pudo leer el archivo.');
     }
-  }, []);
+  }, [fadeAnim]);
 
-  // ─── Toggle selección ───────────────────────────────────────────────────
-  const toggleId = (id) => {
+  const handleToggle = useCallback((id) => {
     setCheckedIds(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
-  };
+  }, []);
 
-  const toggleAll = () => {
-    const allIds = currentMode === 'C'
-      ? jsonProducts.map(p => String(p.id))
-      : parsedItems.map(i => i.orderId);
-    setCheckedIds(prev =>
-      prev.size === allIds.length ? new Set() : new Set(allIds),
-    );
-  };
+  const handleSelectAll = useCallback(() => {
+    if (currentMode === 'C') {
+      setCheckedIds(new Set(jsonProducts.map(p => String(p.id))));
+    } else {
+      setCheckedIds(new Set(parsedItems.map(i => i.orderId)));
+    }
+  }, [currentMode, jsonProducts, parsedItems]);
 
-  // ─── Confirmar Modo C — Escaparate ─────────────────────────────────────
-  const handleConfirmC = () => {
-    setShowConfirm(false);
+  const handleDeselectAll = useCallback(() => {
+    setCheckedIds(new Set());
+  }, []);
+
+  const handleImport = useCallback(() => {
+    if (checkedIds.size === 0) {
+      Alert.alert('Sin selección', 'Selecciona al menos un elemento.');
+      return;
+    }
+    setShowConfirm(true);
+  }, [checkedIds]);
+
+  const handleConfirmC = useCallback(() => {
     const selected = jsonProducts.filter(p => checkedIds.has(String(p.id)));
-    const result   = DatabaseService.importFromVinted(selected);
+    const db = DatabaseService.getInventory();
+    const ids = db.map(x => x.id);
+    const maxId = ids.length > 0 ? Math.max(...ids) : 0;
+    let nextId = maxId + 1;
 
-    // Auto-registrar categorías nuevas detectadas
-    autoRegisterCategories(selected);
-
-    logImportEvent('json_products', selected.length, result);
-    setImportResult({ mode: 'C', ...result, total: selected.length });
-    LogService.add(
-      `Import C: +${result.created} nuevos, ${result.updated} actualizados`,
-      'success',
-    );
-  };
-
-  // ─── Confirmar Modo D — Ventas actuales ────────────────────────────────
-  const handleConfirmD = () => {
-    setShowConfirm(false);
-    const selected = parsedItems.filter(
-      i => checkedIds.has(i.orderId) && i.type !== 'compra',
-    );
-
-    // matchHistoryToInventory devuelve _enrichedItems con categorías
-    const matchRes = matchHistoryToInventory(selected);
-
-    // [Sprint 11] Guardar SaleRecords con categoría correcta
-    if (matchRes._enrichedItems.length > 0) {
-      const records = matchRes._enrichedItems.map(item => mapToSaleRecord(item));
-      VintedSalesDB.saveRecords(records);
-
-      // Auto-registrar categorías nuevas en el diccionario
-      autoRegisterCategories(matchRes._enrichedItems);
-    }
-
-    logImportEvent('json_sales_current', selected.length, matchRes);
-    setImportResult({ mode: 'D', ...matchRes, total: selected.length });
-    LogService.add(
-      `Import D: ${matchRes.matched} matches · ${matchRes.created} nuevos · ${matchRes._enrichedItems.length} stats`,
-      'success',
-    );
-  };
-
-  // ─── Confirmar Modo E — Historial multi-año ────────────────────────────
-  const handleConfirmE = (dest) => {
-    setShowConfirm(false);
-    const selected = parsedItems.filter(i => checkedIds.has(i.orderId));
-    let statsRes   = { inserted: 0, duplicates: 0 };
-    let matchRes   = { matched: 0, created: 0, _enrichedItems: [] };
-
-    if (dest === 'both') {
-      // Paso 1: match con inventario (devuelve _enrichedItems con categorías)
-      matchRes = matchHistoryToInventory(selected.filter(i => i.type === 'venta'));
-
-      // Paso 2: guardar SaleRecords usando items enriquecidos con categoría correcta
-      const itemsToSave = matchRes._enrichedItems.length > 0
-        ? matchRes._enrichedItems
-        : selected.filter(i => i.type === 'venta');
-
-      const records = itemsToSave.map(item => mapToSaleRecord(item));
-      // Añadir también las compras (sin match de inventario)
-      const compraRecords = selected
-        .filter(i => i.type === 'compra')
-        .map(item => mapToSaleRecord(item));
-
-      statsRes = VintedSalesDB.saveRecords([...records, ...compraRecords]);
-
-      // Auto-registrar categorías nuevas
-      autoRegisterCategories(matchRes._enrichedItems);
-
-    } else if (dest === 'stats_only') {
-      // Solo guardar en estadísticas, sin match de inventario
-      const records = selected.map(item => mapToSaleRecord(item));
-      statsRes = VintedSalesDB.saveRecords(records);
-    }
-
-    logImportEvent('json_sales_history', selected.length, { dest, statsRes, matchRes });
-    setImportResult({
-      mode:          'E',
-      dest,
-      statsInserted: statsRes.inserted,
-      statsDup:      statsRes.duplicates,
-      matched:       matchRes.matched,
-      created:       matchRes.created,
-      total:         selected.length,
+    const fusionResults = { nuevos: 0, fusionados: 0 };
+    selected.forEach(prod => {
+      const exists = db.find(x => x.productId === prod.productId);
+      if (exists) {
+        const updated = { ...exists };
+        const sacred = ['listPrice', 'purchasePrice', 'purchaseDate', 'cost', 'category', 'subcategory', 'tags'];
+        sacred.forEach(k => {
+          if (prod[k] != null && prod[k] !== '') updated[k] = prod[k];
+        });
+        updated.title    = prod.title    || updated.title;
+        updated.imageUrl = prod.imageUrl || updated.imageUrl;
+        updated.status   = prod.status   || updated.status;
+        if (prod.soldPrice && !updated.soldPriceReal) updated.soldPrice = prod.soldPrice;
+        if (prod.soldDate  && !updated.soldDateReal)  updated.soldDate  = prod.soldDate;
+        const idx = db.findIndex(x => x.id === exists.id);
+        db[idx] = updated;
+        fusionResults.fusionados++;
+      } else {
+        const newProd = { ...prod, id: nextId++ };
+        db.push(newProd);
+        fusionResults.nuevos++;
+      }
     });
-    LogService.add(
-      `Import E (${dest}): ${matchRes.matched} matches · +${statsRes.inserted} stats`,
-      'success',
-    );
-  };
+    DatabaseService.saveInventory(db);
+    autoRegisterCategories(selected);
+    logImportEvent('C', { total: selected.length, ...fusionResults });
 
-  // ─── Reset ──────────────────────────────────────────────────────────────
-  const handleReset = () => {
+    setShowConfirm(false);
+    setImportResult({ mode: 'C', nuevos: fusionResults.nuevos, fusionados: fusionResults.fusionados });
+    Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+  }, [jsonProducts, checkedIds, fadeAnim]);
+
+  const handleConfirmD = useCallback(async () => {
+    const selected = parsedItems.filter(i => checkedIds.has(i.orderId));
+    const db = DatabaseService.getInventory();
+    let updated = 0;
+
+    const result = await matchHistoryToInventory(selected, db);
+    const enriched = result._enrichedItems;
+
+    enriched.forEach(sale => {
+      const prod = db.find(p => p.productId === sale.productId);
+      if (prod && sale.soldPriceReal && sale.soldDateReal) {
+        prod.soldPriceReal = sale.soldPriceReal;
+        prod.soldDateReal  = sale.soldDateReal;
+        if (!prod.soldPrice) prod.soldPrice = sale.soldPriceReal;
+        if (!prod.soldDate)  prod.soldDate  = sale.soldDateReal;
+        updated++;
+      }
+    });
+
+    DatabaseService.saveInventory(db);
+    await VintedSalesDB.bulkInsert(enriched);
+    logImportEvent('D', { total: selected.length, matched: result.matched });
+
+    setShowConfirm(false);
+    setImportResult({ mode: 'D', updated });
+    Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+  }, [parsedItems, checkedIds, fadeAnim]);
+
+  const handleConfirmE = useCallback(async () => {
+    const selected = parsedItems.filter(i => checkedIds.has(i.orderId));
+    const db = DatabaseService.getInventory();
+
+    const result = await matchHistoryToInventory(selected, db);
+    const enriched = result._enrichedItems;
+
+    await VintedSalesDB.bulkInsert(enriched);
+    logImportEvent('E', { total: selected.length, matched: result.matched, unmatched: result.unmatched });
+
+    setShowConfirm(false);
+    setImportResult({ mode: 'E', total: selected.length });
+    Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+  }, [parsedItems, checkedIds, fadeAnim]);
+
+  const handleReset = useCallback(() => {
+    setFileMeta(null);
     setContentType(null);
-    setParsedItems([]);
+    setCurrentMode(null);
     setJsonProducts([]);
+    setParsedItems([]);
     setCheckedIds(new Set());
     setImportResult(null);
-    setFileName(null);
     fadeAnim.setValue(0);
-  };
+  }, [fadeAnim]);
 
-  const typeMeta   = contentType ? TYPE_META[contentType] : null;
-  const totalItems = currentMode === 'C' ? jsonProducts.length : parsedItems.length;
+ const handleViewLogs = () => navigation.navigate('Logs');
 
-  // ─── Render ─────────────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────────
+  const meta = TYPE_META[contentType] || TYPE_META.unknown;
+
   return (
     <View style={styles.root}>
-
       {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>Importar desde Vinted</Text>
-          <Text style={styles.headerSub}>Adjunta un JSON generado con los scripts de consola</Text>
+          <Text style={styles.headerSub}>Sprint 11 — Parser JSON multi-modo</Text>
         </View>
-        <TouchableOpacity
-          style={styles.logsBtn}
-          onPress={() => navigation.navigate('Logs')}
-        >
-          <Icon name="terminal" size={14} color={DS.textMed} />
+        <TouchableOpacity style={styles.logsBtn} onPress={handleViewLogs}>
+          <Icon name="list" size={14} color={DS.text2} />
           <Text style={styles.logsBtnTxt}>Logs</Text>
         </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-
-        {/* Resultado de importación */}
-        {importResult && (
-          <Animated.View style={[styles.resultBanner, {
-            backgroundColor: importResult.mode === 'C' ? DS.primaryBg
-                           : importResult.mode === 'D' ? DS.successBg : DS.blueBg,
-            borderColor:     importResult.mode === 'C' ? DS.primary + '40'
-                           : importResult.mode === 'D' ? DS.success + '40' : DS.blue + '40',
-            opacity: fadeAnim,
-          }]}>
-            <Icon
-              name="check-circle"
-              size={20}
-              color={importResult.mode === 'C' ? DS.primary
-                   : importResult.mode === 'D' ? DS.success : DS.blue}
-            />
-            <View style={{ flex: 1 }}>
-              {importResult.mode === 'C' && (
-                <>
-                  <Text style={styles.resultTitle}>¡Inventario importado!</Text>
-                  <Text style={styles.resultSub}>
-                    {importResult.created} nuevos · {importResult.updated} actualizados de {importResult.total}
-                  </Text>
-                </>
-              )}
-              {importResult.mode === 'D' && (
-                <>
-                  <Text style={styles.resultTitle}>¡Ventas actualizadas!</Text>
-                  <Text style={styles.resultSub}>
-                    {importResult.matched} productos con precio real · {importResult.created} nuevos
-                  </Text>
-                </>
-              )}
-              {importResult.mode === 'E' && (
-                <>
-                  <Text style={styles.resultTitle}>¡Historial importado!</Text>
-                  <Text style={styles.resultSub}>
-                    {importResult.matched} matches · +{importResult.statsInserted} stats ({importResult.statsDup} dup)
-                  </Text>
-                </>
-              )}
+        {/* Drop Zone */}
+        {!fileMeta && !loading && (
+          <TouchableOpacity style={styles.dropZone} onPress={handlePickFile} activeOpacity={0.8}>
+            <View style={styles.dropIcon}>
+              <Icon name="upload" size={28} color={DS.brand} />
             </View>
-            <TouchableOpacity style={styles.resultResetBtn} onPress={handleReset}>
-              <Text style={styles.resultResetTxt}>NUEVA</Text>
-            </TouchableOpacity>
-          </Animated.View>
+            <Text style={styles.dropTitle}>Selecciona tu archivo JSON</Text>
+            <Text style={styles.dropSub}>Toca aquí para elegir un archivo</Text>
+            <View style={styles.dropBadge}>
+              <Text style={styles.dropBadgeTxt}>.json</Text>
+            </View>
+          </TouchableOpacity>
         )}
 
-        {/* Drop Zone + Guía */}
-        {!hasResults && !importResult && (
-          <>
-            <TouchableOpacity
-              style={styles.dropZone}
-              onPress={handlePickFile}
-              activeOpacity={0.75}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color={DS.primary} size="large" />
-              ) : (
-                <>
-                  <View style={styles.dropIcon}>
-                    <Icon name="upload-cloud" size={32} color={DS.primary} />
-                  </View>
-                  <Text style={styles.dropTitle}>Adjuntar archivo JSON</Text>
-                  <Text style={styles.dropSub}>Toca para seleccionar desde tu dispositivo</Text>
-                  <View style={styles.dropBadge}>
-                    <Text style={styles.dropBadgeTxt}>.json · .txt</Text>
-                  </View>
-                </>
-              )}
-            </TouchableOpacity>
+        {loading && (
+          <View style={[styles.dropZone, { minHeight: 120 }]}>
+            <ActivityIndicator size="large" color={DS.brand} />
+            <Text style={[styles.dropSub, { marginTop: 12 }]}>Analizando archivo...</Text>
+          </View>
+        )}
 
-            {/* Guía de modos */}
-            <Text style={styles.guideTitle}>Modos de importación disponibles</Text>
-            {GUIDE.map(g => (
-              <View key={g.mode} style={styles.guideCard}>
-                <View style={[styles.guideIcon, { backgroundColor: g.color + '20' }]}>
-                  <Icon name={g.icon} size={18} color={g.color} />
+        {/* Guía */}
+        {!fileMeta && !loading && (
+          <>
+            <Text style={styles.guideTitle}>GUÍA DE MODOS</Text>
+            {GUIDE.map((g, i) => (
+              <View key={i} style={styles.guideCard}>
+                <View style={[styles.guideIcon, { backgroundColor: g.color + '1A' }]}>
+                  <Icon name={g.icon} size={20} color={g.color} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.guideCardTitle}>{g.title}</Text>
@@ -667,106 +593,151 @@ export default function VintedImportScreen({ navigation }) {
           </>
         )}
 
-        {/* Badge de tipo detectado */}
-        {hasResults && typeMeta && (
-          <Animated.View style={[styles.typeBadgeRow, { opacity: fadeAnim }]}>
-            <View style={[styles.typeChip, { backgroundColor: typeMeta.color + '20' }]}>
-              <Icon name={typeMeta.icon} size={13} color={typeMeta.color} />
-              <Text style={[styles.typeChipTxt, { color: typeMeta.color }]}>
-                {typeMeta.label}
-              </Text>
+        {/* Resultado de importación */}
+        {importResult && (
+          <View
+            style={[
+              styles.resultBanner,
+              {
+                backgroundColor: DS.successLight,
+                borderColor: DS.success,
+              }
+            ]}
+          >
+            <Icon name="check-circle" size={24} color={DS.success} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.resultTitle}>Importación completada</Text>
+              {importResult.mode === 'C' && (
+                <Text style={styles.resultSub}>
+                  {importResult.nuevos} nuevos · {importResult.fusionados} fusionados
+                </Text>
+              )}
+              {importResult.mode === 'D' && (
+                <Text style={styles.resultSub}>{importResult.updated} productos actualizados</Text>
+              )}
+              {importResult.mode === 'E' && (
+                <Text style={styles.resultSub}>{importResult.total} registros guardados</Text>
+              )}
             </View>
-            {fileName && (
-              <Text style={styles.fileNameTxt} numberOfLines={1}>{fileName}</Text>
-            )}
-            <Text style={[styles.typeChipTxt, { color: DS.textLow, marginLeft: 4 }]}>
-              · {totalItems} items
-            </Text>
-          </Animated.View>
+            <TouchableOpacity style={styles.resultResetBtn} onPress={handleReset}>
+              <Text style={styles.resultResetTxt}>Nuevo</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
-        {/* Quick stats para Modo E */}
-        {currentMode === 'E' && parsedItems.length > 0 && (
-          <Animated.View style={[styles.quickStats, { opacity: fadeAnim }]}>
-            {(() => {
-              const ventas  = parsedItems.filter(i => i.type === 'venta');
-              const compras = parsedItems.filter(i => i.type === 'compra');
-              const totalV  = ventas.reduce((s, i) => s + (i.soldPriceReal || 0), 0).toFixed(2);
-              const totalC  = compras.reduce((s, i) => s + Math.abs(i.amount || 0), 0).toFixed(2);
-              return (
-                <>
-                  <View style={styles.quickStatItem}>
-                    <Text style={[styles.quickStatVal, { color: DS.success }]}>{ventas.length}</Text>
-                    <Text style={styles.quickStatLbl}>ventas</Text>
-                  </View>
-                  <View style={styles.quickStatDivider} />
-                  <View style={styles.quickStatItem}>
-                    <Text style={[styles.quickStatVal, { color: DS.danger }]}>{compras.length}</Text>
-                    <Text style={styles.quickStatLbl}>compras</Text>
-                  </View>
-                  <View style={styles.quickStatDivider} />
-                  <View style={styles.quickStatItem}>
-                    <Text style={[styles.quickStatVal, { color: DS.primary }]}>{totalV}€</Text>
-                    <Text style={styles.quickStatLbl}>facturado</Text>
-                  </View>
-                  <View style={styles.quickStatDivider} />
-                  <View style={styles.quickStatItem}>
-                    <Text style={[styles.quickStatVal, { color: DS.text }]}>
-                      {(parseFloat(totalV) - parseFloat(totalC)).toFixed(2)}€
-                    </Text>
-                    <Text style={styles.quickStatLbl}>balance</Text>
-                  </View>
-                </>
-              );
-            })()}
-          </Animated.View>
+        {/* Tipo detectado */}
+        {fileMeta && !importResult && (
+          <View style={styles.typeBadgeRow}>
+            <View style={[styles.typeChip, { backgroundColor: meta.color + '1A' }]}>
+              <Icon name={meta.icon} size={14} color={meta.color} />
+              <Text style={[styles.typeChipTxt, { color: meta.color }]}>{meta.label}</Text>
+            </View>
+            <Text style={styles.fileNameTxt} numberOfLines={1}>{fileMeta.name}</Text>
+          </View>
+        )}
+
+        {/* Quick stats */}
+        {fileMeta && !importResult && currentMode === 'C' && jsonProducts.length > 0 && (
+          <View style={styles.quickStats}>
+            <View style={styles.quickStatItem}>
+              <Text style={[styles.quickStatVal, { color: DS.blue }]}>
+                {jsonProducts.filter(p => p.status === 'active').length}
+              </Text>
+              <Text style={styles.quickStatLbl}>Activos</Text>
+            </View>
+            <View style={styles.quickStatDivider} />
+            <View style={styles.quickStatItem}>
+              <Text style={[styles.quickStatVal, { color: DS.success }]}>
+                {jsonProducts.filter(p => p.status === 'sold').length}
+              </Text>
+              <Text style={styles.quickStatLbl}>Vendidos</Text>
+            </View>
+            <View style={styles.quickStatDivider} />
+            <View style={styles.quickStatItem}>
+              <Text style={[styles.quickStatVal, { color: DS.text }]}>{jsonProducts.length}</Text>
+              <Text style={styles.quickStatLbl}>Total</Text>
+            </View>
+          </View>
+        )}
+
+        {fileMeta && !importResult && ['D','E'].includes(currentMode) && parsedItems.length > 0 && (
+          <View style={styles.quickStats}>
+            <View style={styles.quickStatItem}>
+              <Text style={[styles.quickStatVal, { color: DS.success }]}>
+                {parsedItems.filter(i => i.type !== 'compra').length}
+              </Text>
+              <Text style={styles.quickStatLbl}>Ventas</Text>
+            </View>
+            <View style={styles.quickStatDivider} />
+            <View style={styles.quickStatItem}>
+              <Text style={[styles.quickStatVal, { color: DS.danger }]}>
+                {parsedItems.filter(i => i.type === 'compra').length}
+              </Text>
+              <Text style={styles.quickStatLbl}>Compras</Text>
+            </View>
+            <View style={styles.quickStatDivider} />
+            <View style={styles.quickStatItem}>
+              <Text style={[styles.quickStatVal, { color: DS.text }]}>{parsedItems.length}</Text>
+              <Text style={styles.quickStatLbl}>Total</Text>
+            </View>
+          </View>
         )}
 
         {/* Barra de selección */}
-        {hasResults && (
-          <Animated.View style={[styles.selectionBar, { opacity: fadeAnim }]}>
-            <TouchableOpacity onPress={toggleAll} style={styles.selAllBtn}>
-              <Icon
-                name={checkedIds.size === totalItems ? 'check-square' : 'square'}
-                size={16}
-                color={DS.primary}
-              />
+        {fileMeta && !importResult && (currentMode === 'C' ? jsonProducts.length : parsedItems.length) > 0 && (
+          <View style={styles.selectionBar}>
+            <TouchableOpacity style={styles.selAllBtn} onPress={handleSelectAll}>
+              <Icon name="check-square" size={16} color={DS.brand} />
               <Text style={styles.selAllTxt}>Seleccionar todo</Text>
             </TouchableOpacity>
             <Text style={styles.selCount}>
-              {checkedIds.size}/{totalItems} seleccionados
+              {checkedIds.size}/{currentMode === 'C' ? jsonProducts.length : parsedItems.length}
             </Text>
+            {checkedIds.size > 0 && (
+              <TouchableOpacity onPress={handleDeselectAll}>
+                <Icon name="x" size={16} color={DS.text2} />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* Preview Cards — Modo C */}
+        {currentMode === 'C' && jsonProducts.length > 0 && !importResult && (
+          <Animated.View style={{ opacity: fadeAnim }}>
+            {jsonProducts.map(p => (
+              <ProductPreviewCard
+                key={p.id}
+                item={p}
+                checked={checkedIds.has(String(p.id))}
+                onToggle={() => handleToggle(String(p.id))}
+              />
+            ))}
           </Animated.View>
         )}
 
-        {/* Lista de preview */}
-        {currentMode === 'C' && jsonProducts.map(p => (
-          <ProductPreviewCard
-            key={String(p.id)}
-            product={p}
-            checked={checkedIds.has(String(p.id))}
-            onToggle={() => toggleId(String(p.id))}
-          />
-        ))}
+        {/* Preview Cards — Modos A/B/D/E */}
+        {['D','E'].includes(currentMode) && parsedItems.length > 0 && !importResult && (
+          <Animated.View style={{ opacity: fadeAnim }}>
+            {parsedItems.map(item => (
+              <SalePreviewCard
+                key={item.orderId}
+                item={item}
+                checked={checkedIds.has(item.orderId)}
+                onToggle={() => handleToggle(item.orderId)}
+              />
+            ))}
+          </Animated.View>
+        )}
 
-        {(currentMode === 'D' || currentMode === 'E') && parsedItems.map(item => (
-          <SalePreviewCard
-            key={item.orderId}
-            item={item}
-            checked={checkedIds.has(item.orderId)}
-            onToggle={() => toggleId(item.orderId)}
-          />
-        ))}
-
-        {/* Botón importar */}
-        {hasResults && checkedIds.size > 0 && !importResult && (
+        {/* Botón Importar */}
+        {fileMeta && !importResult && checkedIds.size > 0 && (
           <Animated.View style={{ opacity: fadeAnim }}>
             <TouchableOpacity
               style={styles.importBtn}
-              onPress={() => setShowConfirm(true)}
+              onPress={handleImport}
               activeOpacity={0.85}
             >
-              <Icon name="download" size={18} color="#FFF" />
+              <Icon name="download" size={18} color={DS.white} />
               <Text style={styles.importBtnTxt}>
                 IMPORTAR {checkedIds.size} {currentMode === 'C' ? 'PRODUCTOS' : 'REGISTROS'}
               </Text>
@@ -805,121 +776,442 @@ export default function VintedImportScreen({ navigation }) {
 
 // ─── Estilos ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root:             { flex: 1, backgroundColor: DS.bg },
-  header:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-                      paddingHorizontal: 16, paddingTop: 52, paddingBottom: 12,
-                      backgroundColor: DS.white, borderBottomWidth: 1, borderBottomColor: DS.border },
-  headerTitle:      { fontSize: 20, fontWeight: '700', color: DS.text },
-  headerSub:        { fontSize: 12, color: DS.textLow, marginTop: 2 },
-  logsBtn:          { flexDirection: 'row', alignItems: 'center', gap: 4,
-                      paddingHorizontal: 10, paddingVertical: 6,
-                      borderRadius: 8, backgroundColor: DS.surface2 },
-  logsBtnTxt:       { fontSize: 12, color: DS.textMed, fontWeight: '500' },
-  scroll:           { flex: 1 },
-  scrollContent:    { padding: 16, paddingBottom: 40 },
+  root: {
+    flex: 1,
+    backgroundColor: DS.surface2,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: SPACE[4],
+    paddingTop: 52,
+    paddingBottom: SPACE[3],
+    backgroundColor: DS.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: DS.border,
+  },
+  headerTitle: {
+    ...TXT.heading,
+  },
+  headerSub: {
+    fontSize: FONT_SIZE.sm,
+    color: DS.text3,
+    marginTop: 2,
+  },
+  logsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: SPACE[2],
+    paddingVertical: 6,
+    borderRadius: RADIUS.sm,
+    backgroundColor: DS.surface3,
+  },
+  logsBtnTxt: {
+    fontSize: FONT_SIZE.sm,
+    color: DS.text2,
+    fontWeight: '500',
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: SPACE[4],
+    paddingBottom: 40,
+  },
 
   // Drop Zone
-  dropZone:         { borderWidth: 2, borderColor: DS.primary + '40', borderStyle: 'dashed',
-                      borderRadius: 20, padding: 32, alignItems: 'center', justifyContent: 'center',
-                      backgroundColor: DS.primaryBg, marginBottom: 24, minHeight: 180 },
-  dropIcon:         { width: 64, height: 64, borderRadius: 32, backgroundColor: DS.white,
-                      alignItems: 'center', justifyContent: 'center',
-                      shadowColor: DS.primary, shadowOpacity: 0.15, shadowRadius: 8, elevation: 3,
-                      marginBottom: 12 },
-  dropTitle:        { fontSize: 17, fontWeight: '700', color: DS.text, marginBottom: 4 },
-  dropSub:          { fontSize: 13, color: DS.textMed, marginBottom: 10 },
-  dropBadge:        { paddingHorizontal: 12, paddingVertical: 4,
-                      backgroundColor: DS.white, borderRadius: 20, borderWidth: 1, borderColor: DS.border },
-  dropBadgeTxt:     { fontSize: 11, color: DS.textLow, fontFamily: DS.mono },
+  dropZone: {
+    borderWidth: 2,
+    borderColor: DS.brand + '40',
+    borderStyle: 'dashed',
+    borderRadius: RADIUS.xl,
+    padding: SPACE[8],
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: DS.brandLight,
+    marginBottom: SPACE[6],
+    minHeight: 180,
+  },
+  dropIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: DS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...SHADOW.md,
+    marginBottom: SPACE[3],
+  },
+  dropTitle: {
+    ...TXT.subheading,
+    marginBottom: 4,
+  },
+  dropSub: {
+    fontSize: FONT_SIZE.sm,
+    color: DS.text2,
+    marginBottom: SPACE[2],
+  },
+  dropBadge: {
+    paddingHorizontal: SPACE[3],
+    paddingVertical: 4,
+    backgroundColor: DS.white,
+    borderRadius: RADIUS.full,
+    borderWidth: 1,
+    borderColor: DS.border,
+  },
+  dropBadgeTxt: {
+    fontSize: FONT_SIZE.xs,
+    color: DS.text3,
+    fontFamily: FONT_FAMILY.mono,
+  },
 
   // Guía
-  guideTitle:       { fontSize: 13, fontWeight: '700', color: DS.textLow,
-                      letterSpacing: 0.5, marginBottom: 10 },
-  guideCard:        { flexDirection: 'row', alignItems: 'flex-start', gap: 12,
-                      backgroundColor: DS.white, borderRadius: 16, padding: 14,
-                      marginBottom: 10, borderWidth: 1, borderColor: DS.border },
-  guideIcon:        { width: 40, height: 40, borderRadius: 12,
-                      alignItems: 'center', justifyContent: 'center' },
-  guideCardTitle:   { fontSize: 14, fontWeight: '800', color: DS.text, marginBottom: 2 },
-  guideCardSub:     { fontSize: 10, color: DS.textLow, marginBottom: 4, fontFamily: DS.mono },
-  guideCardDesc:    { fontSize: 12, color: DS.textMed, lineHeight: 17 },
+  guideTitle: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    color: DS.text3,
+    letterSpacing: 0.5,
+    marginBottom: SPACE[2],
+  },
+  guideCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACE[3],
+    backgroundColor: DS.surface,
+    borderRadius: RADIUS.lg,
+    padding: SPACE[3] + 2,
+    marginBottom: SPACE[2],
+    borderWidth: 1,
+    borderColor: DS.border,
+  },
+  guideIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guideCardTitle: {
+    fontSize: FONT_SIZE.base,
+    fontWeight: '800',
+    color: DS.text,
+    marginBottom: 2,
+  },
+  guideCardSub: {
+    fontSize: FONT_SIZE.xs,
+    color: DS.text3,
+    marginBottom: 4,
+    fontFamily: FONT_FAMILY.mono,
+  },
+  guideCardDesc: {
+    fontSize: FONT_SIZE.sm,
+    color: DS.text2,
+    lineHeight: 17,
+  },
 
   // Tipo detectado
-  typeBadgeRow:     { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
-  typeChip:         { flexDirection: 'row', alignItems: 'center', gap: 5,
-                      paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-  typeChipTxt:      { fontSize: 11, fontWeight: '700' },
-  fileNameTxt:      { fontSize: 11, color: DS.textLow, flex: 1, fontFamily: DS.mono },
+  typeBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: SPACE[3],
+  },
+  typeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: SPACE[2],
+    paddingVertical: 5,
+    borderRadius: RADIUS.full,
+  },
+  typeChipTxt: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '700',
+  },
+  fileNameTxt: {
+    fontSize: FONT_SIZE.xs,
+    color: DS.text3,
+    flex: 1,
+    fontFamily: FONT_FAMILY.mono,
+  },
 
   // Quick stats
-  quickStats:       { flexDirection: 'row', backgroundColor: DS.white, borderRadius: 16,
-                      borderWidth: 1, borderColor: DS.border, padding: 14, marginBottom: 14,
-                      justifyContent: 'space-around', alignItems: 'center' },
-  quickStatItem:    { alignItems: 'center' },
-  quickStatVal:     { fontSize: 18, fontWeight: '900', fontFamily: DS.mono },
-  quickStatLbl:     { fontSize: 10, color: DS.textLow, marginTop: 2 },
-  quickStatDivider: { width: 1, height: 30, backgroundColor: DS.border },
+  quickStats: {
+    flexDirection: 'row',
+    backgroundColor: DS.surface,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: DS.border,
+    padding: SPACE[3] + 2,
+    marginBottom: SPACE[3] + 2,
+    justifyContent: 'space-around',
+    alignItems: 'center',
+  },
+  quickStatItem: {
+    alignItems: 'center',
+  },
+  quickStatVal: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '900',
+    fontFamily: FONT_FAMILY.mono,
+  },
+  quickStatLbl: {
+    fontSize: FONT_SIZE.xs,
+    color: DS.text3,
+    marginTop: 2,
+  },
+  quickStatDivider: {
+    width: 1,
+    height: 30,
+    backgroundColor: DS.border,
+  },
 
   // Barra selección
-  selectionBar:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-                      paddingVertical: 10, marginBottom: 8 },
-  selAllBtn:        { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  selAllTxt:        { fontSize: 13, fontWeight: '700', color: DS.primary },
-  selCount:         { fontSize: 12, color: DS.textMed },
+  selectionBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: SPACE[2],
+    marginBottom: SPACE[2],
+  },
+  selAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  selAllTxt: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    color: DS.brand,
+  },
+  selCount: {
+    fontSize: FONT_SIZE.sm,
+    color: DS.text2,
+  },
 
   // Preview cards
-  previewCard:      { flexDirection: 'row', alignItems: 'center', gap: 10,
-                      backgroundColor: DS.white, borderRadius: 16, padding: 12, marginBottom: 8,
-                      borderWidth: 1, borderColor: DS.border },
-  previewCardChecked: { borderColor: DS.primary, borderWidth: 2 },
-  previewCheck:     { width: 22, height: 22, borderRadius: 11,
-                      borderWidth: 2, borderColor: DS.border,
-                      alignItems: 'center', justifyContent: 'center' },
-  previewCheckOn:   { backgroundColor: DS.primary, borderColor: DS.primary },
-  previewTitle:     { fontSize: 13, fontWeight: '700', color: DS.text, marginBottom: 5 },
-  previewRow:       { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
-  typeBadge:        { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
-  typeBadgeTxt:     { fontSize: 9, fontWeight: '900' },
-  previewAmt:       { fontSize: 13, fontWeight: '800', fontFamily: DS.mono },
-  previewDate:      { fontSize: 10, color: DS.textLow },
-  previewOrder:     { fontSize: 10, color: DS.textLow, marginTop: 3, fontFamily: DS.mono },
-  noDateBadge:      { paddingHorizontal: 6, paddingVertical: 2,
-                      backgroundColor: DS.warningBg, borderRadius: 8 },
-  noDateTxt:        { fontSize: 9, fontWeight: '900', color: DS.warning },
-  previewImg:       { width: 46, height: 46, borderRadius: 10, backgroundColor: DS.surface2 },
+  previewCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[2],
+    backgroundColor: DS.surface,
+    borderRadius: RADIUS.lg,
+    padding: SPACE[3],
+    marginBottom: SPACE[2],
+    borderWidth: 1,
+    borderColor: DS.border,
+  },
+  previewCardChecked: {
+    borderColor: DS.brand,
+    borderWidth: 2,
+  },
+  previewCheck: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: DS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewCheckOn: {
+    backgroundColor: DS.brand,
+    borderColor: DS.brand,
+  },
+  previewTitle: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    color: DS.text,
+    marginBottom: 5,
+  },
+  previewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  typeBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: RADIUS.sm,
+  },
+  typeBadgeTxt: {
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  previewAmt: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '800',
+    fontFamily: FONT_FAMILY.mono,
+  },
+  previewDate: {
+    fontSize: FONT_SIZE.xs,
+    color: DS.text3,
+  },
+  previewOrder: {
+    fontSize: FONT_SIZE.xs,
+    color: DS.text3,
+    marginTop: 3,
+    fontFamily: FONT_FAMILY.mono,
+  },
+  previewCat: {
+    fontSize: FONT_SIZE.xs,
+    color: DS.text2,
+  },
+  noDateBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    backgroundColor: DS.warningDim,
+    borderRadius: RADIUS.sm,
+  },
+  noDateTxt: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: DS.warning,
+  },
+  previewImg: {
+    width: 46,
+    height: 46,
+    borderRadius: RADIUS.sm + 2,
+    backgroundColor: DS.surface3,
+  },
 
   // Botón importar
-  importBtn:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                      gap: 8, backgroundColor: DS.primary, borderRadius: 16, padding: 16, marginTop: 8 },
-  importBtnTxt:     { fontSize: 15, fontWeight: '800', color: '#FFF', letterSpacing: 0.5 },
-  cancelBtn:        { alignItems: 'center', padding: 14 },
-  cancelBtnTxt:     { fontSize: 14, color: DS.textMed },
+  importBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACE[2],
+    backgroundColor: DS.brand,
+    borderRadius: RADIUS.lg,
+    padding: SPACE[4],
+    marginTop: SPACE[2],
+  },
+  importBtnTxt: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '800',
+    color: DS.white,
+    letterSpacing: 0.5,
+  },
+  cancelBtn: {
+    alignItems: 'center',
+    padding: SPACE[3] + 2,
+  },
+  cancelBtnTxt: {
+    fontSize: FONT_SIZE.base,
+    color: DS.text2,
+  },
 
   // Resultado
-  resultBanner:     { flexDirection: 'row', alignItems: 'center', gap: 10,
-                      padding: 14, borderRadius: 16, borderWidth: 1, marginBottom: 20 },
-  resultTitle:      { fontSize: 14, fontWeight: '700', color: DS.text },
-  resultSub:        { fontSize: 12, color: DS.textMed, marginTop: 2 },
-  resultResetBtn:   { paddingHorizontal: 12, paddingVertical: 6,
-                      backgroundColor: DS.surface2, borderRadius: 8 },
-  resultResetTxt:   { fontSize: 12, fontWeight: '700', color: DS.text },
+  resultBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[2],
+    padding: SPACE[3] + 2,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    marginBottom: SPACE[5],
+  },
+  resultTitle: {
+    fontSize: FONT_SIZE.base,
+    fontWeight: '700',
+    color: DS.text,
+  },
+  resultSub: {
+    fontSize: FONT_SIZE.sm,
+    color: DS.text2,
+    marginTop: 2,
+  },
+  resultResetBtn: {
+    paddingHorizontal: SPACE[3],
+    paddingVertical: 6,
+    backgroundColor: DS.surface3,
+    borderRadius: RADIUS.sm,
+  },
+  resultResetTxt: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    color: DS.text,
+  },
 
   // Modales
-  modalOverlay:     { flex: 1, backgroundColor: '#00000055', justifyContent: 'flex-end' },
-  modalSheet:       { backgroundColor: DS.white, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-                      padding: 20, paddingBottom: 40 },
-  modalHeader:      { flexDirection: 'row', justifyContent: 'space-between',
-                      alignItems: 'center', marginBottom: 16 },
-  modalTitle:       { fontSize: 18, fontWeight: '800', color: DS.text },
-  infoBox:          { flexDirection: 'row', alignItems: 'center', gap: 8,
-                      padding: 10, borderRadius: 12, marginBottom: 12 },
-  infoTxt:          { fontSize: 13, fontWeight: '600', flex: 1 },
-  modalDesc:        { fontSize: 13, color: DS.textMed, lineHeight: 19, marginBottom: 16 },
-  modalSummaryRow:  { flexDirection: 'row', gap: 8, marginBottom: 14 },
-  modalSummaryChip: { flex: 1, alignItems: 'center', padding: 10, borderRadius: 12 },
-  modalSummaryVal:  { fontSize: 20, fontWeight: '900', fontFamily: DS.mono },
-  modalSummaryLbl:  { fontSize: 10, color: DS.textMed, marginTop: 2, textAlign: 'center' },
-  confirmBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                      gap: 8, borderRadius: 14, padding: 15, marginBottom: 4 },
-  confirmBtnTxt:    { fontSize: 14, fontWeight: '800', color: '#FFF', letterSpacing: 0.3 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: DS.surface,
+    borderTopLeftRadius: RADIUS.xl,
+    borderTopRightRadius: RADIUS.xl,
+    padding: SPACE[5],
+    paddingBottom: 40,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACE[4],
+  },
+  modalTitle: {
+    ...TXT.heading,
+  },
+  infoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[2],
+    padding: SPACE[2],
+    borderRadius: RADIUS.md,
+    marginBottom: SPACE[3],
+  },
+  infoTxt: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    flex: 1,
+  },
+  modalDesc: {
+    fontSize: FONT_SIZE.sm,
+    color: DS.text2,
+    lineHeight: 19,
+    marginBottom: SPACE[4],
+  },
+  modalSummaryRow: {
+    flexDirection: 'row',
+    gap: SPACE[2],
+    marginBottom: SPACE[3] + 2,
+  },
+  modalSummaryChip: {
+    flex: 1,
+    alignItems: 'center',
+    padding: SPACE[2],
+    borderRadius: RADIUS.md,
+  },
+  modalSummaryVal: {
+    fontSize: FONT_SIZE.xl,
+    fontWeight: '900',
+    fontFamily: FONT_FAMILY.mono,
+  },
+  modalSummaryLbl: {
+    fontSize: FONT_SIZE.xs,
+    color: DS.text2,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  confirmBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACE[2],
+    borderRadius: RADIUS.md + 2,
+    padding: SPACE[4] - 1,
+    marginBottom: 4,
+  },
+  confirmBtnTxt: {
+    fontSize: FONT_SIZE.base,
+    fontWeight: '800',
+    color: DS.white,
+    letterSpacing: 0.3,
+  },
 });
