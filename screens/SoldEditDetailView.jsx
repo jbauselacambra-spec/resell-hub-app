@@ -1,3 +1,12 @@
+/**
+ * SoldEditDetailView.jsx — Edición de Producto Vendido
+ *
+ * REFACTORIZADO para usar theme.js (ResellHub Design System v2)
+ * - Edición inline de precio de venta, fecha de venta, categoría, fecha de subida
+ * - Modal de categoría con subcategorías
+ * - CalPicker para selección de fechas
+ */
+
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   View, Text, ScrollView, Image, StyleSheet, Dimensions,
@@ -7,37 +16,16 @@ import Icon from 'react-native-vector-icons/Feather';
 import { DatabaseService } from '../services/DatabaseService';
 import LogService, { LOG_CTX } from '../services/LogService';
 
+// ── Importar Design System ───────────────────────────────────────────────────
+import {
+  DS, SPACE, RADIUS, SHADOW, TXT, BTN, BTN_TEXT, CARD,
+  LAYOUT, FONT_SIZE, FONT_FAMILY, MONTH_NAMES,
+  ttsColor, ttsEmoji, fmtPrice, fmtDate, fmtDateLong,
+} from '../theme';
+
 const { width } = Dimensions.get('window');
 
-// ─── Design System Light Canónico v4.2 ───────────────────────────────────────
-const DS = {
-  bg:        '#F8F9FA',
-  white:     '#FFFFFF',
-  surface2:  '#F0F2F5',
-  border:    '#EAEDF0',
-  primary:   '#FF6B35',
-  primaryBg: '#FFF2EE',
-  success:   '#00D9A3',
-  successBg: '#E8FBF6',
-  warning:   '#FFB800',
-  warningBg: '#FFF8E0',
-  danger:    '#E63946',
-  dangerBg:  '#FFEBEC',
-  blue:      '#004E89',
-  blueBg:    '#EAF2FB',
-  purple:    '#6C63FF',
-  text:      '#1A1A2E',
-  textMed:   '#5C6070',
-  textLow:   '#A0A5B5',
-  mono:      Platform.OS === 'android' ? 'monospace' : 'Courier New',
-};
-
-const fmt  = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('es-ES', { day:'2-digit', month:'long', year:'numeric' }); } catch { return '—'; } };
-const fmtS = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('es-ES', { day:'2-digit', month:'short', year:'numeric' }); } catch { return '—'; } };
-
 // ─── Helper: cargar diccionario completo con fallbacks ────────────────────────
-// [FIX Sprint 12+] Centralizado e igual que en ProductDetailScreen.
-// Tres niveles de fallback para garantizar que el modal nunca quede vacío.
 function loadDictionaryWithFallbacks() {
   try {
     const full = DatabaseService.getFullDictionary();
@@ -76,14 +64,13 @@ function loadDictionaryWithFallbacks() {
 }
 
 // ─── CalPicker canónico ───────────────────────────────────────────────────────
-function CalPicker({ visible, onClose, value, onChange, accent = DS.primary, label }) {
+function CalPicker({ visible, onClose, value, onChange, accent = DS.brand, label }) {
   const [nav, setNav]           = useState(value ? new Date(value) : new Date());
   const [yearMode, setYearMode] = useState(false);
   useEffect(() => {
     if (visible) { setNav(value ? new Date(value) : new Date()); setYearMode(false); }
   }, [visible]);
   const yr    = nav.getFullYear(), mo = nav.getMonth(), today = new Date();
-  const MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
   const WD     = ['L','M','X','J','V','S','D'];
   const firstWD = (new Date(yr, mo, 1).getDay() + 6) % 7;
   const days    = new Date(yr, mo + 1, 0).getDate();
@@ -100,16 +87,16 @@ function CalPicker({ visible, onClose, value, onChange, accent = DS.primary, lab
           <View style={[cS.hdr, {backgroundColor: accent}]}>
             {label && <Text style={cS.hdrLbl}>{label}</Text>}
             <Text style={cS.hdrY}>{yr}</Text>
-            <Text style={cS.hdrM}>{MONTHS[mo]}</Text>
-            {sel && <Text style={cS.hdrD}>{sel.getDate()} de {MONTHS[sel.getMonth()]} de {sel.getFullYear()}</Text>}
+            <Text style={cS.hdrM}>{MONTH_NAMES[mo]}</Text>
+            {sel && <Text style={cS.hdrD}>{sel.getDate()} de {MONTH_NAMES[sel.getMonth()]} de {sel.getFullYear()}</Text>}
           </View>
           <View style={cS.nav}>
             <TouchableOpacity style={cS.navBtn} onPress={() => setNav(new Date(yr, mo-1, 1))}>
               <Icon name="chevron-left" size={18} color={DS.text}/>
             </TouchableOpacity>
             <TouchableOpacity style={cS.navTitleRow} onPress={() => setYearMode(!yearMode)}>
-              <Text style={cS.navT}>{MONTHS[mo].toUpperCase()} {yr}</Text>
-              <Icon name={yearMode ? 'chevron-up' : 'chevron-down'} size={13} color={DS.textMed}/>
+              <Text style={cS.navT}>{MONTH_NAMES[mo].toUpperCase()} {yr}</Text>
+              <Icon name={yearMode ? 'chevron-up' : 'chevron-down'} size={13} color={DS.text2}/>
             </TouchableOpacity>
             <TouchableOpacity style={cS.navBtn} onPress={() => setNav(new Date(yr, mo+1, 1))}>
               <Icon name="chevron-right" size={18} color={DS.text}/>
@@ -155,382 +142,315 @@ function CalPicker({ visible, onClose, value, onChange, accent = DS.primary, lab
   );
 }
 const cS = StyleSheet.create({
-  overlay:      {flex:1,backgroundColor:'#00000055',justifyContent:'center',alignItems:'center',padding:20},
-  card:         {backgroundColor:DS.white,borderRadius:24,width:'100%',overflow:'hidden',elevation:16},
-  hdr:          {padding:20,paddingBottom:14},
-  hdrLbl:       {fontSize:10,color:'rgba(255,255,255,0.75)',fontWeight:'900',letterSpacing:1.5,textTransform:'uppercase',marginBottom:6},
-  hdrY:         {fontSize:12,color:'rgba(255,255,255,0.75)',fontWeight:'700'},
-  hdrM:         {fontSize:24,color:'#FFF',fontWeight:'900',lineHeight:28},
-  hdrD:         {fontSize:13,color:'rgba(255,255,255,0.9)',marginTop:4,fontWeight:'600'},
-  nav:          {flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:16,paddingVertical:12},
-  navBtn:       {width:34,height:34,borderRadius:17,backgroundColor:DS.bg,justifyContent:'center',alignItems:'center'},
-  navTitleRow:  {flexDirection:'row',alignItems:'center',gap:5},
-  navT:         {fontSize:13,fontWeight:'900',color:DS.text},
-  yearRow:      {flexDirection:'row',flexWrap:'wrap',gap:6,paddingHorizontal:14,paddingBottom:10},
-  yChip:        {paddingHorizontal:12,paddingVertical:6,borderRadius:20,backgroundColor:DS.surface2},
-  yTxt:         {fontSize:12,color:DS.textMed,fontWeight:'700'},
-  wdRow:        {flexDirection:'row',paddingHorizontal:8,marginBottom:4},
-  wdTxt:        {flex:1,textAlign:'center',fontSize:10,fontWeight:'900',color:DS.textLow},
-  grid:         {flexDirection:'row',flexWrap:'wrap',paddingHorizontal:8,paddingBottom:4},
-  cell:         {width:`${100/7}%`,aspectRatio:1,justifyContent:'center',alignItems:'center'},
-  cellS:        {borderRadius:22},
-  cellT:        {borderRadius:22,borderWidth:1.5},
-  dTxt:         {fontSize:14,color:DS.text},
-  dTxtS:        {color:'#FFF',fontWeight:'900'},
-  foot:         {flexDirection:'row',justifyContent:'flex-end',gap:12,padding:14,
-                 borderTopWidth:1,borderTopColor:DS.border,alignItems:'center'},
-  todayBtn:     {flexDirection:'row',alignItems:'center',paddingHorizontal:16,paddingVertical:8,
-                 borderRadius:20,borderWidth:1.5},
-  todayTxt:     {fontSize:11,fontWeight:'900'},
-  cancelBtn:    {paddingHorizontal:14,paddingVertical:8},
-  cancelTxt:    {fontSize:11,fontWeight:'700',color:DS.textMed},
+  overlay:  {flex:1, backgroundColor:'#00000070', justifyContent:'center', alignItems:'center', padding: SPACE[5]},
+  card:     {backgroundColor: DS.white, borderRadius: RADIUS.xl, overflow:'hidden', width:'100%', maxWidth:400, ...SHADOW.lg},
+  hdr:      {padding: SPACE[5], paddingTop: SPACE[6]},
+  hdrLbl:   {...TXT.label, color:'#FFF', marginBottom: SPACE[2]},
+  hdrY:     {fontSize: FONT_SIZE['3xl'], fontWeight:'900', color:'#FFF', opacity:0.85, lineHeight: FONT_SIZE['3xl'] * 1.1},
+  hdrM:     {fontSize: FONT_SIZE.xl, fontWeight:'600', color:'#FFF', marginBottom: SPACE[1]},
+  hdrD:     {fontSize: FONT_SIZE.base, fontWeight:'500', color:'#FFF', opacity:0.9},
+  nav:      {flexDirection:'row', alignItems:'center', paddingHorizontal: SPACE[4], paddingVertical: SPACE[3],
+             backgroundColor: DS.surface2, borderBottomWidth:1, borderBottomColor: DS.border},
+  navBtn:   {padding: SPACE[2]},
+  navTitleRow: {flex:1, flexDirection:'row', alignItems:'center', justifyContent:'center', gap: SPACE[1]},
+  navT:     {...TXT.label, fontSize: FONT_SIZE.sm, color: DS.text},
+  yearRow:  {flexDirection:'row', flexWrap:'wrap', gap: SPACE[2], padding: SPACE[4], backgroundColor: DS.surface2},
+  yChip:    {paddingHorizontal: SPACE[3], paddingVertical: SPACE[2], borderRadius: RADIUS.md, backgroundColor: DS.white,
+             borderWidth:1, borderColor: DS.border},
+  yTxt:     {fontSize: FONT_SIZE.sm, fontWeight:'600', color: DS.text},
+  wdRow:    {flexDirection:'row', paddingHorizontal: SPACE[3], paddingVertical: SPACE[2], backgroundColor: DS.surface3},
+  wdTxt:    {flex:1, textAlign:'center', fontSize: FONT_SIZE.xs, fontWeight:'900', color: DS.text3},
+  grid:     {flexDirection:'row', flexWrap:'wrap', padding: SPACE[3]},
+  cell:     {width:'14.28%', aspectRatio:1, justifyContent:'center', alignItems:'center', borderRadius: RADIUS.sm},
+  cellS:    {borderRadius: RADIUS.sm},
+  cellT:    {borderWidth:2},
+  dTxt:     {fontSize: FONT_SIZE.base, fontWeight:'500', color: DS.text},
+  dTxtS:    {color:'#FFF', fontWeight:'900'},
+  foot:     {flexDirection:'row', gap: SPACE[2], padding: SPACE[4], backgroundColor: DS.surface2},
+  todayBtn: {flex:1, paddingVertical: SPACE[3], borderRadius: RADIUS.md, alignItems:'center',
+             backgroundColor: DS.white, borderWidth:2, flexDirection:'row', justifyContent:'center'},
+  todayTxt: {fontSize: FONT_SIZE.xs, fontWeight:'900', letterSpacing:0.8},
+  cancelBtn:{flex:1, paddingVertical: SPACE[3], borderRadius: RADIUS.md, alignItems:'center', backgroundColor: DS.surface3},
+  cancelTxt:{fontSize: FONT_SIZE.xs, fontWeight:'700', color: DS.text2},
 });
 
-// ─── Modal Categoría con subcategorías ───────────────────────────────────────
-// [FIX Sprint 12+] Misma lógica robusta que CatModal en ProductDetailScreen.
-// Inicializa con el diccionario ya cargado, recarga en useEffect al abrir.
-function CategoryModal({ visible, onClose, onSelect, currentCat, currentSub }) {
-  // [FIX] Inicializar con dict ya cargado — no esperar al useEffect
-  const [dict, setDict]     = useState(() => loadDictionaryWithFallbacks());
-  const [selCat, setSelCat] = useState(currentCat || null);
-  const [step, setStep]     = useState('cat');
+// ─── Modal de Categoría ───────────────────────────────────────────────────────
+function CategoryModal({ visible, onClose, dict, currentCat, currentSub, onSelect }) {
+  const [selCat, setSelCat] = useState(currentCat || '');
+  const [selSub, setSelSub] = useState(currentSub || null);
 
   useEffect(() => {
-  if (!visible) return;
- 
-  const full = DatabaseService.getFullDictionary();
- 
-  if (full && Object.keys(full).length > 0) {
-    setDict(full);
-  } else {
-    const leg = DatabaseService.getDictionary();
-    const b = {};
-    Object.keys(leg || {}).forEach(k => {
-      const val = leg[k];
-      b[k] = Array.isArray(val)
-        ? { tags: val, subcategories: {} }
-        : { tags: val?.tags || [], subcategories: val?.subcategories || {} };
-    });
-    setDict(Object.keys(b).length > 0 ? b : {});
-  }
- 
-  setSelCat(currentCat || null);
-  setStep('cat');
-}, [visible, currentCat]);
+    if (visible) { setSelCat(currentCat || ''); setSelSub(currentSub || null); }
+  }, [visible, currentCat, currentSub]);
 
-  const cats    = Object.keys(dict);
-  const hasSubs = (cat) => Object.keys(dict[cat]?.subcategories || {}).length > 0;
-  const subs    = selCat ? Object.keys(dict[selCat]?.subcategories || {}) : [];
+  const cats = Object.keys(dict);
+  const subs = selCat && dict[selCat]?.subcategories
+    ? Object.keys(dict[selCat].subcategories)
+    : [];
 
-  const handleCatSelect = (cat) => {
-    if (hasSubs(cat)) {
-      setSelCat(cat);
-      setStep('sub');
-    } else {
-      onSelect(cat, null);
-      onClose();
-    }
+  const handleConfirm = () => {
+    onSelect(selCat, selSub);
+    onClose();
   };
-
-  const listData = step === 'cat' ? cats : ['__none__', ...subs];
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={mS.overlay} activeOpacity={1} onPress={onClose}>
+      <View style={mS.overlay}>
+        <TouchableOpacity style={{flex:1}} onPress={onClose}/>
         <View style={mS.sheet}>
           <View style={mS.handle}/>
-
-          {/* Cabecera */}
-          <View style={mS.header}>
-            {step === 'sub' && (
-              <TouchableOpacity onPress={() => setStep('cat')} style={mS.backBtn}>
-                <Icon name="arrow-left" size={16} color={DS.text}/>
-              </TouchableOpacity>
-            )}
-            <View style={{flex:1}}>
-              <Text style={mS.title}>
-                {step === 'cat' ? 'Categoría' : `${selCat}`}
+          <View style={mS.hdr}>
+            <View>
+              <Text style={mS.hdrTitle}>Seleccionar categoría</Text>
+              <Text style={mS.hdrSub}>
+                {selCat ? (selSub ? `${selCat} › ${selSub}` : selCat) : 'Elige una categoría'}
               </Text>
-              {step === 'sub' && (
-                <Text style={mS.subtitle}>Selecciona una subcategoría</Text>
-              )}
             </View>
-            <TouchableOpacity onPress={onClose} style={mS.closeBtn}>
-              <Icon name="x" size={16} color={DS.textMed}/>
+            <TouchableOpacity style={mS.closeBtn} onPress={onClose}>
+              <Icon name="x" size={18} color={DS.text2}/>
             </TouchableOpacity>
           </View>
 
-          {/* Selección actual */}
-          {(currentCat || currentSub) && (
-            <View style={mS.currentRow}>
-              <Icon name="check-circle" size={12} color={DS.success}/>
-              <Text style={mS.currentTxt}>
-                Actual: {currentCat}{currentSub ? ` › ${currentSub}` : ''}
-              </Text>
-            </View>
-          )}
+          <ScrollView style={mS.body} showsVerticalScrollIndicator={false}>
+            <Text style={mS.sectionLbl}>CATEGORÍA PRINCIPAL</Text>
+            {cats.map(cat => (
+              <TouchableOpacity
+                key={cat}
+                style={[mS.catRow, selCat === cat && {backgroundColor: DS.brandLight, borderColor: DS.brand}]}
+                onPress={() => { setSelCat(cat); setSelSub(null); }}
+              >
+                <Icon name="tag" size={18} color={selCat === cat ? DS.brand : DS.text2}/>
+                <Text style={[mS.catTxt, selCat === cat && {color: DS.brand, fontWeight:'700'}]}>{cat}</Text>
+                {selCat === cat && <Icon name="check" size={16} color={DS.brand} style={{marginLeft:'auto'}}/>}
+              </TouchableOpacity>
+            ))}
 
-          {/* Estado vacío */}
-          {cats.length === 0 && step === 'cat' && (
-            <View style={mS.emptyBox}>
-              <Icon name="tag" size={32} color={DS.textLow}/>
-              <Text style={mS.emptyTitle}>Sin categorías configuradas</Text>
-              <Text style={mS.emptySub}>
-                Ve a Ajustes → Categorías para añadir tus categorías y subcategorías.
-              </Text>
-            </View>
-          )}
-
-          <FlatList
-            data={listData}
-            keyExtractor={item => item}
-            style={{flexGrow:0, maxHeight: cats.length === 0 ? 0 : 420}}
-            renderItem={({item}) => {
-              const isNone    = item === '__none__';
-              const label     = isNone ? 'Sin subcategoría' : item;
-              const subCount  = step === 'cat' ? Object.keys(dict[item]?.subcategories || {}).length : 0;
-              const hasSubsNow= step === 'cat' && subCount > 0;
-              const isCurrent = step === 'cat'
-                ? item === currentCat
-                : (!isNone && item === currentSub) || (isNone && !currentSub);
-              const previewTags = step === 'cat' ? (dict[item]?.tags || []).slice(0, 4) : [];
-
-              return (
+            {subs.length > 0 && (
+              <>
+                <Text style={[mS.sectionLbl, {marginTop: SPACE[5]}]}>SUBCATEGORÍA</Text>
                 <TouchableOpacity
-                  style={[mS.item, isCurrent && mS.itemActive]}
-                  onPress={() => step === 'cat' ? handleCatSelect(item) : (onSelect(selCat, isNone ? null : item), onClose())}
-                  activeOpacity={0.7}
+                  style={[mS.subRow, !selSub && selCat && {backgroundColor: DS.blueLight, borderColor: DS.blue}]}
+                  onPress={() => setSelSub(null)}
                 >
-                  <View style={{flex:1}}>
-                    <View style={{flexDirection:'row', alignItems:'center', gap:6}}>
-                      {isNone && <Icon name="minus-circle" size={13} color={DS.textLow}/>}
-                      <Text style={[mS.itemTxt, isCurrent && {color:DS.blue, fontWeight:'800'}]}>
-                        {label}
-                      </Text>
-                    </View>
-                    {previewTags.length > 0 && (
-                      <Text style={mS.itemSub} numberOfLines={1}>
-                        {previewTags.join(' · ')}
-                      </Text>
-                    )}
-                    {hasSubsNow && (
-                      <Text style={[mS.itemSub, {color: DS.blue}]}>
-                        {subCount} subcategor{subCount === 1 ? 'ía' : 'ías'} disponibles
-                      </Text>
-                    )}
-                  </View>
-                  {isCurrent && <Icon name="check" size={15} color={DS.blue}/>}
-                  {!isCurrent && hasSubsNow && <Icon name="chevron-right" size={15} color={DS.textLow}/>}
+                  <Text style={[mS.subTxt, !selSub && selCat && {color: DS.blue, fontWeight:'700'}]}>
+                    Sin subcategoría
+                  </Text>
                 </TouchableOpacity>
-              );
-            }}
-          />
+                {subs.map(sub => (
+                  <TouchableOpacity
+                    key={sub}
+                    style={[mS.subRow, selSub === sub && {backgroundColor: DS.blueLight, borderColor: DS.blue}]}
+                    onPress={() => setSelSub(sub)}
+                  >
+                    <Text style={[mS.subTxt, selSub === sub && {color: DS.blue, fontWeight:'700'}]}>{sub}</Text>
+                    {selSub === sub && <Icon name="check" size={14} color={DS.blue} style={{marginLeft:'auto'}}/>}
+                  </TouchableOpacity>
+                ))}
+              </>
+            )}
+          </ScrollView>
+
+          <View style={mS.actions}>
+            <TouchableOpacity style={[BTN.secondary, {flex:1}]} onPress={onClose}>
+              <Text style={BTN_TEXT.secondary}>Cancelar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[BTN.primary, {flex:2}]} onPress={handleConfirm}>
+              <Icon name="check" size={16} color="#FFF"/>
+              <Text style={BTN_TEXT.primary}>Confirmar</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </TouchableOpacity>
+      </View>
     </Modal>
   );
 }
-
 const mS = StyleSheet.create({
-  overlay:    {flex:1,backgroundColor:'#00000060',justifyContent:'flex-end'},
-  sheet:      {backgroundColor:DS.white,borderTopLeftRadius:28,borderTopRightRadius:28,
-               paddingHorizontal:20,paddingTop:12,paddingBottom:34,maxHeight:'80%'},
-  handle:     {width:40,height:4,backgroundColor:DS.border,borderRadius:2,alignSelf:'center',marginBottom:14},
-  header:     {flexDirection:'row',alignItems:'center',gap:10,marginBottom:8},
-  backBtn:    {width:34,height:34,borderRadius:17,backgroundColor:DS.bg,justifyContent:'center',alignItems:'center'},
-  closeBtn:   {width:30,height:30,borderRadius:15,backgroundColor:DS.bg,justifyContent:'center',alignItems:'center'},
-  title:      {fontSize:18,fontWeight:'900',color:DS.text},
-  subtitle:   {fontSize:11,color:DS.textMed,marginTop:2},
-  currentRow: {flexDirection:'row',alignItems:'center',gap:6,backgroundColor:DS.successBg,
-               borderRadius:10,padding:8,marginBottom:10},
-  currentTxt: {fontSize:11,fontWeight:'700',color:DS.success},
-  item:       {flexDirection:'row',alignItems:'center',paddingVertical:13,
-               borderBottomWidth:1,borderBottomColor:DS.bg,gap:10},
-  itemActive: {backgroundColor:DS.blueBg,paddingHorizontal:10,marginHorizontal:-10,borderRadius:10},
-  itemTxt:    {fontSize:15,color:DS.text,fontWeight:'600'},
-  itemSub:    {fontSize:10,color:DS.textMed,marginTop:3},
-  emptyBox:   {alignItems:'center',padding:24,gap:10},
-  emptyTitle: {fontSize:15,fontWeight:'800',color:DS.textMed,textAlign:'center'},
-  emptySub:   {fontSize:12,color:DS.textLow,textAlign:'center',lineHeight:18},
+  overlay: {flex:1, backgroundColor:'#00000060', justifyContent:'flex-end'},
+  sheet:   {backgroundColor: DS.white, borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl,
+            maxHeight:'85%', paddingBottom: SPACE[8]},
+  handle:  {width:40, height:4, backgroundColor: DS.border, borderRadius: RADIUS.sm, alignSelf:'center', marginTop: SPACE[3]},
+  hdr:     {flexDirection:'row', alignItems:'center', justifyContent:'space-between', padding: SPACE[5],
+            borderBottomWidth:1, borderBottomColor: DS.border},
+  hdrTitle:{...TXT.heading},
+  hdrSub:  {...TXT.caption, marginTop: SPACE[1]},
+  closeBtn:{width:36, height:36, borderRadius: RADIUS.md, backgroundColor: DS.surface3,
+            justifyContent:'center', alignItems:'center'},
+  body:    {paddingHorizontal: SPACE[5], maxHeight:400},
+  sectionLbl: {...TXT.label, marginTop: SPACE[4], marginBottom: SPACE[2]},
+  catRow:  {flexDirection:'row', alignItems:'center', gap: SPACE[3], backgroundColor: DS.white,
+            borderRadius: RADIUS.md, padding: SPACE[3] + 2, borderWidth:1, borderColor: DS.border, marginBottom: SPACE[2]},
+  catTxt:  {...TXT.body, fontWeight:'600'},
+  subRow:  {flexDirection:'row', alignItems:'center', backgroundColor: DS.surface3,
+            borderRadius: RADIUS.sm, padding: SPACE[2] + 2, borderWidth:1, borderColor: DS.border, marginBottom: SPACE[1] + 2},
+  subTxt:  {...TXT.caption, fontWeight:'600'},
+  actions: {flexDirection:'row', gap: SPACE[2] + 2, padding: SPACE[5], paddingTop: SPACE[4],
+            borderTopWidth:1, borderTopColor: DS.border},
 });
 
-// ─── Pantalla principal ───────────────────────────────────────────────────────
+// ─── PANTALLA PRINCIPAL ───────────────────────────────────────────────────────
 export default function SoldEditDetailView({ route, navigation }) {
-  const { product: initialProduct } = route.params;
-
-  const _cfg          = DatabaseService.getConfig();
-  const ttsLightning  = parseInt(_cfg?.ttsLightning || 7);
-  const ttsAnchor     = parseInt(_cfg?.ttsAnchor    || 30);
+  const { product } = route.params;
 
   const [editForm, setEditForm] = useState({
-    ...initialProduct,
-    soldPriceReal:   initialProduct.soldPriceReal ?? initialProduct.soldPrice ?? (initialProduct.price || 0),
-    soldDateReal:    initialProduct.soldDateReal  || initialProduct.soldDate  || initialProduct.soldAt || new Date().toISOString(),
-    isBundle:        initialProduct.isBundle      || false,
-    category:        initialProduct.category      || 'Otros',
-    subcategory:     initialProduct.subcategory   || null,
-    firstUploadDate: initialProduct.firstUploadDate || initialProduct.createdAt || new Date().toISOString(),
+    soldPriceReal:   product.soldPriceReal || product.soldPrice || product.price || '',
+    soldDateReal:    product.soldDateReal  || product.soldDate  || product.soldAt || new Date().toISOString(),
+    category:        product.category || '',
+    subcategory:     product.subcategory || null,
+    firstUploadDate: product.firstUploadDate || product.createdAt || new Date().toISOString(),
   });
 
-  const [showCalSold,    setShowCalSold]    = useState(false);
-  const [showCalUpload,  setShowCalUpload]  = useState(false);
-  const [showCatModal,   setShowCatModal]   = useState(false);
+  const [showCalSold,   setShowCalSold]   = useState(false);
+  const [showCalUpload, setShowCalUpload] = useState(false);
+  const [showCatModal,  setShowCatModal]  = useState(false);
 
-  // Tags de categoría (combina cat + subcat)
-  const categoryTags = useMemo(() => {
-    const full    = DatabaseService.getFullDictionary() || {};
-    const catData = full[editForm.category];
-    if (!catData) return [];
-    const subTags = editForm.subcategory ? (catData.subcategories?.[editForm.subcategory]?.tags || []) : [];
-    return [...new Set([...(catData.tags || []), ...subTags])].slice(0, 12);
-  }, [editForm.category, editForm.subcategory]);
+  const dict = useMemo(() => loadDictionaryWithFallbacks(), []);
 
   // TTS calculado
   const tts = useMemo(() => {
-    if (!editForm.firstUploadDate || !editForm.soldDateReal) return null;
-    return Math.max(1, Math.round(
-      (new Date(editForm.soldDateReal) - new Date(editForm.firstUploadDate)) / 86_400_000
-    ));
+    const s = editForm.firstUploadDate;
+    const e = editForm.soldDateReal;
+    if (!s || !e) return null;
+    const diff = Math.round((new Date(e) - new Date(s)) / 86_400_000);
+    return Math.max(1, diff);
   }, [editForm.firstUploadDate, editForm.soldDateReal]);
 
-  // Diferencia de precio
-  const priceDiff = useMemo(() => {
-    const sold   = Number(editForm.soldPriceReal) || 0;
-    const listed = Number(editForm.price)         || 0;
-    return (sold - listed).toFixed(2);
-  }, [editForm.soldPriceReal, editForm.price]);
+  const config = DatabaseService.getConfig();
+  const ttsLightning = parseInt(config?.ttsLightning || 7);
+  const ttsAnchor    = parseInt(config?.ttsAnchor    || 30);
+  const ttsCol = tts && tts > 0
+    ? (tts <= ttsLightning ? DS.success : tts <= ttsAnchor ? DS.warning : DS.danger)
+    : DS.text3;
+  const ttsLbl = tts && tts > 0
+    ? (tts <= ttsLightning ? '⚡' : tts <= ttsAnchor ? '🟡' : '⚓')
+    : '';
+
+  // Tags de la categoría + subcategoría
+  const categoryTags = useMemo(() => {
+    const cat = editForm.category;
+    const sub = editForm.subcategory;
+    if (!cat || !dict[cat]) return [];
+    const catData = dict[cat];
+    let tags = catData.tags || [];
+    if (sub && catData.subcategories?.[sub]?.tags) {
+      tags = [...tags, ...catData.subcategories[sub].tags];
+    }
+    return tags;
+  }, [editForm.category, editForm.subcategory, dict]);
+
+  const handleCategorySelect = (cat, sub) => {
+    setEditForm(prev => ({ ...prev, category: cat, subcategory: sub }));
+  };
 
   const handleSave = () => {
-    const span = LogService.span(`Guardar vendido ${editForm.id}`, LOG_CTX.UI);
-    if (!editForm.soldDateReal) { Alert.alert('Campo requerido', 'Indica la fecha real de venta.'); return; }
-    const ok = DatabaseService.updateProduct({
-      ...editForm,
-      soldPriceReal:   Number(editForm.soldPriceReal),
-      price:           Number(editForm.price),
-      isBundle:        Boolean(editForm.isBundle),
-      firstUploadDate: editForm.firstUploadDate || initialProduct.createdAt || new Date().toISOString(),
-    });
-    if (ok) {
-      span.end({ soldPriceReal: editForm.soldPriceReal, category: editForm.category });
-      LogService.success(`Venta guardada: "${editForm.title}" — ${editForm.soldPriceReal}€`, LOG_CTX.UI, {id: editForm.id});
-      navigation.goBack();
-    } else {
-      span.fail(new Error('updateProduct false'));
-      Alert.alert('Error', 'No se pudo guardar en la base de datos.');
+    const sp = parseFloat(editForm.soldPriceReal);
+    if (!sp || sp <= 0) {
+      Alert.alert('Precio inválido', 'Introduce un precio de venta válido.');
+      return;
+    }
+    try {
+      DatabaseService.updateProduct(product.id, {
+        soldPriceReal:   sp,
+        soldDateReal:    editForm.soldDateReal,
+        category:        editForm.category,
+        subcategory:     editForm.subcategory,
+        firstUploadDate: editForm.firstUploadDate,
+      });
+      LogService.add(`💾 Venta editada: ${product.title}`, 'success');
+      Alert.alert('✅ Guardado', 'Datos de venta actualizados correctamente.', [
+        { text: 'OK', onPress: () => navigation.goBack() },
+      ]);
+    } catch (e) {
+      LogService.error('SoldEditDetailView.handleSave', LOG_CTX.UI, e);
+      Alert.alert('Error', 'No se pudo guardar la edición.');
     }
   };
 
-  const ttsColor = tts === null ? DS.textMed
-    : tts <= ttsLightning ? DS.success
-    : tts <= ttsAnchor    ? DS.warning
-    : DS.danger;
-  const ttsEmoji = tts === null ? '' : tts <= ttsLightning ? '⚡' : tts <= ttsAnchor ? '🟡' : '⚓';
-
   return (
     <View style={styles.container}>
-      {/* Modales */}
-      <CategoryModal
-        visible={showCatModal} onClose={() => setShowCatModal(false)}
-        currentCat={editForm.category} currentSub={editForm.subcategory}
-        onSelect={(cat, sub) => setEditForm(f => ({...f, category: cat, subcategory: sub}))}
-      />
-      <CalPicker
-        visible={showCalSold} onClose={() => setShowCalSold(false)}
-        value={editForm.soldDateReal} accent={DS.success} label="FECHA REAL DE VENTA"
-        onChange={iso => setEditForm(f => ({...f, soldDateReal: iso}))}
-      />
-      <CalPicker
-        visible={showCalUpload} onClose={() => setShowCalUpload(false)}
-        value={editForm.firstUploadDate} accent={DS.primary} label="FECHA DE SUBIDA ORIGINAL"
-        onChange={iso => setEditForm(f => ({...f, firstUploadDate: iso}))}
-      />
-
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Hero */}
+        {/* HERO */}
         <View style={styles.hero}>
-          {editForm.images?.[0]
-            ? <Image source={{uri: editForm.images[0]}} style={styles.heroImg} resizeMode="cover"/>
-            : <View style={[styles.heroImg, styles.heroPlaceholder]}>
-                <Icon name="image" size={52} color={DS.textLow}/>
-              </View>
-          }
+          {product.images?.[0] ? (
+            <Image source={{uri: product.images[0]}} style={styles.heroImg} resizeMode="cover"/>
+          ) : (
+            <View style={[styles.heroImg, styles.heroPlaceholder]}>
+              <Icon name="image" size={48} color={DS.border}/>
+            </View>
+          )}
           <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
             <Icon name="arrow-left" size={20} color={DS.text}/>
           </TouchableOpacity>
           <View style={styles.soldBadge}>
-            <Icon name="check-circle" size={13} color="#FFF"/>
+            <Icon name="check-circle" size={14} color="#FFF"/>
             <Text style={styles.soldBadgeTxt}>VENDIDO</Text>
           </View>
         </View>
 
-        {/* Contenido */}
+        {/* CONTENT CARD */}
         <View style={styles.contentCard}>
-
-          {/* Identidad del producto */}
           <View style={styles.topRow}>
-            <Text style={styles.brandTxt}>{editForm.brand || 'Sin marca'}</Text>
-            {(editForm.category || editForm.subcategory) && (
+            <Text style={styles.brandTxt}>VINTED</Text>
+            {product.category && (
               <View style={styles.catPill}>
-                <Icon name="tag" size={9} color={DS.blue}/>
-                <Text style={styles.catPillTxt}>{editForm.category || ''}</Text>
-                {editForm.subcategory && (
-                  <>
-                    <Text style={styles.catSep}>›</Text>
-                    <Text style={[styles.catPillTxt, {color: DS.textMed}]}>{editForm.subcategory}</Text>
-                  </>
-                )}
+                <Icon name="tag" size={10} color={DS.blue}/>
+                <Text style={styles.catPillTxt}>
+                  {product.category}
+                  {product.subcategory && <Text style={styles.catSep}> › {product.subcategory}</Text>}
+                </Text>
               </View>
             )}
           </View>
-          <Text style={styles.titleTxt} numberOfLines={2}>{editForm.title}</Text>
 
-          {/* Panel TTS informativo */}
-          {tts !== null && (
-            <View style={styles.ttsPanel}>
-              <View style={styles.ttsStat}>
-                <Icon name="tag" size={14} color={DS.textLow}/>
-                <Text style={styles.ttsLbl}>PRECIO SUBIDO</Text>
-                <Text style={[styles.ttsVal, {fontFamily: DS.mono}]}>{editForm.price}€</Text>
-              </View>
-              <View style={styles.ttsDivider}/>
-              <View style={styles.ttsStat}>
-                <Icon name="clock" size={14} color={ttsColor}/>
-                <Text style={styles.ttsLbl}>DÍAS HASTA VENTA</Text>
-                <Text style={[styles.ttsVal, {color: ttsColor, fontFamily: DS.mono}]}>
-                  {ttsEmoji} {tts}d
-                </Text>
-              </View>
-              <View style={styles.ttsDivider}/>
-              <View style={styles.ttsStat}>
-                <Icon name="trending-up" size={14} color={Number(priceDiff) >= 0 ? DS.success : DS.danger}/>
-                <Text style={styles.ttsLbl}>DIFERENCIA</Text>
-                <Text style={[styles.ttsVal, {color: Number(priceDiff) >= 0 ? DS.success : DS.danger, fontFamily: DS.mono}]}>
-                  {Number(priceDiff) >= 0 ? '+' : ''}{priceDiff}€
-                </Text>
-              </View>
+          <Text style={styles.titleTxt}>{product.title}</Text>
+
+          {/* TTS Panel */}
+          <View style={styles.ttsPanel}>
+            <View style={styles.ttsStat}>
+              <Text style={styles.ttsLbl}>PRECIO VENTA</Text>
+              <Text style={[styles.ttsVal, {color: DS.success, fontFamily: FONT_FAMILY.mono}]}>
+                {editForm.soldPriceReal}€
+              </Text>
             </View>
-          )}
+            <View style={styles.ttsDivider}/>
+            <View style={styles.ttsStat}>
+              <Text style={styles.ttsLbl}>TTS</Text>
+              <Text style={[styles.ttsVal, {color: ttsCol, fontFamily: FONT_FAMILY.mono}]}>
+                {tts !== null ? `${ttsLbl} ${tts}d` : '—'}
+              </Text>
+            </View>
+            <View style={styles.ttsDivider}/>
+            <View style={styles.ttsStat}>
+              <Text style={styles.ttsLbl}>FECHA VENTA</Text>
+              <Text style={[styles.ttsVal, {fontSize: 13}]}>
+                {editForm.soldDateReal
+                  ? new Date(editForm.soldDateReal).toLocaleDateString('es-ES', {day:'2-digit', month:'short'})
+                  : '—'}
+              </Text>
+            </View>
+          </View>
 
-          {/* Formulario de datos permanentes */}
+          {/* FORMULARIO */}
           <View style={styles.formCard}>
             <View style={styles.formBanner}>
-              <Icon name="shield" size={14} color={DS.success}/>
+              <Icon name="edit-3" size={18} color={DS.success}/>
               <View style={{flex:1}}>
-                <Text style={styles.formBannerTitle}>DATOS PERMANENTES</Text>
-                <Text style={styles.formBannerSub}>Se conservan al importar JSON de Vinted</Text>
+                <Text style={styles.formBannerTitle}>Editar datos de venta</Text>
+                <Text style={styles.formBannerSub}>
+                  Actualiza el precio, fecha, categoría y fecha de subida original
+                </Text>
               </View>
             </View>
 
-            {/* Precio real de venta */}
-            <Text style={styles.fieldLbl}>PRECIO FINAL DE VENTA (€) *</Text>
-            <View style={[styles.priceInputRow, editForm.soldPriceReal && {borderColor: DS.success}]}>
+            {/* Precio de venta */}
+            <Text style={styles.fieldLbl}>PRECIO DE VENTA *</Text>
+            <View style={styles.priceInputRow}>
               <TextInput
-                style={[styles.priceInput, {fontFamily: DS.mono}]}
-                keyboardType="decimal-pad"
+                style={styles.priceInput}
+                keyboardType="numeric"
+                placeholder="0"
+                placeholderTextColor={DS.text3}
                 value={String(editForm.soldPriceReal)}
-                onChangeText={v => setEditForm(f => ({...f, soldPriceReal: v}))}
-                placeholderTextColor={DS.textLow}
-                placeholder={String(editForm.price)}
+                onChangeText={v => setEditForm(prev => ({...prev, soldPriceReal: v}))}
               />
               <Text style={styles.priceEuro}>€</Text>
             </View>
@@ -539,37 +459,37 @@ export default function SoldEditDetailView({ route, navigation }) {
             <Text style={styles.fieldLbl}>FECHA REAL DE VENTA *</Text>
             <TouchableOpacity style={[styles.datePickBtn, {borderColor: DS.success+'50'}]}
               onPress={() => setShowCalSold(true)}>
-              <View style={[styles.datePickIcon, {backgroundColor: DS.successBg}]}>
+              <View style={[styles.datePickIcon, {backgroundColor: DS.successLight}]}>
                 <Icon name="calendar" size={16} color={DS.success}/>
               </View>
               <View style={{flex:1}}>
-                <Text style={styles.datePickVal}>{fmt(editForm.soldDateReal)}</Text>
+                <Text style={styles.datePickVal}>{fmtDateLong(editForm.soldDateReal)}</Text>
                 <Text style={styles.datePickHint}>Toca para cambiar</Text>
               </View>
-              <Icon name="chevron-right" size={16} color={DS.textLow}/>
+              <Icon name="chevron-right" size={16} color={DS.text3}/>
             </TouchableOpacity>
 
             {/* Categoría / Subcategoría */}
             <Text style={styles.fieldLbl}>CATEGORÍA / SUBCATEGORÍA</Text>
             <TouchableOpacity style={styles.catSelector} onPress={() => setShowCatModal(true)}>
-              <View style={[styles.catSelIcon, {backgroundColor: DS.blueBg}]}>
+              <View style={[styles.catSelIcon, {backgroundColor: DS.blueLight}]}>
                 <Icon name="tag" size={14} color={DS.blue}/>
               </View>
               <View style={{flex:1}}>
                 <Text style={styles.catSelVal}>{editForm.category || 'Sin categoría'}</Text>
                 {editForm.subcategory && (
                   <View style={{flexDirection:'row', alignItems:'center', gap:4, marginTop:3}}>
-                    <Icon name="corner-down-right" size={10} color={DS.textLow}/>
+                    <Icon name="corner-down-right" size={10} color={DS.text3}/>
                     <Text style={styles.catSelSub}>{editForm.subcategory}</Text>
                   </View>
                 )}
                 {!editForm.subcategory && (
-                  <Text style={[styles.catSelSub, {color: DS.textLow}]}>
+                  <Text style={[styles.catSelSub, {color: DS.text3}]}>
                     Toca para seleccionar subcategoría
                   </Text>
                 )}
               </View>
-              <Icon name="chevron-right" size={16} color={DS.textLow}/>
+              <Icon name="chevron-right" size={16} color={DS.text3}/>
             </TouchableOpacity>
 
             {/* Tags sugeridos de la cat+sub */}
@@ -590,16 +510,16 @@ export default function SoldEditDetailView({ route, navigation }) {
 
             {/* Fecha de subida original */}
             <Text style={styles.fieldLbl}>FECHA DE SUBIDA ORIGINAL</Text>
-            <TouchableOpacity style={[styles.datePickBtn, {borderColor: DS.primary+'40'}]}
+            <TouchableOpacity style={[styles.datePickBtn, {borderColor: DS.brand+'40'}]}
               onPress={() => setShowCalUpload(true)}>
-              <View style={[styles.datePickIcon, {backgroundColor: DS.primaryBg}]}>
-                <Icon name="upload" size={16} color={DS.primary}/>
+              <View style={[styles.datePickIcon, {backgroundColor: DS.brandLight}]}>
+                <Icon name="upload" size={16} color={DS.brand}/>
               </View>
               <View style={{flex:1}}>
-                <Text style={styles.datePickVal}>{fmt(editForm.firstUploadDate)}</Text>
+                <Text style={styles.datePickVal}>{fmtDateLong(editForm.firstUploadDate)}</Text>
                 <Text style={styles.datePickHint}>Usada para calcular el TTS</Text>
               </View>
-              <Icon name="chevron-right" size={16} color={DS.textLow}/>
+              <Icon name="chevron-right" size={16} color={DS.text3}/>
             </TouchableOpacity>
           </View>
 
@@ -612,77 +532,104 @@ export default function SoldEditDetailView({ route, navigation }) {
           <View style={{height: 60}}/>
         </View>
       </ScrollView>
+
+      {/* MODALS */}
+      <CalPicker
+        visible={showCalSold}
+        onClose={() => setShowCalSold(false)}
+        value={editForm.soldDateReal}
+        onChange={d => setEditForm(prev => ({...prev, soldDateReal: d}))}
+        accent={DS.success}
+        label="FECHA DE VENTA"
+      />
+
+      <CalPicker
+        visible={showCalUpload}
+        onClose={() => setShowCalUpload(false)}
+        value={editForm.firstUploadDate}
+        onChange={d => setEditForm(prev => ({...prev, firstUploadDate: d}))}
+        accent={DS.brand}
+        label="FECHA DE SUBIDA"
+      />
+
+      <CategoryModal
+        visible={showCatModal}
+        onClose={() => setShowCatModal(false)}
+        dict={dict}
+        currentCat={editForm.category}
+        currentSub={editForm.subcategory}
+        onSelect={handleCategorySelect}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container:      {flex:1, backgroundColor: DS.bg},
+  container:      {flex:1, backgroundColor: DS.surface2},
 
   hero:           {height:320, position:'relative'},
   heroImg:        {width, height:320},
-  heroPlaceholder:{backgroundColor: DS.border, justifyContent:'center', alignItems:'center'},
-  backBtn:        {position:'absolute', top:52, left:20, backgroundColor: DS.white,
+  heroPlaceholder:{backgroundColor: DS.surface3, justifyContent:'center', alignItems:'center'},
+  backBtn:        {position:'absolute', top: LAYOUT.headerPadT, left: SPACE[5], backgroundColor: DS.white,
                    width:44, height:44, borderRadius:22, justifyContent:'center',
-                   alignItems:'center', elevation:6},
-  soldBadge:      {position:'absolute', bottom:20, right:20, flexDirection:'row',
-                   alignItems:'center', gap:6, backgroundColor: DS.success,
-                   paddingHorizontal:14, paddingVertical:8, borderRadius:20},
-  soldBadgeTxt:   {color:'#FFF', fontWeight:'900', fontSize:12, letterSpacing:0.5},
+                   alignItems:'center', ...SHADOW.lg},
+  soldBadge:      {position:'absolute', bottom: SPACE[5], right: SPACE[5], flexDirection:'row',
+                   alignItems:'center', gap: SPACE[2], backgroundColor: DS.success,
+                   paddingHorizontal: SPACE[3] + 2, paddingVertical: SPACE[2], borderRadius: RADIUS.full},
+  soldBadgeTxt:   {color:'#FFF', fontWeight:'900', fontSize: 12, letterSpacing:0.5},
 
-  contentCard:    {backgroundColor: DS.white, borderTopLeftRadius:28, borderTopRightRadius:28,
-                   padding:24, marginTop:-28, minHeight:500},
+  contentCard:    {backgroundColor: DS.white, borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl,
+                   padding: SPACE[6], marginTop: -RADIUS.xl - 4, minHeight:500},
 
-  topRow:         {flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:8},
-  brandTxt:       {fontSize:11, fontWeight:'900', color: DS.primary, letterSpacing:1.2, textTransform:'uppercase'},
-  catPill:        {flexDirection:'row', alignItems:'center', gap:4, backgroundColor: DS.blueBg,
-                   paddingHorizontal:10, paddingVertical:5, borderRadius:10},
-  catPillTxt:     {fontSize:10, fontWeight:'800', color: DS.blue},
-  catSep:         {fontSize:10, color: DS.textLow},
-  titleTxt:       {fontSize:21, fontWeight:'900', color: DS.text, lineHeight:27, marginBottom:16},
+  topRow:         {flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom: SPACE[2]},
+  brandTxt:       {...TXT.label, color: DS.brand},
+  catPill:        {flexDirection:'row', alignItems:'center', gap: SPACE[1], backgroundColor: DS.blueLight,
+                   paddingHorizontal: SPACE[2] + 2, paddingVertical: SPACE[1] + 1, borderRadius: RADIUS.sm},
+  catPillTxt:     {fontSize: 10, fontWeight:'800', color: DS.blue},
+  catSep:         {fontSize: 10, color: DS.text3},
+  titleTxt:       {...TXT.display, fontSize: 21, lineHeight: 27, marginBottom: SPACE[4]},
 
-  ttsPanel:       {flexDirection:'row', backgroundColor: DS.bg, borderRadius:20, padding:16,
-                   marginBottom:20, gap:0},
-  ttsStat:        {flex:1, alignItems:'center', gap:4},
-  ttsDivider:     {width:1, backgroundColor: DS.border, marginVertical:4},
-  ttsLbl:         {fontSize:8, color: DS.textLow, fontWeight:'900', letterSpacing:0.8, textTransform:'uppercase'},
-  ttsVal:         {fontSize:18, fontWeight:'900', color: DS.text},
+  ttsPanel:       {flexDirection:'row', backgroundColor: DS.surface2, borderRadius: RADIUS.lg, padding: SPACE[4],
+                   marginBottom: SPACE[5], gap:0},
+  ttsStat:        {flex:1, alignItems:'center', gap: SPACE[1]},
+  ttsDivider:     {width:1, backgroundColor: DS.border, marginVertical: SPACE[1]},
+  ttsLbl:         {...TXT.label, fontSize: 8},
+  ttsVal:         {fontSize: 18, fontWeight:'900', color: DS.text},
 
-  formCard:       {backgroundColor: DS.bg, borderRadius:20, padding:20, borderWidth:1,
-                   borderColor: DS.border, marginBottom:20},
-  formBanner:     {flexDirection:'row', alignItems:'center', gap:10, backgroundColor: DS.successBg,
-                   borderRadius:14, padding:14, marginBottom:20, borderWidth:1, borderColor: DS.success+'25'},
-  formBannerTitle:{fontSize:11, fontWeight:'900', color: DS.text},
-  formBannerSub:  {fontSize:10, color: DS.textMed, marginTop:2},
+  formCard:       {backgroundColor: DS.surface2, borderRadius: RADIUS.lg, padding: SPACE[5], borderWidth:1,
+                   borderColor: DS.border, marginBottom: SPACE[5]},
+  formBanner:     {flexDirection:'row', alignItems:'center', gap: SPACE[2] + 2, backgroundColor: DS.successLight,
+                   borderRadius: RADIUS.md, padding: SPACE[3] + 2, marginBottom: SPACE[5], borderWidth:1, borderColor: DS.success+'25'},
+  formBannerTitle:{fontSize: 11, fontWeight:'900', color: DS.text},
+  formBannerSub:  {fontSize: 10, color: DS.text2, marginTop: 2},
 
-  fieldLbl:       {fontSize:9, fontWeight:'900', color: DS.textLow, letterSpacing:1.5,
-                   textTransform:'uppercase', marginBottom:8, marginTop:16},
+  fieldLbl:       {...TXT.label, marginBottom: SPACE[2], marginTop: SPACE[4]},
 
-  priceInputRow:  {flexDirection:'row', alignItems:'center', gap:8, backgroundColor: DS.white,
-                   borderWidth:2, borderColor: DS.border, borderRadius:16,
-                   paddingHorizontal:16, paddingVertical:10, marginBottom:4},
-  priceInput:     {flex:1, fontSize:28, fontWeight:'900', color: DS.text, textAlign:'center'},
-  priceEuro:      {fontSize:22, fontWeight:'900', color: DS.textMed},
+  priceInputRow:  {flexDirection:'row', alignItems:'center', gap: SPACE[2], backgroundColor: DS.white,
+                   borderWidth:2, borderColor: DS.border, borderRadius: RADIUS.lg,
+                   paddingHorizontal: SPACE[4], paddingVertical: SPACE[2] + 2, marginBottom: SPACE[1]},
+  priceInput:     {flex:1, fontSize: 28, fontWeight:'900', color: DS.text, textAlign:'center', fontFamily: FONT_FAMILY.mono},
+  priceEuro:      {fontSize: 22, fontWeight:'900', color: DS.text2},
 
-  datePickBtn:    {flexDirection:'row', alignItems:'center', gap:12, backgroundColor: DS.white,
-                   borderRadius:16, padding:14, borderWidth:1, borderColor: DS.border, marginBottom:4},
-  datePickIcon:   {width:40, height:40, borderRadius:12, justifyContent:'center', alignItems:'center'},
-  datePickVal:    {fontSize:15, fontWeight:'700', color: DS.text},
-  datePickHint:   {fontSize:10, color: DS.textLow, marginTop:2},
+  datePickBtn:    {flexDirection:'row', alignItems:'center', gap: SPACE[3], backgroundColor: DS.white,
+                   borderRadius: RADIUS.lg, padding: SPACE[3] + 2, borderWidth:1, borderColor: DS.border, marginBottom: SPACE[1]},
+  datePickIcon:   {width:40, height:40, borderRadius: RADIUS.md, justifyContent:'center', alignItems:'center'},
+  datePickVal:    {fontSize: 15, fontWeight:'700', color: DS.text},
+  datePickHint:   {fontSize: 10, color: DS.text3, marginTop: 2},
 
-  catSelector:    {flexDirection:'row', alignItems:'center', gap:12, backgroundColor: DS.white,
-                   borderRadius:16, padding:14, borderWidth:1, borderColor: DS.border, marginBottom:4},
-  catSelIcon:     {width:36, height:36, borderRadius:10, justifyContent:'center', alignItems:'center'},
-  catSelVal:      {fontSize:15, fontWeight:'800', color: DS.text},
-  catSelSub:      {fontSize:11, color: DS.textMed},
+  catSelector:    {flexDirection:'row', alignItems:'center', gap: SPACE[3], backgroundColor: DS.white,
+                   borderRadius: RADIUS.lg, padding: SPACE[3] + 2, borderWidth:1, borderColor: DS.border, marginBottom: SPACE[1]},
+  catSelIcon:     {width:36, height:36, borderRadius: RADIUS.sm, justifyContent:'center', alignItems:'center'},
+  catSelVal:      {fontSize: 15, fontWeight:'800', color: DS.text},
+  catSelSub:      {fontSize: 11, color: DS.text2},
 
-  tagPreview:     {backgroundColor: DS.white, borderRadius:14, padding:12, marginTop:4, marginBottom:4},
-  tagPreviewLbl:  {fontSize:10, color: DS.textMed, fontWeight:'700', marginBottom:6},
-  tagsCloud:      {flexDirection:'row', flexWrap:'wrap', gap:7},
-  tag:            {backgroundColor: DS.blueBg, paddingHorizontal:10, paddingVertical:5, borderRadius:10},
-  tagTxt:         {fontSize:11, color: DS.blue, fontWeight:'700'},
+  tagPreview:     {backgroundColor: DS.white, borderRadius: RADIUS.md, padding: SPACE[3], marginTop: SPACE[1], marginBottom: SPACE[1]},
+  tagPreviewLbl:  {fontSize: 10, color: DS.text2, fontWeight:'700', marginBottom: SPACE[2]},
+  tagsCloud:      {flexDirection:'row', flexWrap:'wrap', gap: SPACE[2]},
+  tag:            {backgroundColor: DS.blueLight, paddingHorizontal: SPACE[2] + 2, paddingVertical: SPACE[1] + 1, borderRadius: RADIUS.sm},
+  tagTxt:         {fontSize: 11, color: DS.blue, fontWeight:'700'},
 
   saveBtn:        {flexDirection:'row', justifyContent:'center', alignItems:'center',
-                   gap:10, backgroundColor: DS.text, padding:18, borderRadius:22, elevation:4},
-  saveBtnTxt:     {color:'#FFF', fontWeight:'900', fontSize:15, letterSpacing:0.5},
+                   gap: SPACE[2] + 2, backgroundColor: DS.text, padding: SPACE[4] + 2, borderRadius: RADIUS.xl, ...SHADOW.md},
+  saveBtnTxt:     {color:'#FFF', fontWeight:'900', fontSize: 15, letterSpacing:0.5},
 });
