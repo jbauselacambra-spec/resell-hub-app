@@ -1,16 +1,8 @@
 /**
  * VintedImportScreen.jsx — Sprint 11 + Theme Integration
  *
- * [DATA_SCIENTIST] Sprint 11:
- * - handleConfirmE: usa _enrichedItems de matchHistoryToInventory()
- *   para guardar SaleRecords con categoría correcta en VintedSalesDB
- * - handleConfirmD: idem para Modo D
- * - autoRegisterCategories: registra categorías inferidas en el diccionario
- *
- * [DESIGN] Integrado con theme.js:
- * - Usa DS, SPACE, RADIUS, SHADOW, TXT, BTN del design system
- * - Tipografía consistente con DM Sans
- * - Colores semánticos unificados
+ * [FIX] handleConfirmC: getInventory()/saveInventory() → importFromVinted()
+ * [FIX] handleConfirmD/E: VintedSalesDB.bulkInsert() → saveRecords()
  */
 
 import React, { useState, useCallback, useRef } from 'react';
@@ -181,12 +173,12 @@ function ProductPreviewCard({ item, checked, onToggle }) {
             <Text style={styles.previewCat}>{item.category}</Text>
           )}
         </View>
-        {item.productId && (
-          <Text style={styles.previewOrder}>ID: {item.productId}</Text>
+        {item.id && (
+          <Text style={styles.previewOrder}>ID: {item.id}</Text>
         )}
       </View>
-      {item.imageUrl ? (
-        <Image source={{ uri: item.imageUrl }} style={styles.previewImg} />
+      {item.images?.[0] ? (
+        <Image source={{ uri: item.images[0] }} style={styles.previewImg} />
       ) : null}
     </TouchableOpacity>
   );
@@ -194,7 +186,7 @@ function ProductPreviewCard({ item, checked, onToggle }) {
 
 // ─── Modal C: confirmar importación inventario ────────────────────────────────
 function ConfirmModalC({ visible, products, onConfirm, onClose }) {
-  const activos  = products.filter(p => p.status === 'active').length;
+  const activos  = products.filter(p => p.status !== 'sold').length;
   const vendidos = products.filter(p => p.status === 'sold').length;
 
   return (
@@ -394,20 +386,22 @@ export default function VintedImportScreen({ navigation }) {
         setJsonProducts(prods);
         setCheckedIds(new Set(prods.map(p => String(p.id))));
         Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
-      } else if (['json_sales_current','json_sales_history'].includes(detected)) {
+      } else if (['json_sales_current', 'json_sales_history'].includes(detected)) {
         const items = detected === 'json_sales_current'
           ? parseJsonSalesCurrent(content)
           : parseJsonSalesHistory(content);
         setParsedItems(items);
         setCheckedIds(new Set(items.map(i => i.orderId)));
         Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+      } else {
+        Alert.alert('Formato no reconocido', `Tipo detectado: ${detected}\n\nAsegúrate de usar uno de los scripts de ResellHub.`);
       }
 
       setLoading(false);
     } catch (e) {
       console.error('[VintedImport] handlePickFile error:', e);
       setLoading(false);
-      Alert.alert('Error', 'No se pudo leer el archivo.');
+      Alert.alert('Error', 'No se pudo leer el archivo: ' + e.message);
     }
   }, [fadeAnim]);
 
@@ -440,86 +434,113 @@ export default function VintedImportScreen({ navigation }) {
     setShowConfirm(true);
   }, [checkedIds]);
 
+  // ─── [FIX] handleConfirmC — usa importFromVinted() en lugar de getInventory/saveInventory ───
   const handleConfirmC = useCallback(() => {
-    const selected = jsonProducts.filter(p => checkedIds.has(String(p.id)));
-    const db = DatabaseService.getInventory();
-    const ids = db.map(x => x.id);
-    const maxId = ids.length > 0 ? Math.max(...ids) : 0;
-    let nextId = maxId + 1;
+    try {
+      const selected = jsonProducts.filter(p => checkedIds.has(String(p.id)));
 
-    const fusionResults = { nuevos: 0, fusionados: 0 };
-    selected.forEach(prod => {
-      const exists = db.find(x => x.productId === prod.productId);
-      if (exists) {
-        const updated = { ...exists };
-        const sacred = ['listPrice', 'purchasePrice', 'purchaseDate', 'cost', 'category', 'subcategory', 'tags'];
-        sacred.forEach(k => {
-          if (prod[k] != null && prod[k] !== '') updated[k] = prod[k];
-        });
-        updated.title    = prod.title    || updated.title;
-        updated.imageUrl = prod.imageUrl || updated.imageUrl;
-        updated.status   = prod.status   || updated.status;
-        if (prod.soldPrice && !updated.soldPriceReal) updated.soldPrice = prod.soldPrice;
-        if (prod.soldDate  && !updated.soldDateReal)  updated.soldDate  = prod.soldDate;
-        const idx = db.findIndex(x => x.id === exists.id);
-        db[idx] = updated;
-        fusionResults.fusionados++;
-      } else {
-        const newProd = { ...prod, id: nextId++ };
-        db.push(newProd);
-        fusionResults.nuevos++;
-      }
-    });
-    DatabaseService.saveInventory(db);
-    autoRegisterCategories(selected);
-    logImportEvent('C', { total: selected.length, ...fusionResults });
+      // importFromVinted hace el merge inteligente con los 7 Campos Sagrados
+      const result = DatabaseService.importFromVinted(selected);
 
-    setShowConfirm(false);
-    setImportResult({ mode: 'C', nuevos: fusionResults.nuevos, fusionados: fusionResults.fusionados });
-    Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+      // Auto-registrar categorías nuevas en el diccionario
+      autoRegisterCategories(selected);
+
+      logImportEvent('C', {
+        total:     selected.length,
+        created:   result.created   || 0,
+        updated:   result.updated   || 0,
+        reposted:  result.reposted  || 0,
+      });
+
+      LogService.add(
+        `✅ Modo C: ${selected.length} productos importados (${result.created || 0} nuevos, ${result.updated || 0} actualizados)`,
+        'success',
+        LOG_CTX.IMPORT,
+      );
+
+      setShowConfirm(false);
+      setImportResult({ mode: 'C', nuevos: result.created || 0, fusionados: result.updated || 0 });
+      Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+    } catch (e) {
+      LogService.error('VintedImport.handleConfirmC', LOG_CTX.IMPORT, e);
+      Alert.alert('Error en importación', e.message);
+    }
   }, [jsonProducts, checkedIds, fadeAnim]);
 
-  const handleConfirmD = useCallback(async () => {
-    const selected = parsedItems.filter(i => checkedIds.has(i.orderId));
-    const db = DatabaseService.getInventory();
-    let updated = 0;
+  // ─── [FIX] handleConfirmD — usa saveRecords() en lugar de bulkInsert() ───────
+  const handleConfirmD = useCallback(() => {
+    try {
+      const selected = parsedItems.filter(i => checkedIds.has(i.orderId));
 
-    const result = await matchHistoryToInventory(selected, db);
-    const enriched = result._enrichedItems;
+      // Cruzar con inventario para actualizar soldPriceReal + soldDateReal
+      const result = matchHistoryToInventory(selected);
+      const enriched = result._enrichedItems || [];
 
-    enriched.forEach(sale => {
-      const prod = db.find(p => p.productId === sale.productId);
-      if (prod && sale.soldPriceReal && sale.soldDateReal) {
-        prod.soldPriceReal = sale.soldPriceReal;
-        prod.soldDateReal  = sale.soldDateReal;
-        if (!prod.soldPrice) prod.soldPrice = sale.soldPriceReal;
-        if (!prod.soldDate)  prod.soldDate  = sale.soldDateReal;
-        updated++;
+      // Guardar en VintedSalesDB los registros enriquecidos con categoría
+      if (enriched.length > 0) {
+        const salesRecords = enriched
+          .filter(item => item.type !== 'compra')
+          .map(item => mapToSaleRecord(item));
+        if (salesRecords.length > 0) {
+          VintedSalesDB.saveRecords(salesRecords);
+        }
       }
-    });
 
-    DatabaseService.saveInventory(db);
-    await VintedSalesDB.bulkInsert(enriched);
-    logImportEvent('D', { total: selected.length, matched: result.matched });
+      logImportEvent('D', { total: selected.length, matched: result.matched, created: result.created });
 
-    setShowConfirm(false);
-    setImportResult({ mode: 'D', updated });
-    Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+      LogService.add(
+        `✅ Modo D: ${result.matched} productos actualizados, ${result.created} creados`,
+        'success',
+        LOG_CTX.IMPORT,
+      );
+
+      setShowConfirm(false);
+      setImportResult({ mode: 'D', updated: result.matched + (result.created || 0) });
+      Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+    } catch (e) {
+      LogService.error('VintedImport.handleConfirmD', LOG_CTX.IMPORT, e);
+      Alert.alert('Error en actualización', e.message);
+    }
   }, [parsedItems, checkedIds, fadeAnim]);
 
-  const handleConfirmE = useCallback(async () => {
-    const selected = parsedItems.filter(i => checkedIds.has(i.orderId));
-    const db = DatabaseService.getInventory();
+  // ─── [FIX] handleConfirmE — usa saveRecords() en lugar de bulkInsert() ───────
+  const handleConfirmE = useCallback(() => {
+    try {
+      const selected = parsedItems.filter(i => checkedIds.has(i.orderId));
 
-    const result = await matchHistoryToInventory(selected, db);
-    const enriched = result._enrichedItems;
+      // Cruzar ventas con inventario
+      const result = matchHistoryToInventory(selected);
+      const enriched = result._enrichedItems || [];
 
-    await VintedSalesDB.bulkInsert(enriched);
-    logImportEvent('E', { total: selected.length, matched: result.matched, unmatched: result.unmatched });
+      // Guardar TODOS los registros (ventas + compras) en VintedSalesDB
+      const salesRecords = enriched.length > 0
+        ? enriched.map(item => mapToSaleRecord(item))
+        : selected.map(item => mapToSaleRecord(item));
 
-    setShowConfirm(false);
-    setImportResult({ mode: 'E', total: selected.length });
-    Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+      if (salesRecords.length > 0) {
+        VintedSalesDB.saveRecords(salesRecords);
+      }
+
+      logImportEvent('E', {
+        total:    selected.length,
+        matched:  result.matched,
+        created:  result.created,
+        skipped:  result.skipped,
+      });
+
+      LogService.add(
+        `✅ Modo E: ${selected.length} registros guardados (${result.matched} matches, ${result.created} creados)`,
+        'success',
+        LOG_CTX.IMPORT,
+      );
+
+      setShowConfirm(false);
+      setImportResult({ mode: 'E', total: selected.length });
+      Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+    } catch (e) {
+      LogService.error('VintedImport.handleConfirmE', LOG_CTX.IMPORT, e);
+      Alert.alert('Error en importación', e.message);
+    }
   }, [parsedItems, checkedIds, fadeAnim]);
 
   const handleReset = useCallback(() => {
@@ -533,7 +554,7 @@ export default function VintedImportScreen({ navigation }) {
     fadeAnim.setValue(0);
   }, [fadeAnim]);
 
- const handleViewLogs = () => navigation.navigate('Logs');
+  const handleViewLogs = () => navigation.navigate('Logs');
 
   // ─── Render ───────────────────────────────────────────────────────────────
   const meta = TYPE_META[contentType] || TYPE_META.unknown;
@@ -544,7 +565,7 @@ export default function VintedImportScreen({ navigation }) {
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>Importar desde Vinted</Text>
-          <Text style={styles.headerSub}>Sprint 11 — Parser JSON multi-modo</Text>
+          <Text style={styles.headerSub}>Parser JSON multi-modo</Text>
         </View>
         <TouchableOpacity style={styles.logsBtn} onPress={handleViewLogs}>
           <Icon name="list" size={14} color={DS.text2} />
@@ -595,15 +616,7 @@ export default function VintedImportScreen({ navigation }) {
 
         {/* Resultado de importación */}
         {importResult && (
-          <View
-            style={[
-              styles.resultBanner,
-              {
-                backgroundColor: DS.successLight,
-                borderColor: DS.success,
-              }
-            ]}
-          >
+          <View style={[styles.resultBanner, { backgroundColor: DS.successLight, borderColor: DS.success }]}>
             <Icon name="check-circle" size={24} color={DS.success} />
             <View style={{ flex: 1 }}>
               <Text style={styles.resultTitle}>Importación completada</Text>
@@ -641,7 +654,7 @@ export default function VintedImportScreen({ navigation }) {
           <View style={styles.quickStats}>
             <View style={styles.quickStatItem}>
               <Text style={[styles.quickStatVal, { color: DS.blue }]}>
-                {jsonProducts.filter(p => p.status === 'active').length}
+                {jsonProducts.filter(p => p.status !== 'sold').length}
               </Text>
               <Text style={styles.quickStatLbl}>Activos</Text>
             </View>
@@ -660,7 +673,7 @@ export default function VintedImportScreen({ navigation }) {
           </View>
         )}
 
-        {fileMeta && !importResult && ['D','E'].includes(currentMode) && parsedItems.length > 0 && (
+        {fileMeta && !importResult && ['D', 'E'].includes(currentMode) && parsedItems.length > 0 && (
           <View style={styles.quickStats}>
             <View style={styles.quickStatItem}>
               <Text style={[styles.quickStatVal, { color: DS.success }]}>
@@ -706,7 +719,7 @@ export default function VintedImportScreen({ navigation }) {
           <Animated.View style={{ opacity: fadeAnim }}>
             {jsonProducts.map(p => (
               <ProductPreviewCard
-                key={p.id}
+                key={String(p.id)}
                 item={p}
                 checked={checkedIds.has(String(p.id))}
                 onToggle={() => handleToggle(String(p.id))}
@@ -715,8 +728,8 @@ export default function VintedImportScreen({ navigation }) {
           </Animated.View>
         )}
 
-        {/* Preview Cards — Modos A/B/D/E */}
-        {['D','E'].includes(currentMode) && parsedItems.length > 0 && !importResult && (
+        {/* Preview Cards — Modos D/E */}
+        {['D', 'E'].includes(currentMode) && parsedItems.length > 0 && !importResult && (
           <Animated.View style={{ opacity: fadeAnim }}>
             {parsedItems.map(item => (
               <SalePreviewCard
