@@ -4238,3 +4238,1864 @@ git checkout main && git merge --no-ff fix/sprint12-useeffect-scope
 [QA_ENGINEER]
 - backup limpio aplicado: 365→359 productos, 6 duplicados eliminados
 - repostOf corruptos limpiados en 5 productos"
+
+
+
+# 🏗️ SYSTEM DESIGN — ResellHub
+> **Sprint 14 · Design System v2 · Business Intelligence · Deduplicación**
+> Última actualización: Mayo 2026
+
+---
+
+## 📋 Índice de Sprints
+
+| Sprint | Rama | Descripción |
+|--------|------|-------------|
+| Sprint 1 v4.2 | `feature/sprint1-activation-v4.2` | Los 7 Campos Sagrados + tema AMOLED + modal soldPriceReal |
+| Sprint 2+3 | `feature/sprint2-categorias-globales` | Categorías/subcategorías globales + config canónico |
+| Sprint 4 | `feature/sprint4-light-theme-detail-screens` | Light DS global + rediseño pantallas detalle |
+| Sprint 5 | `feature/vinted-import-mobile` | Módulo importación móvil desde Vinted |
+| Sprint 6 | `feature/vinted-import-mobile (fix)` | Fix completo: 3 formatos importación móvil |
+| Sprint 6 Hotfix | — | SyntaxError ProductsScreen + Deploy v5.0 |
+| Hotfix 2 | — | DS undefined + PS1 parse error + Logging |
+| Hotfix 3 | — | Diagnóstico definitivo de errores repetidos |
+| Sprint 7 | `feature/vinted-import-mobile` | JSON Import Scripts + Deploy Fix (Bare Workflow) |
+| Hotfix 4 | — | JAVA_HOME auto-detection |
+| Sprint 8 | `feature/sprint8-json-import-v2` | DocumentPicker + matchHistoryToInventory + tab Importar |
+| Sprint 8 Fix | — | LogsScreen errors + matchHistoryToInventory fix |
+| Sprint 9 | `feature/sprint9-annual-stats-export-db` | Estadísticas anuales + filtro precios + export BBDD |
+| Sprint 10 | `feature/sprint10-persistent-backup` | Persistencia BBDD ante rebuilds de APK |
+| Sprint 10.1 | `fix/sprint10-navigation-revert` | Fix navegación + mdc v4.2 |
+| Sprint 11 | `feature/sprint11-subcategorias-globales` | Subcategorías en filtros e inventario estacional |
+| Sprint 12 | `fix/sprint12-useeffect-scope` | Fix useEffect fuera del componente → subcategorías invisibles |
+| Hotfix 5 | `fix/hotfix5-export-images-categories` | Export BBDD + imágenes vendidos + categorías |
+| Sprint 13 | `fix/sprint13-seeffect-typo-subcats` | Regla 8: archivos completos + typo seEffect |
+| Sprint 13b | `fix/sprint13b-stale-closure-subcats` | Regla 9: stale closure en SettingsScreen |
+| **Sprint 14** | `feature/sprint14-ds2-bi-dedup` | **Design System v2 + Business Intelligence + Deduplicación** |
+
+---
+
+## 🔑 Las 9 Reglas de Hierro
+
+| # | Regla | Consecuencia si se viola |
+|---|-------|--------------------------|
+| 1 | `SYSTEM_DESIGN.md` es la única fuente de verdad | Regresión de arquitectura |
+| 2 | Los 7 Campos Sagrados son INMUTABLES en imports | Corrupción de datos del usuario |
+| 3 | Hooks SIEMPRE antes de early returns | Crash en runtime (React invariant) |
+| 4 | Tab 6 = VintedImportScreen · LogsScreen = Stack.Screen | UX rota |
+| 5 | `_triggerBackup()` tras CADA escritura MMKV | Pérdida de datos |
+| 6 | `seoTags` eliminado desde v2.1 — nunca reintroducir | Regresión |
+| 7 | Todo trabajo pasa por [ORCHESTRATOR] — sin excepciones | Inconsistencia |
+| 8 | SIEMPRE entregar archivos COMPLETOS — nunca fragmentos | Typos fatales como `seEffect` |
+| 9 | Handlers con estado anidado → usar `useRef` como mirror | Stale closure: datos perdidos silenciosamente |
+
+### Los 7 Campos Sagrados (NUNCA sobreescribir en imports)
+```
+firstUploadDate · category · title · brand · soldPriceReal · soldDateReal · isBundle
+```
+
+---
+
+## 📱 Estado técnico del proyecto
+
+### Stack
+- **Framework:** React Native 0.76 + Expo SDK 52 (bare workflow)
+- **Storage:** react-native-mmkv + FileSystem (doble capa Sprint 10)
+- **Dispositivo objetivo:** Poco X7 Pro (393dp · 120Hz · Android 14)
+- **Bundle ID:** `com.perdigon85.resellhub`
+- **Build:** EAS CLI + `agent-deploy.ps1 v5.3`
+
+### Navegación canónica (App.jsx — 6 tabs fijos)
+```
+Tab 1: Inicio       → DashboardScreen
+Tab 2: Inventario   → ProductsScreen
+Tab 3: Vendidos     → SoldHistoryScreen
+Tab 4: Stats        → AdvancedStatsScreen
+Tab 5: Config       → SettingsScreen
+Tab 6: Importar     → VintedImportScreen
+
+Stack (no tabs):
+  ProductDetail    → ProductDetailScreen
+  SoldEditDetail   → SoldEditDetailView
+  Deduplication    → DeduplicationScreen       ← NUEVO Sprint 14
+  Logs             → LogsScreen
+  Intelligence     → BusinessIntelligenceScreen ← NUEVO Sprint 14
+```
+
+---
+
+## 🗄️ Modelo de Datos (v4.2+)
+
+```js
+{
+  // ─── De Vinted (actualizables en import) ──────────────────────────
+  id:           String,
+  price:        Number,
+  description:  String,
+  images:       String[],
+  status:       'available' | 'sold' | 'active',
+  views:        Number,
+  favorites:    Number,
+  createdAt:    ISO String,
+
+  // ─── LOS 7 SAGRADOS — NUNCA sobreescritos en import ───────────────
+  firstUploadDate: ISO String,   // [1] Fecha real de primera subida
+  category:        String,       // [2] Categoría del diccionario
+  title:           String,       // [3] Título curado
+  brand:           String,       // [4] Marca curada
+  soldPriceReal:   Number?,      // [5] Precio final real de venta
+  soldDateReal:    ISO String?,  // [6] Fecha real de cierre de venta
+  isBundle:        Boolean,      // [7] Lote/pack — init: false
+
+  // ─── Legacy (fallback) ────────────────────────────────────────────
+  // soldPrice / soldDate: mantenidos para retrocompatibilidad
+
+  // ─── Generados por el sistema ────────────────────────────────────
+  subcategory:     String?,
+  priceHistory:    [{ oldPrice, newPrice, date, source }],
+  repostOf:        String?,
+  repostTo:        String?,
+  repostCount:     Number,
+  lastRepostDate:  ISO String?,
+  stale:           Boolean?,
+  staleDetectedAt: ISO String?,
+  lastSync:        ISO String,
+  lastActivity:    ISO String,
+}
+```
+
+---
+
+## 🎨 Design System v2 — theme.js
+
+> **NUEVO Sprint 14** — `theme.js` reemplaza las constantes locales de cada pantalla.
+
+### Fuente de verdad visual
+
+Todas las pantallas importan desde `../theme` (o `../../theme`):
+
+```js
+import {
+  DS, SPACE, RADIUS, SHADOW, TXT, BTN, BTN_TEXT, CARD,
+  LAYOUT, FONT_SIZE, FONT_FAMILY, MONTH_NAMES, MONTH_NAMES_SHORT,
+  ttsColor, ttsEmoji, fmtPrice, fmtDate, fmtDateLong,
+} from '../theme';
+```
+
+### Paleta de colores DS
+
+```js
+export const DS = {
+  // Marca
+  brand:         '#FF4F1A',   // Naranja primario — CTAs, KPI acento
+  brandDim:      'rgba(255,79,26,0.10)',
+  brandMid:      'rgba(255,79,26,0.18)',
+  brandLight:    '#FFF2EE',
+
+  // Superficies
+  white:         '#FFFFFF',
+  surface:       '#FFFFFF',   // Cards elevadas
+  surface2:      '#F6F5F3',   // Fondo de pantalla
+  surface3:      '#EFEDE9',   // Inputs, chips inactivos
+
+  // Bordes
+  border:        'rgba(0,0,0,0.07)',
+  borderMed:     'rgba(0,0,0,0.12)',
+  borderStrong:  'rgba(0,0,0,0.20)',
+
+  // Texto
+  text:          '#0F0E0D',
+  text2:         '#5A5752',
+  text3:         '#A09C97',
+
+  // Semánticos
+  success:       '#1A9E6E',  successDim: '...', successLight: '#E8F7F2',
+  warning:       '#D4820A',  warningDim: '...', warningLight: '#FEF3E2',
+  danger:        '#D63B3B',  dangerDim:  '...', dangerLight:  '#FDEAEA',
+  blue:          '#1A68D4',  blueDim:    '...', blueLight:    '#E8F1FD',
+  purple:        '#7248D4',  purpleDim:  '...', purpleLight:  '#F0EAFF',
+};
+```
+
+### Tipografía
+
+```js
+export const FONT_FAMILY = {
+  body: Platform.select({ ios: 'System', android: 'sans-serif' }),
+  mono: Platform.select({ ios: 'Menlo', android: 'monospace' }),
+};
+
+export const FONT_SIZE = {
+  xs: 10, sm: 12, base: 14, md: 16, lg: 18, xl: 20, '2xl': 24, '3xl': 28, '4xl': 34,
+};
+```
+
+### Tokens de espaciado y radio
+
+```js
+export const SPACE  = { 1:4, 2:8, 3:12, 4:16, 5:20, 6:24, 8:32, 10:40, 12:48, 16:64 };
+export const RADIUS = { sm:8, md:12, lg:18, xl:24, full:999 };
+export const SHADOW = { none:{}, sm:{...}, md:{...}, lg:{...} };
+```
+
+### Componentes estándar exportados
+
+| Export | Uso |
+|--------|-----|
+| `CARD.default / .compact / .flat` | Estilos base de tarjeta |
+| `BADGE / BADGE_TEXT` | Chips de estado |
+| `BTN.primary / .secondary / .ghost / .sm` | Botones |
+| `BTN_TEXT.primary / .secondary` | Texto de botones |
+| `INPUT.base / .focused` | Campos de texto |
+| `TXT.display / .heading / .title / .body / .caption / .label / .price` | Tipografía |
+| `LAYOUT` | `screenPadH`, `headerPadT`, `tabBarH` |
+
+### Helpers exportados
+
+```js
+ttsColor(tts, config)    // → color semántico (DS.success/warning/danger)
+ttsEmoji(tts, config)    // → '⚡' | '🟡' | '⚓'
+fmtPrice(value)          // → "89€" o "89,50€"
+fmtDate(iso)             // → "12 abr 2026"
+fmtDateLong(iso)         // → "12 de abril de 2026"
+```
+
+---
+
+## 🗺️ Mapa de ficheros (Sprint 14)
+
+### Servicios
+| Fichero | Propietario | Descripción |
+|---------|-------------|-------------|
+| `services/DatabaseService.js` | [ARCHITECT] | CRITICO: toda la lógica de datos |
+| `services/VintedParserService.js` | [DATA_SCIENTIST] | Parsers HTML/JSON Vinted |
+| `services/BackupService.js` | [ARCHITECT] | Backup persistente FileSystem |
+| `services/LogService.js` | [DEVOPS] | Logging global |
+| `services/IntelligenceService.js` | [DATA_SCIENTIST] | **NUEVO** Motor BI con benchmarks globales |
+| `services/AIService.js` | — | GPT-4o para análisis de productos |
+| `services/ImageProcessingService.js` | [ARCHITECT] | Anti-hash, galería, cámara |
+| `services/NotificationService.js` | [DEVOPS] | Notificaciones locales |
+| `services/authService.js` | [SECURITY_OFFICER] | Token MMKV |
+
+### Pantallas — Tabs
+| Fichero | Tab | Sprint introducción |
+|---------|-----|---------------------|
+| `screens/DashboardScreen.jsx` | Inicio | Sprint 14 (DS v2) |
+| `screens/ProductsScreen.jsx` | Inventario | Sprint 14 (DS v2 + eliminar + ordenar) |
+| `screens/SoldHistoryScreen.jsx` | Vendidos | Sprint 14 (DS v2 + eliminar + ordenar) |
+| `screens/AdvancedStatsScreen.jsx` | Stats | Sprint 14 (DS v2) |
+| `screens/SettingsScreen.jsx` | Config | Sprint 14 (DS v2 + useRef Regla 9) |
+| `screens/VintedImportScreen.jsx` | Importar | Sprint 14 (DS v2 + fix handlers) |
+
+### Pantallas — Stack Screens
+| Fichero | Ruta | Sprint introducción |
+|---------|------|---------------------|
+| `screens/ProductDetailScreen.jsx` | `ProductDetail` | Sprint 14 (DS v2) |
+| `screens/SoldEditDetailView.jsx` | `SoldEditDetail` | Sprint 14 (DS v2) |
+| `screens/DeduplicationScreen.jsx` | `Deduplication` | **Sprint 14 NUEVO** |
+| `screens/BusinessIntelligenceScreen.jsx` | `Intelligence` | **Sprint 14 NUEVO** |
+| `screens/LogsScreen.jsx` | `Logs` | Sprint 8 fix |
+| `screens/DebugScreen.jsx` | — | Sprint 14 (DS v2) |
+
+### Raíz y config
+| Fichero | Descripción |
+|---------|-------------|
+| `App.jsx` | Navegación, auth, splash, autoRestore |
+| `theme.js` | **NUEVO** Design System v2 — fuente única visual |
+| `CLAUDE.md` | Instrucciones para Claude Projects/Code |
+| `.claude/RULES.md` | 19 reglas maestras |
+| `resellhub_v4.2.mdc` | Reglas Cursor IDE |
+| `agent-deploy.ps1 v5.3` | Script deploy Windows |
+| `eas.json` | Configuración EAS Build |
+| `app.json` | Configuración Expo |
+
+---
+
+## 📋 Changelog completo por sprint
+
+---
+
+### Sprint 1 v4.2 — Los 7 Campos Sagrados
+
+- **[ARCHITECT]** Formalización de 7 campos inmutables en `importFromVinted()`
+- **[DATA_SCIENTIST]** `calcTTS()` usa exclusivamente `soldDateReal`
+- **[UI_SPECIALIST]** Modal `SoldPriceReal` para registrar precio real al vender
+- **[QA_ENGINEER]** Purga definitiva de `autoGenerateSeoTags`
+
+---
+
+### Sprint 2+3 — Categorías Globales
+
+- **[ARCHITECT]** `getMonthlyHistory()` con `categoryBreakdown` por mes
+- **[ARCHITECT]** `getBusinessKPIs()` con campo `topSubcategory`
+- **[ARCHITECT]** `getSmartAlerts()` usa TTS efectivo de subcategoría
+- **[ARCHITECT]** `DEFAULT_CONFIG` +7 parámetros: hotViews, hotFavs, hotDays, daysAlmostReady, favsAlmostReady, opportunityFavs, opportunityDays
+- **[UI_SPECIALIST]** Todas las pantallas con init síncrono: `useState(() => DatabaseService.getConfig())`
+- **[QA_ENGINEER]** Purga de todos los umbrales hardcodeados → `config.*`
+
+---
+
+### Sprint 4 — Light DS Global
+
+- **[ARCHITECT]** Design System Light canónico (`DS`) con paleta `#F8F9FA / #FFFFFF / #FF6B35`
+- **[UI_SPECIALIST]** Migración AMOLED → Light en: Dashboard, SoldEdit, LogsScreen, DebugScreen
+- **[UI_SPECIALIST]** `CalPicker` unificado: header coloreado, selector año, días semana, acento dinámico
+- **[UI_SPECIALIST]** `App.jsx` tabBar: fondo blanco + borde suave
+
+---
+
+### Sprint 5-7 — Módulo Importación Móvil
+
+- **[DATA_SCIENTIST]** `VintedParserService.js`: detectContentType + parsers A/B/C/D/E
+- **[DATA_SCIENTIST]** `VintedSalesDB`: historial económico en MMKV separado
+- **[DATA_SCIENTIST]** `matchHistoryToInventory()`: cruza ventas con inventario
+- **[UI_SPECIALIST]** `VintedImportScreen`: Drop Zone, PreviewCards, ConfirmModals
+- **[DEVOPS]** `agent-deploy.ps1 v5.3`: `-Build/-Local/-Check`, JAVA_HOME auto-detect
+
+---
+
+### Sprint 8 — Import v2 + Tab "Importar"
+
+- **[ARCHITECT]** Tab 6: `LogsScreen` → `VintedImportScreen` (label "Importar")
+- **[ARCHITECT]** `DatabaseService.updateSaleData()`: bypass MANUAL_FIELDS para historial
+- **[UI_SPECIALIST]** `DocumentPicker` + `FileSystem` (sin clipboard)
+- **[ARCHITECT]** `LogsScreen`: restaurado uso directo `backupStorage` (MMKV)
+
+---
+
+### Sprint 9 — Estadísticas Anuales + Export BBDD
+
+- **[DATA_SCIENTIST]** Fix BUG CRÍTICO: `getMonthlyHistory()` key `getMonth()+1`
+- **[DATA_SCIENTIST]** `soldAmt = Math.max(0, ...)` — sin negativos
+- **[ARCHITECT]** `getAnnualHistory()`, `exportFullDatabase()`, `importFullDatabase()`
+- **[QA_ENGINEER]** Filtro `MIN_VALID_PRICE = 0.01` en todos los parsers
+- **[UI_SPECIALIST]** Tab "📅 Por Año" en AdvancedStatsScreen
+- **[UI_SPECIALIST]** Tab "💾 BBDD" en SettingsScreen
+
+---
+
+### Sprint 9.1 — Rediseño KPIs
+
+- **[PRODUCT_OWNER]** Decisión: en segunda mano el "beneficio" es siempre ≤ 0 → métrica inútil
+- **[DATA_SCIENTIST]** Eliminados: `totalProfit`, `avgProfit`, `totalRevenue`, `revenueThisMonth`
+- **[DATA_SCIENTIST]** Nuevos: `totalRecaudacion`, `recaudacionThisMonth`, `rotacion`, `avgPrecioVenta`
+- **[QA_ENGINEER]** Regla 14: Guards `?? 0` en todos los `.toFixed()` sobre KPIs
+
+---
+
+### Sprint 10 — Persistencia ante Rebuilds
+
+- **[ARCHITECT]** `BackupService.js`: triple capa MMKV + FileSystem + Share API
+- **[ARCHITECT]** `DatabaseService._triggerBackup()`: debounce 3s en 6 métodos de escritura
+- **[MIGRATION_MANAGER]** `App.jsx`: `autoRestoreIfNeeded()` antes de `setIsReady(true)`
+- **[UI_SPECIALIST]** SettingsScreen: sección "Auto-Backup" con estado, fecha, tamaño
+
+---
+
+### Sprint 10.1 — Fix Navegación + .mdc v4.2
+
+- **[QA_ENGINEER]** Fix: Sprint 10 entregó tab "Logs" revirtiendo Sprint 8
+- **[LIBRARIAN]** `resellhub_v4.2.mdc`: Reglas 11-17 nuevas
+
+---
+
+### Sprint 11 — Subcategorías Globales en Filtros
+
+- **[ARCHITECT]** `parseSeasonalItem()`: soporta `'Cat'` y `'Cat › Sub'` en seasonalMap
+- **[ARCHITECT]** `productMatchesSeasonal()`: retrocompatible con strings sin `›`
+- **[UI_SPECIALIST]** `ProductsScreen`: filtro 2 niveles (categoría → subcategoría)
+- **[UI_SPECIALIST]** `SoldHistoryScreen`: filtro 2 niveles (categoría → subcategoría)
+- **[UI_SPECIALIST]** `SettingsScreen` calendario: categorías expandibles con subcategorías
+- **[DATA_SCIENTIST]** `VintedParserService.inferCategoryFromTitle()`: clasificador 8 categorías por regex
+
+---
+
+### Sprint 12 — Fix useEffect Scope
+
+**Bug:** Subcategorías no aparecen en modales de edición de categorías.
+
+**Causa raíz:** `useEffect` declarado **fuera** del cuerpo del componente (indentación incorrecta) → se ejecuta a nivel módulo una sola vez al importar → `dict` permanece `{}` cuando el modal abre.
+
+**Fix aplicado en:**
+- `screens/ProductDetailScreen.jsx` — `CatModal.useEffect`: 0 espacios → 2 espacios
+- `screens/SoldEditDetailView.jsx` — `CategoryModal.useEffect`: 1 espacio → 2 espacios
+- `screens/SettingsScreen.jsx` — bloque carga diccionario: nivel módulo → dentro del `useEffect`
+
+---
+
+### Hotfix 5 — Export BBDD + Imágenes Vendidos + Categorías
+
+**BUG-A — Export BBDD:**
+- Causa: `Share.share({ message: json })` falla en Android 13+ con >200KB payload
+- Fix: `expo-sharing` + `Sharing.shareAsync(uri)` con fichero real en `cacheDirectory`
+
+**BUG-B — SoldHistoryScreen:**
+- Causa 1: `renderItem` usaba `p.thumbnail || p.image` — campo inexistente en schema
+- Causa 2: `View` envolvente sin `TouchableOpacity` → tarjeta inerte al pulsar
+- Fix: `p.images?.[0]` como imageUri + `TouchableOpacity` a nivel de tarjeta
+
+**BUG-C — Categorías no persisten:**
+- Causa: `handleSaveDictionary` usaba `new MMKV()` anónimo (distinto al de `DatabaseService`)
+- Fix: `DatabaseService.saveFullDictionary()` + `DatabaseService.saveDictionary()`
+- Fix extra: `VintedImportScreen` auto-registra categorías de productos importados
+
+---
+
+### Sprint 13 — Regla 8: Archivos Completos
+
+**Bug:** Typo `seEffect` en `SettingsScreen` causaba crash silencioso en subcategorías.
+
+**Regla 8 (Regla de Hierro):** NUNCA generar fragmentos de código con instrucciones "reemplaza aquí". SIEMPRE entregar archivos completos listos para sobreescribir.
+
+---
+
+### Sprint 13b — Regla 9: Stale Closure en Handlers
+
+**Bug:** Settings → Categorías → añadir subcategoría → Guardar → subcategorías desaparecen.
+
+**Causa raíz:** `handleSaveDictionary()` leía `dictionary` del closure (stale). Los `setDictionary(prev => ...)` funcionales actualizaban el estado React pero el handler capturaba el valor anterior.
+
+**Fix — Regla 9 (Regla de Hierro):**
+
+```js
+// ✅ useRef como mirror del estado — SIEMPRE fresco
+const dictionaryRef = useRef({});
+const [dictionary, setDictionary] = useState({});
+
+const updateDictionary = (updater) => {
+  if (typeof updater === 'function') {
+    setDictionary(prev => {
+      const next = updater(prev);
+      dictionaryRef.current = next;   // ← ref siempre actualizado
+      return next;
+    });
+  } else {
+    dictionaryRef.current = updater;
+    setDictionary(updater);
+  }
+};
+
+// Handler lee del REF — nunca del closure
+const handleSaveDictionary = () => {
+  const current = dictionaryRef.current;  // ← siempre fresco
+  DatabaseService.saveFullDictionary(current);
+};
+```
+
+**Aplicado en:** `screens/SettingsScreen.jsx` → `dictionaryRef` + `updateDictionary()`.
+
+---
+
+### Sprint 14 — Design System v2 + Business Intelligence + Deduplicación
+
+> **Sprint 14 · feature/sprint14-ds2-bi-dedup**
+> Fecha: Mayo 2026
+
+#### Objetivo
+
+Tres mejoras principales:
+1. Unificar toda la app bajo `theme.js` (Design System v2) — eliminar tokens dispersos en cada pantalla
+2. Implementar pantalla de Business Intelligence con motor de aprendizaje personal
+3. Implementar pantalla de Deduplicación para limpiar inventario con duplicados
+
+---
+
+#### [ARCHITECT] — theme.js (Design System v2)
+
+**Nuevo fichero raíz:** `theme.js` centraliza todos los tokens visuales.
+
+**Pantallas migradas:**
+
+| Pantalla | Estado anterior | Estado Sprint 14 |
+|----------|----------------|-----------------|
+| `DashboardScreen.jsx` | DS Light local | theme.js ✅ |
+| `ProductsScreen.jsx` | DS Light local + funciones nuevas | theme.js ✅ |
+| `SoldHistoryScreen.jsx` | DS Light local + funciones nuevas | theme.js ✅ |
+| `AdvancedStatsScreen.jsx` | DS Light local | theme.js ✅ |
+| `SettingsScreen.jsx` | DS Light local | theme.js ✅ |
+| `VintedImportScreen.jsx` | DS Light local | theme.js ✅ |
+| `ProductDetailScreen.jsx` | DS Light local | theme.js ✅ |
+| `SoldEditDetailView.jsx` | DS Light local | theme.js ✅ |
+| `LogsScreen.jsx` | DS legacy | theme.js ✅ |
+| `DebugScreen.jsx` | DS legacy | theme.js ✅ |
+| `BusinessIntelligenceScreen.jsx` | **NUEVO** | theme.js desde creación ✅ |
+| `DeduplicationScreen.jsx` | **NUEVO** | theme.js desde creación ✅ |
+
+**Cambio de paleta:** `#FF6B35 → #FF4F1A` (brand más saturado), `#F8F9FA → #F6F5F3` (surface2 más cálido).
+
+---
+
+#### [DATA_SCIENTIST] — IntelligenceService.js (NUEVO)
+
+**Archivo:** `services/IntelligenceService.js`
+
+Motor de Business Intelligence que combina dos fuentes:
+
+1. **Mercado global** — Benchmarks calibrados de Vinted España (TTS, precios, estacionalidad)
+2. **Historial personal** — Los datos reales del usuario, mejora con cada venta
+
+**Algoritmo Bayesian Blend:**
+
+```js
+// alpha = peso del prior global (0.3 = 30% global, 70% personal cuando hay ≥10 ventas)
+function bayesianBlend(globalValue, personalValue, personalCount, alpha = 0.3) {
+  if (personalCount === 0) return globalValue;
+  const weight = Math.min(personalCount / 10, 1);
+  return globalValue * (alpha + (1 - alpha) * (1 - weight))
+       + personalValue * (1 - alpha) * weight;
+}
+```
+
+**Benchmarks globales incluidos (Vinted España):**
+
+| Categoría | TTS medio | Precio mediano | Demanda |
+|-----------|-----------|----------------|---------|
+| Videojuegos | 8d | 18€ | Alta (0.88) |
+| Calzado | 10d | 14€ | Alta (0.85) |
+| Ropa Niño | 12d | 6€ | Alta (0.82) |
+| Ropa Mujer | 16d | 9€ | Alta (0.80) |
+| Juguetes | 15d | 8€ | Media-Alta (0.78) |
+| Electrónica | 18d | 25€ | Media (0.72) |
+| Disfraces | 9d | 10€ | Media (0.65) |
+| Libros | 22d | 4€ | Media (0.60) |
+| Hogar | 25d | 12€ | Baja (0.58) |
+
+**Métodos principales:**
+
+```js
+// Análisis personal por categoría con score de oportunidad (0-100)
+IntelligenceService.getCategoryAnalysis()
+
+// Precio óptimo para un producto concreto con justificación
+IntelligenceService.getPriceRecommendation(product)
+
+// Ventana óptima de publicación ahora mismo
+IntelligenceService.getPublishWindowStatus(category)
+
+// Ranking de productos activos por oportunidad de venta
+IntelligenceService.getProductOpportunities()
+
+// Aprendizajes narrativos personalizados
+IntelligenceService.getPersonalLearnings()
+
+// Datos para gráficos: personal vs mercado
+IntelligenceService.getCategoryComparisonData()
+IntelligenceService.getMonthlyTrendData()
+
+// Punto de entrada principal (async) — orquesta todos los análisis
+IntelligenceService.generateFullIntelligence()
+```
+
+**Score de oportunidad (0-100):**
+```
+demanda global (25%) + estacionalidad mes actual (20%)
++ engagement producto (20%) + urgencia por días stock (25%)
++ margen de precio vs mercado (10%)
+```
+
+---
+
+#### [UI_SPECIALIST] — BusinessIntelligenceScreen.jsx (NUEVO)
+
+**Acceso:** AdvancedStatsScreen → botón "BI" (icono cpu) → `navigation.navigate('Intelligence')`
+
+**5 pestañas:**
+
+| Tab | Contenido |
+|-----|-----------|
+| Aprendizajes | Tarjetas colapsables con insight + acción recomendada |
+| Oportunidades | Ranking de productos activos por score de oportunidad |
+| Comparativa | Gráfico de barras doble: personal vs mercado (vendidos o precio) |
+| Tendencias | Tabla mensual con ingresos, ventas y TTS |
+| Categorías | Cards expandibles con análisis por categoría + subcategorías |
+
+**KPI strip:** Total Insights · Top Oportunidades · Score Medio
+
+**Ventana óptima de publicación:** muestra si ahora es PRIME / bueno / esperar, con la próxima ventana prime.
+
+---
+
+#### [ARCHITECT] — DeduplicationScreen.jsx (NUEVO)
+
+**Acceso:** Settings → Import tab → "Buscar duplicados" → `navigation.navigate('Deduplication')`
+
+**Funcionalidad:**
+
+1. **Detectar grupos de duplicados** — productos con mismo título normalizado (activos o vendidos)
+2. **Detectar repostOf corruptos** — `repostOf` apuntando a producto inexistente
+
+**Reglas de deduplicación:**
+- Prioridad 1: conservar el producto con `status === 'sold'`
+- Prioridad 2: entre iguales, conservar el `firstUploadDate` más antiguo
+- El usuario puede cambiar manualmente qué conservar antes de confirmar
+
+**Funciones internas:**
+```js
+normTitle(s)                        // Normaliza título para comparación
+findDuplicateGroups(products)       // Detecta grupos con mismo título
+findCorruptRepostOf(products)       // Detecta repostOf inválidos
+```
+
+**Acciones disponibles:**
+- Eliminar un grupo individualmente (con confirmación Alert)
+- "Eliminar todos" (elimina los duplicados de todos los grupos de una vez)
+- "Limpiar repostOf" (limpia los enlaces corruptos)
+
+**Reglas sagradas respetadas:** Los 7 Campos Sagrados nunca se tocan en el producto conservado.
+
+---
+
+#### [UI_SPECIALIST] — ProductsScreen — Nuevas funcionalidades Sprint 14
+
+**Eliminar producto:**
+- Botón `trash-2` en la esquina inferior derecha de cada tarjeta
+- `Alert.alert` con confirmación antes de borrar
+- `DatabaseService.deleteProduct(id)` + `loadData()` para refrescar
+
+**Ordenar inventario:**
+- Botón "Ordenar" en el header despliega panel con 6 opciones:
+
+| ID | Label | Campo | Dirección |
+|----|-------|-------|-----------|
+| `date_desc` | Más reciente | `firstUploadDate` | desc |
+| `date_asc` | Más antiguo | `firstUploadDate` | asc |
+| `days_desc` | Más tiempo | `daysOld` | desc |
+| `days_asc` | Menos tiempo | `daysOld` | asc |
+| `price_desc` | Mayor precio | `price` | desc |
+| `price_asc` | Menor precio | `price` | asc |
+
+**KPI Panel interactivo:** cada KPI (Crítico / Invisible / Desinterés / Casi listo) es tappable y filtra la lista directamente.
+
+---
+
+#### [UI_SPECIALIST] — SoldHistoryScreen — Nuevas funcionalidades Sprint 14
+
+**Eliminar registro de venta:**
+- Botón `trash-2` en cada tarjeta (lado derecho)
+- Confirmación Alert antes de borrar
+- `DatabaseService.deleteProduct(id)` + `loadData()`
+
+**Ordenar ventas:**
+- Panel desplegable con 6 opciones:
+
+| ID | Label | Campo |
+|----|-------|-------|
+| `date_desc` | Más reciente | `soldDateReal` |
+| `date_asc` | Más antiguo | `soldDateReal` |
+| `price_desc` | Mayor precio | `soldPriceReal` |
+| `price_asc` | Menor precio | `soldPriceReal` |
+| `tts_asc` | Más rápido | TTS calculado |
+| `tts_desc` | Más lento | TTS calculado |
+
+---
+
+#### [QA_ENGINEER] — VintedImportScreen Fixes Sprint 14
+
+**Fix handleConfirmC:** Usaba `getInventory()/saveInventory()` (inexistentes) → ahora usa `DatabaseService.importFromVinted()`.
+
+**Fix handleConfirmD/E:** Usaba `VintedSalesDB.bulkInsert()` (inexistente) → ahora usa `VintedSalesDB.saveRecords()`.
+
+---
+
+#### [ARCHITECT] — DatabaseService: detectRepost mejorado
+
+**Bug:** 5 productos con título genérico ("Producto sin título") se enlazaban como resubidas entre sí.
+
+**Fix:**
+```js
+const GENERIC_TITLES = new Set([
+  'producto sin título', 'sin título', 'artículo', 'product', 'item', '',
+]);
+
+function detectRepost(existingProducts, newProduct) {
+  const t1 = norm(newProduct.title);
+  // No hacer match en títulos genéricos o muy cortos
+  if (GENERIC_TITLES.has(t1) || t1.length < 15) return null;
+  const hasLetters = /[a-záéíóúüñ]{3}/i.test(t1);
+  if (!hasLetters) return null;
+  // Precio similar (±50%) para evitar falsos positivos
+  // ...
+}
+```
+
+---
+
+#### [DATA_SCIENTIST] — Anti-duplicados en importFromVinted
+
+**Bug:** Al importar JSON de escaparate, productos vendidos con mismo título se creaban múltiples veces.
+
+**Fix:** Índice `_soldByTitle` construido antes del bucle de merge:
+```js
+const _soldByTitle = new Map();
+current.forEach(ex => {
+  if (ex.status === 'sold' && ex.soldPriceReal) {
+    const key = _normTitle(ex.title);
+    _soldByTitle.get(key)?.push(ex) ?? _soldByTitle.set(key, [ex]);
+  }
+});
+
+// En el bucle: skip si ya existe sold con este título y precio real
+if (p.status === 'sold') {
+  const _key = _normTitle(p.title);
+  if ((_soldByTitle.get(_key) || []).length > 0) return; // skip
+}
+```
+
+---
+
+#### [ARCHITECT] — DatabaseService.importFullDatabase fix
+
+**Bug:** Al restaurar BBDD, la config y el diccionario no se guardaban si el array de productos ya tenía datos (hacía merge en lugar de restauración).
+
+**Fix:** Config y diccionario se restauran **siempre**, independientemente de si hubo productos nuevos:
+```js
+// [FIX] Restaurar config, dictionary y dictionaryFull siempre
+if (payload.config) {
+  this.saveConfig(payload.config);
+  result.configRestored = true;
+}
+if (payload.dictionary && Object.keys(payload.dictionary).length > 0) {
+  storage.set(KEYS.DICTIONARY, JSON.stringify(payload.dictionary));
+}
+if (payload.dictionaryFull && Object.keys(payload.dictionaryFull).length > 0) {
+  storage.set(KEYS.FULL_DICTIONARY, JSON.stringify(payload.dictionaryFull));
+}
+```
+
+---
+
+#### Archivos Sprint 14
+
+| Fichero | Tipo | Cambio |
+|---------|------|--------|
+| `theme.js` | **NUEVO** | Design System v2 completo |
+| `services/IntelligenceService.js` | **NUEVO** | Motor BI con benchmarks + bayesian blend |
+| `screens/BusinessIntelligenceScreen.jsx` | **NUEVO** | Pantalla BI con 5 tabs |
+| `screens/DeduplicationScreen.jsx` | **NUEVO** | Pantalla deduplicación inventario |
+| `screens/DashboardScreen.jsx` | Migrado | theme.js + FONT_FAMILY.mono |
+| `screens/ProductsScreen.jsx` | Ampliado | theme.js + eliminar + ordenar + KPI interactivo |
+| `screens/SoldHistoryScreen.jsx` | Ampliado | theme.js + eliminar + ordenar |
+| `screens/AdvancedStatsScreen.jsx` | Migrado | theme.js + botón "BI" en header |
+| `screens/SettingsScreen.jsx` | Migrado | theme.js + useRef (Regla 9) |
+| `screens/VintedImportScreen.jsx` | Fix + Migrado | theme.js + fix handleConfirmC/D/E |
+| `screens/ProductDetailScreen.jsx` | Migrado | theme.js + markProductAsSold |
+| `screens/SoldEditDetailView.jsx` | Migrado | theme.js |
+| `screens/LogsScreen.jsx` | Migrado | theme.js |
+| `screens/DebugScreen.jsx` | Migrado | theme.js |
+| `App.jsx` | Ampliado | +BusinessIntelligenceScreen +DeduplicationScreen en Stack |
+| `services/DatabaseService.js` | Fix | detectRepost + anti-duplicados + importFullDatabase fix |
+
+---
+
+#### Git Workflow — Sprint 14
+
+```bash
+git checkout -b feature/sprint14-ds2-bi-dedup
+
+git add theme.js
+git add services/IntelligenceService.js
+git add screens/BusinessIntelligenceScreen.jsx
+git add screens/DeduplicationScreen.jsx
+git add screens/DashboardScreen.jsx
+git add screens/ProductsScreen.jsx
+git add screens/SoldHistoryScreen.jsx
+git add screens/AdvancedStatsScreen.jsx
+git add screens/SettingsScreen.jsx
+git add screens/VintedImportScreen.jsx
+git add screens/ProductDetailScreen.jsx
+git add screens/SoldEditDetailView.jsx
+git add screens/LogsScreen.jsx
+git add screens/DebugScreen.jsx
+git add App.jsx
+git add services/DatabaseService.js
+git add SYSTEM_DESIGN.md
+
+git commit -m "feat(sprint14): Design System v2 + Business Intelligence + Deduplicación
+
+[ARCHITECT]
+- theme.js: Design System v2 centralizado (paleta, tipografía, espaciado, sombras)
+  Todas las pantallas migradas de DS local a theme.js importado
+- DatabaseService: fix detectRepost con GENERIC_TITLES + anti-duplicados sold
+- DatabaseService.importFullDatabase: config+dict siempre restaurados
+- App.jsx: +Intelligence y +Deduplication en Stack.Navigator
+
+[DATA_SCIENTIST]
+- IntelligenceService.js: motor BI con benchmarks globales Vinted España
+  Bayesian blend: combina prior global (30%) con historial personal (70% a partir de 10 ventas)
+  getCategoryAnalysis: TTS personal vs global + score oportunidad (0-100)
+  getPriceRecommendation: precio óptimo con justificación narrativa
+  getPublishWindowStatus: ventana prime de publicación en tiempo real
+  getProductOpportunities: ranking activos por score de oportunidad
+  getPersonalLearnings: aprendizajes narrativos personalizados
+  generateFullIntelligence: orquesta todos los análisis async
+
+[UI_SPECIALIST]
+- BusinessIntelligenceScreen: 5 tabs (Aprendizajes/Oportunidades/Comparativa/Tendencias/Categorías)
+  KPI strip: totalInsights · topOpportunities · avgScore
+  LearningCard: colapsable con insight + acción + botón ejecutar
+  OpportunityCard: score, precio actual vs sugerido, ventana publicación
+  Gráfico barras doble: personal vs mercado (toggle vendidos/precio)
+- DeduplicationScreen: detecta duplicados por título normalizado + repostOf corruptos
+  Reglas: prefer sold > prefer oldest firstUploadDate
+  Acciones: eliminar individual / eliminar todos / limpiar repostOf
+- ProductsScreen: +eliminar (trash-2) + ordenar (6 opciones) + KPI tap-to-filter
+- SoldHistoryScreen: +eliminar (trash-2) + ordenar (6 opciones)
+
+[QA_ENGINEER]
+- VintedImportScreen: fix handleConfirmC → importFromVinted() (no getInventory)
+  fix handleConfirmD/E → VintedSalesDB.saveRecords() (no bulkInsert)
+- DeduplicationScreen: Los 7 Campos Sagrados intactos en producto conservado
+- theme.js: FONT_FAMILY.mono en todos los precios/fechas numéricos
+
+[LIBRARIAN]
+- SYSTEM_DESIGN.md: Sprint 14 completamente documentado
+- Mapa de ficheros actualizado con nuevas pantallas y servicios"
+
+git checkout main
+git merge --no-ff feature/sprint14-ds2-bi-dedup -m "merge: Sprint 14 DS v2 + BI + Dedup"
+```
+
+---
+
+## 📐 MMKV Keys — Tabla Maestra
+
+| Key | Tipo | Propietario | Descripción |
+|-----|------|-------------|-------------|
+| `products` | JSON Array | [ARCHITECT] | Array maestro de productos |
+| `app_user_config` | JSON Obj | [ARCHITECT] | Config global del usuario |
+| `app_pin` | String | [SECURITY] | PIN — SAGRADO |
+| `app_password` | String | [SECURITY] | Password — SAGRADO |
+| `session_authed_until` | Number ms | [SECURITY] | Expiry sesión — SAGRADO |
+| `custom_dictionary` | JSON | [ARCHITECT] | Dict legacy Cat→Tags |
+| `custom_dictionary_full` | JSON | [ARCHITECT] | Dict Cat→Subcat→Tags |
+| `import_log` | JSON Array | [QA_ENGINEER] | Últimas 50 importaciones |
+| `emergency_backup` | JSON | [SECURITY] | Backup emergencia — SAGRADO |
+| `schema_version` | String | [MIGRATION] | Versión schema — SAGRADO |
+
+**FileSystem (Sprint 10+):**
+```
+<documentDirectory>/resellhub_auto_backup.json
+  → Backup automático de todos los datos MMKV críticos
+  → Escrito con debounce 3s tras cada escritura MMKV
+  → Restaurado automáticamente al arrancar si MMKV vacío
+```
+
+---
+
+## ✅ Checklist Pre-Entrega
+
+```
+[ ] App.jsx tiene exactamente 6 Tab.Screen
+[ ] Tab 6 = VintedImportScreen (label "Importar", icon "upload-cloud")
+[ ] LogsScreen está como Stack.Screen name="Logs", NO como Tab
+[ ] Intelligence está como Stack.Screen name="Intelligence"
+[ ] Deduplication está como Stack.Screen name="Deduplication"
+[ ] Todos los hooks antes de early returns (Regla 3 / Regla 12)
+[ ] Guards (?? 0) en todos los .toFixed() sobre campos de KPIs (Regla 14)
+[ ] _triggerBackup() en DatabaseService para todos los métodos de escritura (Regla 15)
+[ ] autoRestoreIfNeeded() en App.jsx antes de setIsReady(true)
+[ ] Handlers con estado anidado usan useRef como mirror (Regla 9)
+[ ] updateDictionary() sincroniza dictionaryRef y dictionary state
+[ ] Los 7 Campos Sagrados no tocados en importaciones
+[ ] theme.js importado en todas las pantallas (no DS local)
+[ ] SYSTEM_DESIGN.md documenta el sprint entregado
+[ ] Archivos entregados COMPLETOS — nunca fragmentos (Regla 8)
+```
+
+---
+
+## 🤖 Flujos de Orquestación
+
+### Workflow: Nuevo Producto Detectado
+```
+DEVOPS.directory_watcher → ARCHITECT.image_pipeline → ARCHITECT.extract_metadata
+→ DATA_SCIENTIST.staleness_score(init=0) → UI_SPECIALIST.show_pending
+→ QA.LogService.info('PRODUCT_INGESTED', {id, title, brand})
+```
+
+### Workflow: Importación JSON Vinted
+```
+VintedImportScreen.DocumentPicker → FileSystem.readAsStringAsync
+→ detectContentType → parseJson[Products|SalesCurrent|SalesHistory]
+→ Preview + selección por checkboxes → ConfirmModal
+→ MODO C: importFromVinted() → autoRegisterCategories()
+→ MODO D: matchHistoryToInventory() → saveRecords()
+→ MODO E: matchHistoryToInventory() → saveRecords()
+→ _triggerBackup() → LogService.logImportResult()
+```
+
+### Workflow: Resubida
+```
+SECURITY_OFFICER.vinted_safety → ARCHITECT.image_pipeline(crop+1px)
+→ DATA_SCIENTIST.price_optimizer → GROWTH_HACKER.republish_strategy
+→ ARCHITECT.smart_merge(republishCount++) → UI.show_copy_card
+→ QA.LogService.info('PRODUCT_REPUBLISHED', {id, newPrice})
+```
+
+### Workflow: Marcar como Vendido
+```
+ProductDetailScreen → SoldModal (precio + fecha)
+→ DatabaseService.markAsSold(id, soldPriceReal, soldDateReal, false)
+→ DATA_SCIENTIST.calcTTS(product) → actualiza avgTTS por categoría
+→ GROWTH_HACKER.recalibra categorías Relámpago/Ancla
+→ UI animación celebración → mueve a "Vendidos"
+→ _triggerBackup()
+```
+
+### Workflow: Business Intelligence
+```
+AdvancedStatsScreen → botón "BI"
+→ BusinessIntelligenceScreen → IntelligenceService.generateFullIntelligence()
+  → getCategoryAnalysis() → bayesianBlend(global, personal)
+  → getProductOpportunities() → scores 0-100
+  → getPersonalLearnings() → insights narrativos
+  → getPublishWindowStatus() → ventana óptima actual
+→ 5 tabs: Aprendizajes / Oportunidades / Comparativa / Tendencias / Categorías
+```
+
+### Workflow: Deduplicación
+```
+Settings → Import → "Buscar duplicados"
+→ DeduplicationScreen → findDuplicateGroups(products)
+  → normTitle: lowercase + strip symbols
+  → groups: mismo título → priorizar sold > older firstUploadDate
+→ findCorruptRepostOf: repostOf apunta a ID inexistente
+→ usuario selecciona cuál conservar
+→ DatabaseService.deleteProduct(id) × duplicados
+→ loadData() → ActualizaUI
+```
+
+---
+
+*SYSTEM_DESIGN.md — ResellHub v4.3 · Sprint 14 · Mayo 2026*
+*Generado por [LIBRARIAN] · Mantenido por [ORCHESTRATOR]*
+
+
+# 🏗️ SYSTEM DESIGN — ResellHub
+> **Sprint 14 · Design System v2 · Business Intelligence · Deduplicación**
+> Última actualización: Mayo 2026
+
+---
+
+## 📋 Índice de Sprints
+
+| Sprint | Rama | Descripción |
+|--------|------|-------------|
+| Sprint 1 v4.2 | `feature/sprint1-activation-v4.2` | Los 7 Campos Sagrados + tema AMOLED + modal soldPriceReal |
+| Sprint 2+3 | `feature/sprint2-categorias-globales` | Categorías/subcategorías globales + config canónico |
+| Sprint 4 | `feature/sprint4-light-theme-detail-screens` | Light DS global + rediseño pantallas detalle |
+| Sprint 5 | `feature/vinted-import-mobile` | Módulo importación móvil desde Vinted |
+| Sprint 6 | `feature/vinted-import-mobile (fix)` | Fix completo: 3 formatos importación móvil |
+| Sprint 6 Hotfix | — | SyntaxError ProductsScreen + Deploy v5.0 |
+| Hotfix 2 | — | DS undefined + PS1 parse error + Logging |
+| Hotfix 3 | — | Diagnóstico definitivo de errores repetidos |
+| Sprint 7 | `feature/vinted-import-mobile` | JSON Import Scripts + Deploy Fix (Bare Workflow) |
+| Hotfix 4 | — | JAVA_HOME auto-detection |
+| Sprint 8 | `feature/sprint8-json-import-v2` | DocumentPicker + matchHistoryToInventory + tab Importar |
+| Sprint 8 Fix | — | LogsScreen errors + matchHistoryToInventory fix |
+| Sprint 9 | `feature/sprint9-annual-stats-export-db` | Estadísticas anuales + filtro precios + export BBDD |
+| Sprint 10 | `feature/sprint10-persistent-backup` | Persistencia BBDD ante rebuilds de APK |
+| Sprint 10.1 | `fix/sprint10-navigation-revert` | Fix navegación + mdc v4.2 |
+| Sprint 11 | `feature/sprint11-subcategorias-globales` | Subcategorías en filtros e inventario estacional |
+| Sprint 12 | `fix/sprint12-useeffect-scope` | Fix useEffect fuera del componente → subcategorías invisibles |
+| Hotfix 5 | `fix/hotfix5-export-images-categories` | Export BBDD + imágenes vendidos + categorías |
+| Sprint 13 | `fix/sprint13-seeffect-typo-subcats` | Regla 8: archivos completos + typo seEffect |
+| Sprint 13b | `fix/sprint13b-stale-closure-subcats` | Regla 9: stale closure en SettingsScreen |
+| **Sprint 14** | `feature/sprint14-ds2-bi-dedup` | **Design System v2 + Business Intelligence + Deduplicación** |
+
+---
+
+## 🔑 Las 9 Reglas de Hierro
+
+| # | Regla | Consecuencia si se viola |
+|---|-------|--------------------------|
+| 1 | `SYSTEM_DESIGN.md` es la única fuente de verdad | Regresión de arquitectura |
+| 2 | Los 7 Campos Sagrados son INMUTABLES en imports | Corrupción de datos del usuario |
+| 3 | Hooks SIEMPRE antes de early returns | Crash en runtime (React invariant) |
+| 4 | Tab 6 = VintedImportScreen · LogsScreen = Stack.Screen | UX rota |
+| 5 | `_triggerBackup()` tras CADA escritura MMKV | Pérdida de datos |
+| 6 | `seoTags` eliminado desde v2.1 — nunca reintroducir | Regresión |
+| 7 | Todo trabajo pasa por [ORCHESTRATOR] — sin excepciones | Inconsistencia |
+| 8 | SIEMPRE entregar archivos COMPLETOS — nunca fragmentos | Typos fatales como `seEffect` |
+| 9 | Handlers con estado anidado → usar `useRef` como mirror | Stale closure: datos perdidos silenciosamente |
+
+### Los 7 Campos Sagrados (NUNCA sobreescribir en imports)
+```
+firstUploadDate · category · title · brand · soldPriceReal · soldDateReal · isBundle
+```
+
+---
+
+## 📱 Estado técnico del proyecto
+
+### Stack
+- **Framework:** React Native 0.76 + Expo SDK 52 (bare workflow)
+- **Storage:** react-native-mmkv + FileSystem (doble capa Sprint 10)
+- **Dispositivo objetivo:** Poco X7 Pro (393dp · 120Hz · Android 14)
+- **Bundle ID:** `com.perdigon85.resellhub`
+- **Build:** EAS CLI + `agent-deploy.ps1 v5.3`
+
+### Navegación canónica (App.jsx — 6 tabs fijos)
+```
+Tab 1: Inicio       → DashboardScreen
+Tab 2: Inventario   → ProductsScreen
+Tab 3: Vendidos     → SoldHistoryScreen
+Tab 4: Stats        → AdvancedStatsScreen
+Tab 5: Config       → SettingsScreen
+Tab 6: Importar     → VintedImportScreen
+
+Stack (no tabs):
+  ProductDetail    → ProductDetailScreen
+  SoldEditDetail   → SoldEditDetailView
+  Deduplication    → DeduplicationScreen       ← NUEVO Sprint 14
+  Logs             → LogsScreen
+  Intelligence     → BusinessIntelligenceScreen ← NUEVO Sprint 14
+```
+
+---
+
+## 🗄️ Modelo de Datos (v4.2+)
+
+```js
+{
+  // ─── De Vinted (actualizables en import) ──────────────────────────
+  id:           String,
+  price:        Number,
+  description:  String,
+  images:       String[],
+  status:       'available' | 'sold' | 'active',
+  views:        Number,
+  favorites:    Number,
+  createdAt:    ISO String,
+
+  // ─── LOS 7 SAGRADOS — NUNCA sobreescritos en import ───────────────
+  firstUploadDate: ISO String,   // [1] Fecha real de primera subida
+  category:        String,       // [2] Categoría del diccionario
+  title:           String,       // [3] Título curado
+  brand:           String,       // [4] Marca curada
+  soldPriceReal:   Number?,      // [5] Precio final real de venta
+  soldDateReal:    ISO String?,  // [6] Fecha real de cierre de venta
+  isBundle:        Boolean,      // [7] Lote/pack — init: false
+
+  // ─── Legacy (fallback) ────────────────────────────────────────────
+  // soldPrice / soldDate: mantenidos para retrocompatibilidad
+
+  // ─── Generados por el sistema ────────────────────────────────────
+  subcategory:     String?,
+  priceHistory:    [{ oldPrice, newPrice, date, source }],
+  repostOf:        String?,
+  repostTo:        String?,
+  repostCount:     Number,
+  lastRepostDate:  ISO String?,
+  stale:           Boolean?,
+  staleDetectedAt: ISO String?,
+  lastSync:        ISO String,
+  lastActivity:    ISO String,
+}
+```
+
+---
+
+## 🎨 Design System v2 — theme.js
+
+> **NUEVO Sprint 14** — `theme.js` reemplaza las constantes locales de cada pantalla.
+
+### Fuente de verdad visual
+
+Todas las pantallas importan desde `../theme` (o `../../theme`):
+
+```js
+import {
+  DS, SPACE, RADIUS, SHADOW, TXT, BTN, BTN_TEXT, CARD,
+  LAYOUT, FONT_SIZE, FONT_FAMILY, MONTH_NAMES, MONTH_NAMES_SHORT,
+  ttsColor, ttsEmoji, fmtPrice, fmtDate, fmtDateLong,
+} from '../theme';
+```
+
+### Paleta de colores DS
+
+```js
+export const DS = {
+  // Marca
+  brand:         '#FF4F1A',   // Naranja primario — CTAs, KPI acento
+  brandDim:      'rgba(255,79,26,0.10)',
+  brandMid:      'rgba(255,79,26,0.18)',
+  brandLight:    '#FFF2EE',
+
+  // Superficies
+  white:         '#FFFFFF',
+  surface:       '#FFFFFF',   // Cards elevadas
+  surface2:      '#F6F5F3',   // Fondo de pantalla
+  surface3:      '#EFEDE9',   // Inputs, chips inactivos
+
+  // Bordes
+  border:        'rgba(0,0,0,0.07)',
+  borderMed:     'rgba(0,0,0,0.12)',
+  borderStrong:  'rgba(0,0,0,0.20)',
+
+  // Texto
+  text:          '#0F0E0D',
+  text2:         '#5A5752',
+  text3:         '#A09C97',
+
+  // Semánticos
+  success:       '#1A9E6E',  successDim: '...', successLight: '#E8F7F2',
+  warning:       '#D4820A',  warningDim: '...', warningLight: '#FEF3E2',
+  danger:        '#D63B3B',  dangerDim:  '...', dangerLight:  '#FDEAEA',
+  blue:          '#1A68D4',  blueDim:    '...', blueLight:    '#E8F1FD',
+  purple:        '#7248D4',  purpleDim:  '...', purpleLight:  '#F0EAFF',
+};
+```
+
+### Tipografía
+
+```js
+export const FONT_FAMILY = {
+  body: Platform.select({ ios: 'System', android: 'sans-serif' }),
+  mono: Platform.select({ ios: 'Menlo', android: 'monospace' }),
+};
+
+export const FONT_SIZE = {
+  xs: 10, sm: 12, base: 14, md: 16, lg: 18, xl: 20, '2xl': 24, '3xl': 28, '4xl': 34,
+};
+```
+
+### Tokens de espaciado y radio
+
+```js
+export const SPACE  = { 1:4, 2:8, 3:12, 4:16, 5:20, 6:24, 8:32, 10:40, 12:48, 16:64 };
+export const RADIUS = { sm:8, md:12, lg:18, xl:24, full:999 };
+export const SHADOW = { none:{}, sm:{...}, md:{...}, lg:{...} };
+```
+
+### Componentes estándar exportados
+
+| Export | Uso |
+|--------|-----|
+| `CARD.default / .compact / .flat` | Estilos base de tarjeta |
+| `BADGE / BADGE_TEXT` | Chips de estado |
+| `BTN.primary / .secondary / .ghost / .sm` | Botones |
+| `BTN_TEXT.primary / .secondary` | Texto de botones |
+| `INPUT.base / .focused` | Campos de texto |
+| `TXT.display / .heading / .title / .body / .caption / .label / .price` | Tipografía |
+| `LAYOUT` | `screenPadH`, `headerPadT`, `tabBarH` |
+
+### Helpers exportados
+
+```js
+ttsColor(tts, config)    // → color semántico (DS.success/warning/danger)
+ttsEmoji(tts, config)    // → '⚡' | '🟡' | '⚓'
+fmtPrice(value)          // → "89€" o "89,50€"
+fmtDate(iso)             // → "12 abr 2026"
+fmtDateLong(iso)         // → "12 de abril de 2026"
+```
+
+---
+
+## 🗺️ Mapa de ficheros (Sprint 14)
+
+### Servicios
+| Fichero | Propietario | Descripción |
+|---------|-------------|-------------|
+| `services/DatabaseService.js` | [ARCHITECT] | CRITICO: toda la lógica de datos |
+| `services/VintedParserService.js` | [DATA_SCIENTIST] | Parsers HTML/JSON Vinted |
+| `services/BackupService.js` | [ARCHITECT] | Backup persistente FileSystem |
+| `services/LogService.js` | [DEVOPS] | Logging global |
+| `services/IntelligenceService.js` | [DATA_SCIENTIST] | **NUEVO** Motor BI con benchmarks globales |
+| `services/AIService.js` | — | GPT-4o para análisis de productos |
+| `services/ImageProcessingService.js` | [ARCHITECT] | Anti-hash, galería, cámara |
+| `services/NotificationService.js` | [DEVOPS] | Notificaciones locales |
+| `services/authService.js` | [SECURITY_OFFICER] | Token MMKV |
+
+### Pantallas — Tabs
+| Fichero | Tab | Sprint introducción |
+|---------|-----|---------------------|
+| `screens/DashboardScreen.jsx` | Inicio | Sprint 14 (DS v2) |
+| `screens/ProductsScreen.jsx` | Inventario | Sprint 14 (DS v2 + eliminar + ordenar) |
+| `screens/SoldHistoryScreen.jsx` | Vendidos | Sprint 14 (DS v2 + eliminar + ordenar) |
+| `screens/AdvancedStatsScreen.jsx` | Stats | Sprint 14 (DS v2) |
+| `screens/SettingsScreen.jsx` | Config | Sprint 14 (DS v2 + useRef Regla 9) |
+| `screens/VintedImportScreen.jsx` | Importar | Sprint 14 (DS v2 + fix handlers) |
+
+### Pantallas — Stack Screens
+| Fichero | Ruta | Sprint introducción |
+|---------|------|---------------------|
+| `screens/ProductDetailScreen.jsx` | `ProductDetail` | Sprint 14 (DS v2) |
+| `screens/SoldEditDetailView.jsx` | `SoldEditDetail` | Sprint 14 (DS v2) |
+| `screens/DeduplicationScreen.jsx` | `Deduplication` | **Sprint 14 NUEVO** |
+| `screens/BusinessIntelligenceScreen.jsx` | `Intelligence` | **Sprint 14 NUEVO** |
+| `screens/LogsScreen.jsx` | `Logs` | Sprint 8 fix |
+| `screens/DebugScreen.jsx` | — | Sprint 14 (DS v2) |
+
+### Raíz y config
+| Fichero | Descripción |
+|---------|-------------|
+| `App.jsx` | Navegación, auth, splash, autoRestore |
+| `theme.js` | **NUEVO** Design System v2 — fuente única visual |
+| `CLAUDE.md` | Instrucciones para Claude Projects/Code |
+| `.claude/RULES.md` | 19 reglas maestras |
+| `resellhub_v4.2.mdc` | Reglas Cursor IDE |
+| `agent-deploy.ps1 v5.3` | Script deploy Windows |
+| `eas.json` | Configuración EAS Build |
+| `app.json` | Configuración Expo |
+
+---
+
+## 📋 Changelog completo por sprint
+
+---
+
+### Sprint 1 v4.2 — Los 7 Campos Sagrados
+
+- **[ARCHITECT]** Formalización de 7 campos inmutables en `importFromVinted()`
+- **[DATA_SCIENTIST]** `calcTTS()` usa exclusivamente `soldDateReal`
+- **[UI_SPECIALIST]** Modal `SoldPriceReal` para registrar precio real al vender
+- **[QA_ENGINEER]** Purga definitiva de `autoGenerateSeoTags`
+
+---
+
+### Sprint 2+3 — Categorías Globales
+
+- **[ARCHITECT]** `getMonthlyHistory()` con `categoryBreakdown` por mes
+- **[ARCHITECT]** `getBusinessKPIs()` con campo `topSubcategory`
+- **[ARCHITECT]** `getSmartAlerts()` usa TTS efectivo de subcategoría
+- **[ARCHITECT]** `DEFAULT_CONFIG` +7 parámetros: hotViews, hotFavs, hotDays, daysAlmostReady, favsAlmostReady, opportunityFavs, opportunityDays
+- **[UI_SPECIALIST]** Todas las pantallas con init síncrono: `useState(() => DatabaseService.getConfig())`
+- **[QA_ENGINEER]** Purga de todos los umbrales hardcodeados → `config.*`
+
+---
+
+### Sprint 4 — Light DS Global
+
+- **[ARCHITECT]** Design System Light canónico (`DS`) con paleta `#F8F9FA / #FFFFFF / #FF6B35`
+- **[UI_SPECIALIST]** Migración AMOLED → Light en: Dashboard, SoldEdit, LogsScreen, DebugScreen
+- **[UI_SPECIALIST]** `CalPicker` unificado: header coloreado, selector año, días semana, acento dinámico
+- **[UI_SPECIALIST]** `App.jsx` tabBar: fondo blanco + borde suave
+
+---
+
+### Sprint 5-7 — Módulo Importación Móvil
+
+- **[DATA_SCIENTIST]** `VintedParserService.js`: detectContentType + parsers A/B/C/D/E
+- **[DATA_SCIENTIST]** `VintedSalesDB`: historial económico en MMKV separado
+- **[DATA_SCIENTIST]** `matchHistoryToInventory()`: cruza ventas con inventario
+- **[UI_SPECIALIST]** `VintedImportScreen`: Drop Zone, PreviewCards, ConfirmModals
+- **[DEVOPS]** `agent-deploy.ps1 v5.3`: `-Build/-Local/-Check`, JAVA_HOME auto-detect
+
+---
+
+### Sprint 8 — Import v2 + Tab "Importar"
+
+- **[ARCHITECT]** Tab 6: `LogsScreen` → `VintedImportScreen` (label "Importar")
+- **[ARCHITECT]** `DatabaseService.updateSaleData()`: bypass MANUAL_FIELDS para historial
+- **[UI_SPECIALIST]** `DocumentPicker` + `FileSystem` (sin clipboard)
+- **[ARCHITECT]** `LogsScreen`: restaurado uso directo `backupStorage` (MMKV)
+
+---
+
+### Sprint 9 — Estadísticas Anuales + Export BBDD
+
+- **[DATA_SCIENTIST]** Fix BUG CRÍTICO: `getMonthlyHistory()` key `getMonth()+1`
+- **[DATA_SCIENTIST]** `soldAmt = Math.max(0, ...)` — sin negativos
+- **[ARCHITECT]** `getAnnualHistory()`, `exportFullDatabase()`, `importFullDatabase()`
+- **[QA_ENGINEER]** Filtro `MIN_VALID_PRICE = 0.01` en todos los parsers
+- **[UI_SPECIALIST]** Tab "📅 Por Año" en AdvancedStatsScreen
+- **[UI_SPECIALIST]** Tab "💾 BBDD" en SettingsScreen
+
+---
+
+### Sprint 9.1 — Rediseño KPIs
+
+- **[PRODUCT_OWNER]** Decisión: en segunda mano el "beneficio" es siempre ≤ 0 → métrica inútil
+- **[DATA_SCIENTIST]** Eliminados: `totalProfit`, `avgProfit`, `totalRevenue`, `revenueThisMonth`
+- **[DATA_SCIENTIST]** Nuevos: `totalRecaudacion`, `recaudacionThisMonth`, `rotacion`, `avgPrecioVenta`
+- **[QA_ENGINEER]** Regla 14: Guards `?? 0` en todos los `.toFixed()` sobre KPIs
+
+---
+
+### Sprint 10 — Persistencia ante Rebuilds
+
+- **[ARCHITECT]** `BackupService.js`: triple capa MMKV + FileSystem + Share API
+- **[ARCHITECT]** `DatabaseService._triggerBackup()`: debounce 3s en 6 métodos de escritura
+- **[MIGRATION_MANAGER]** `App.jsx`: `autoRestoreIfNeeded()` antes de `setIsReady(true)`
+- **[UI_SPECIALIST]** SettingsScreen: sección "Auto-Backup" con estado, fecha, tamaño
+
+---
+
+### Sprint 10.1 — Fix Navegación + .mdc v4.2
+
+- **[QA_ENGINEER]** Fix: Sprint 10 entregó tab "Logs" revirtiendo Sprint 8
+- **[LIBRARIAN]** `resellhub_v4.2.mdc`: Reglas 11-17 nuevas
+
+---
+
+### Sprint 11 — Subcategorías Globales en Filtros
+
+- **[ARCHITECT]** `parseSeasonalItem()`: soporta `'Cat'` y `'Cat › Sub'` en seasonalMap
+- **[ARCHITECT]** `productMatchesSeasonal()`: retrocompatible con strings sin `›`
+- **[UI_SPECIALIST]** `ProductsScreen`: filtro 2 niveles (categoría → subcategoría)
+- **[UI_SPECIALIST]** `SoldHistoryScreen`: filtro 2 niveles (categoría → subcategoría)
+- **[UI_SPECIALIST]** `SettingsScreen` calendario: categorías expandibles con subcategorías
+- **[DATA_SCIENTIST]** `VintedParserService.inferCategoryFromTitle()`: clasificador 8 categorías por regex
+
+---
+
+### Sprint 12 — Fix useEffect Scope
+
+**Bug:** Subcategorías no aparecen en modales de edición de categorías.
+
+**Causa raíz:** `useEffect` declarado **fuera** del cuerpo del componente (indentación incorrecta) → se ejecuta a nivel módulo una sola vez al importar → `dict` permanece `{}` cuando el modal abre.
+
+**Fix aplicado en:**
+- `screens/ProductDetailScreen.jsx` — `CatModal.useEffect`: 0 espacios → 2 espacios
+- `screens/SoldEditDetailView.jsx` — `CategoryModal.useEffect`: 1 espacio → 2 espacios
+- `screens/SettingsScreen.jsx` — bloque carga diccionario: nivel módulo → dentro del `useEffect`
+
+---
+
+### Hotfix 5 — Export BBDD + Imágenes Vendidos + Categorías
+
+**BUG-A — Export BBDD:**
+- Causa: `Share.share({ message: json })` falla en Android 13+ con >200KB payload
+- Fix: `expo-sharing` + `Sharing.shareAsync(uri)` con fichero real en `cacheDirectory`
+
+**BUG-B — SoldHistoryScreen:**
+- Causa 1: `renderItem` usaba `p.thumbnail || p.image` — campo inexistente en schema
+- Causa 2: `View` envolvente sin `TouchableOpacity` → tarjeta inerte al pulsar
+- Fix: `p.images?.[0]` como imageUri + `TouchableOpacity` a nivel de tarjeta
+
+**BUG-C — Categorías no persisten:**
+- Causa: `handleSaveDictionary` usaba `new MMKV()` anónimo (distinto al de `DatabaseService`)
+- Fix: `DatabaseService.saveFullDictionary()` + `DatabaseService.saveDictionary()`
+- Fix extra: `VintedImportScreen` auto-registra categorías de productos importados
+
+---
+
+### Sprint 13 — Regla 8: Archivos Completos
+
+**Bug:** Typo `seEffect` en `SettingsScreen` causaba crash silencioso en subcategorías.
+
+**Regla 8 (Regla de Hierro):** NUNCA generar fragmentos de código con instrucciones "reemplaza aquí". SIEMPRE entregar archivos completos listos para sobreescribir.
+
+---
+
+### Sprint 13b — Regla 9: Stale Closure en Handlers
+
+**Bug:** Settings → Categorías → añadir subcategoría → Guardar → subcategorías desaparecen.
+
+**Causa raíz:** `handleSaveDictionary()` leía `dictionary` del closure (stale). Los `setDictionary(prev => ...)` funcionales actualizaban el estado React pero el handler capturaba el valor anterior.
+
+**Fix — Regla 9 (Regla de Hierro):**
+
+```js
+// ✅ useRef como mirror del estado — SIEMPRE fresco
+const dictionaryRef = useRef({});
+const [dictionary, setDictionary] = useState({});
+
+const updateDictionary = (updater) => {
+  if (typeof updater === 'function') {
+    setDictionary(prev => {
+      const next = updater(prev);
+      dictionaryRef.current = next;   // ← ref siempre actualizado
+      return next;
+    });
+  } else {
+    dictionaryRef.current = updater;
+    setDictionary(updater);
+  }
+};
+
+// Handler lee del REF — nunca del closure
+const handleSaveDictionary = () => {
+  const current = dictionaryRef.current;  // ← siempre fresco
+  DatabaseService.saveFullDictionary(current);
+};
+```
+
+**Aplicado en:** `screens/SettingsScreen.jsx` → `dictionaryRef` + `updateDictionary()`.
+
+---
+
+### Sprint 14 — Design System v2 + Business Intelligence + Deduplicación
+
+> **Sprint 14 · feature/sprint14-ds2-bi-dedup**
+> Fecha: Mayo 2026
+
+#### Objetivo
+
+Tres mejoras principales:
+1. Unificar toda la app bajo `theme.js` (Design System v2) — eliminar tokens dispersos en cada pantalla
+2. Implementar pantalla de Business Intelligence con motor de aprendizaje personal
+3. Implementar pantalla de Deduplicación para limpiar inventario con duplicados
+
+---
+
+#### [ARCHITECT] — theme.js (Design System v2)
+
+**Nuevo fichero raíz:** `theme.js` centraliza todos los tokens visuales.
+
+**Pantallas migradas:**
+
+| Pantalla | Estado anterior | Estado Sprint 14 |
+|----------|----------------|-----------------|
+| `DashboardScreen.jsx` | DS Light local | theme.js ✅ |
+| `ProductsScreen.jsx` | DS Light local + funciones nuevas | theme.js ✅ |
+| `SoldHistoryScreen.jsx` | DS Light local + funciones nuevas | theme.js ✅ |
+| `AdvancedStatsScreen.jsx` | DS Light local | theme.js ✅ |
+| `SettingsScreen.jsx` | DS Light local | theme.js ✅ |
+| `VintedImportScreen.jsx` | DS Light local | theme.js ✅ |
+| `ProductDetailScreen.jsx` | DS Light local | theme.js ✅ |
+| `SoldEditDetailView.jsx` | DS Light local | theme.js ✅ |
+| `LogsScreen.jsx` | DS legacy | theme.js ✅ |
+| `DebugScreen.jsx` | DS legacy | theme.js ✅ |
+| `BusinessIntelligenceScreen.jsx` | **NUEVO** | theme.js desde creación ✅ |
+| `DeduplicationScreen.jsx` | **NUEVO** | theme.js desde creación ✅ |
+
+**Cambio de paleta:** `#FF6B35 → #FF4F1A` (brand más saturado), `#F8F9FA → #F6F5F3` (surface2 más cálido).
+
+---
+
+#### [DATA_SCIENTIST] — IntelligenceService.js (NUEVO)
+
+**Archivo:** `services/IntelligenceService.js`
+
+Motor de Business Intelligence que combina dos fuentes:
+
+1. **Mercado global** — Benchmarks calibrados de Vinted España (TTS, precios, estacionalidad)
+2. **Historial personal** — Los datos reales del usuario, mejora con cada venta
+
+**Algoritmo Bayesian Blend:**
+
+```js
+// alpha = peso del prior global (0.3 = 30% global, 70% personal cuando hay ≥10 ventas)
+function bayesianBlend(globalValue, personalValue, personalCount, alpha = 0.3) {
+  if (personalCount === 0) return globalValue;
+  const weight = Math.min(personalCount / 10, 1);
+  return globalValue * (alpha + (1 - alpha) * (1 - weight))
+       + personalValue * (1 - alpha) * weight;
+}
+```
+
+**Benchmarks globales incluidos (Vinted España):**
+
+| Categoría | TTS medio | Precio mediano | Demanda |
+|-----------|-----------|----------------|---------|
+| Videojuegos | 8d | 18€ | Alta (0.88) |
+| Calzado | 10d | 14€ | Alta (0.85) |
+| Ropa Niño | 12d | 6€ | Alta (0.82) |
+| Ropa Mujer | 16d | 9€ | Alta (0.80) |
+| Juguetes | 15d | 8€ | Media-Alta (0.78) |
+| Electrónica | 18d | 25€ | Media (0.72) |
+| Disfraces | 9d | 10€ | Media (0.65) |
+| Libros | 22d | 4€ | Media (0.60) |
+| Hogar | 25d | 12€ | Baja (0.58) |
+
+**Métodos principales:**
+
+```js
+// Análisis personal por categoría con score de oportunidad (0-100)
+IntelligenceService.getCategoryAnalysis()
+
+// Precio óptimo para un producto concreto con justificación
+IntelligenceService.getPriceRecommendation(product)
+
+// Ventana óptima de publicación ahora mismo
+IntelligenceService.getPublishWindowStatus(category)
+
+// Ranking de productos activos por oportunidad de venta
+IntelligenceService.getProductOpportunities()
+
+// Aprendizajes narrativos personalizados
+IntelligenceService.getPersonalLearnings()
+
+// Datos para gráficos: personal vs mercado
+IntelligenceService.getCategoryComparisonData()
+IntelligenceService.getMonthlyTrendData()
+
+// Punto de entrada principal (async) — orquesta todos los análisis
+IntelligenceService.generateFullIntelligence()
+```
+
+**Score de oportunidad (0-100):**
+```
+demanda global (25%) + estacionalidad mes actual (20%)
++ engagement producto (20%) + urgencia por días stock (25%)
++ margen de precio vs mercado (10%)
+```
+
+---
+
+#### [UI_SPECIALIST] — BusinessIntelligenceScreen.jsx (NUEVO)
+
+**Acceso:** AdvancedStatsScreen → botón "BI" (icono cpu) → `navigation.navigate('Intelligence')`
+
+**5 pestañas:**
+
+| Tab | Contenido |
+|-----|-----------|
+| Aprendizajes | Tarjetas colapsables con insight + acción recomendada |
+| Oportunidades | Ranking de productos activos por score de oportunidad |
+| Comparativa | Gráfico de barras doble: personal vs mercado (vendidos o precio) |
+| Tendencias | Tabla mensual con ingresos, ventas y TTS |
+| Categorías | Cards expandibles con análisis por categoría + subcategorías |
+
+**KPI strip:** Total Insights · Top Oportunidades · Score Medio
+
+**Ventana óptima de publicación:** muestra si ahora es PRIME / bueno / esperar, con la próxima ventana prime.
+
+---
+
+#### [ARCHITECT] — DeduplicationScreen.jsx (NUEVO)
+
+**Acceso:** Settings → Import tab → "Buscar duplicados" → `navigation.navigate('Deduplication')`
+
+**Funcionalidad:**
+
+1. **Detectar grupos de duplicados** — productos con mismo título normalizado (activos o vendidos)
+2. **Detectar repostOf corruptos** — `repostOf` apuntando a producto inexistente
+
+**Reglas de deduplicación:**
+- Prioridad 1: conservar el producto con `status === 'sold'`
+- Prioridad 2: entre iguales, conservar el `firstUploadDate` más antiguo
+- El usuario puede cambiar manualmente qué conservar antes de confirmar
+
+**Funciones internas:**
+```js
+normTitle(s)                        // Normaliza título para comparación
+findDuplicateGroups(products)       // Detecta grupos con mismo título
+findCorruptRepostOf(products)       // Detecta repostOf inválidos
+```
+
+**Acciones disponibles:**
+- Eliminar un grupo individualmente (con confirmación Alert)
+- "Eliminar todos" (elimina los duplicados de todos los grupos de una vez)
+- "Limpiar repostOf" (limpia los enlaces corruptos)
+
+**Reglas sagradas respetadas:** Los 7 Campos Sagrados nunca se tocan en el producto conservado.
+
+---
+
+#### [UI_SPECIALIST] — ProductsScreen — Nuevas funcionalidades Sprint 14
+
+**Eliminar producto:**
+- Botón `trash-2` en la esquina inferior derecha de cada tarjeta
+- `Alert.alert` con confirmación antes de borrar
+- `DatabaseService.deleteProduct(id)` + `loadData()` para refrescar
+
+**Ordenar inventario:**
+- Botón "Ordenar" en el header despliega panel con 6 opciones:
+
+| ID | Label | Campo | Dirección |
+|----|-------|-------|-----------|
+| `date_desc` | Más reciente | `firstUploadDate` | desc |
+| `date_asc` | Más antiguo | `firstUploadDate` | asc |
+| `days_desc` | Más tiempo | `daysOld` | desc |
+| `days_asc` | Menos tiempo | `daysOld` | asc |
+| `price_desc` | Mayor precio | `price` | desc |
+| `price_asc` | Menor precio | `price` | asc |
+
+**KPI Panel interactivo:** cada KPI (Crítico / Invisible / Desinterés / Casi listo) es tappable y filtra la lista directamente.
+
+---
+
+#### [UI_SPECIALIST] — SoldHistoryScreen — Nuevas funcionalidades Sprint 14
+
+**Eliminar registro de venta:**
+- Botón `trash-2` en cada tarjeta (lado derecho)
+- Confirmación Alert antes de borrar
+- `DatabaseService.deleteProduct(id)` + `loadData()`
+
+**Ordenar ventas:**
+- Panel desplegable con 6 opciones:
+
+| ID | Label | Campo |
+|----|-------|-------|
+| `date_desc` | Más reciente | `soldDateReal` |
+| `date_asc` | Más antiguo | `soldDateReal` |
+| `price_desc` | Mayor precio | `soldPriceReal` |
+| `price_asc` | Menor precio | `soldPriceReal` |
+| `tts_asc` | Más rápido | TTS calculado |
+| `tts_desc` | Más lento | TTS calculado |
+
+---
+
+#### [QA_ENGINEER] — VintedImportScreen Fixes Sprint 14
+
+**Fix handleConfirmC:** Usaba `getInventory()/saveInventory()` (inexistentes) → ahora usa `DatabaseService.importFromVinted()`.
+
+**Fix handleConfirmD/E:** Usaba `VintedSalesDB.bulkInsert()` (inexistente) → ahora usa `VintedSalesDB.saveRecords()`.
+
+---
+
+#### [ARCHITECT] — DatabaseService: detectRepost mejorado
+
+**Bug:** 5 productos con título genérico ("Producto sin título") se enlazaban como resubidas entre sí.
+
+**Fix:**
+```js
+const GENERIC_TITLES = new Set([
+  'producto sin título', 'sin título', 'artículo', 'product', 'item', '',
+]);
+
+function detectRepost(existingProducts, newProduct) {
+  const t1 = norm(newProduct.title);
+  // No hacer match en títulos genéricos o muy cortos
+  if (GENERIC_TITLES.has(t1) || t1.length < 15) return null;
+  const hasLetters = /[a-záéíóúüñ]{3}/i.test(t1);
+  if (!hasLetters) return null;
+  // Precio similar (±50%) para evitar falsos positivos
+  // ...
+}
+```
+
+---
+
+#### [DATA_SCIENTIST] — Anti-duplicados en importFromVinted
+
+**Bug:** Al importar JSON de escaparate, productos vendidos con mismo título se creaban múltiples veces.
+
+**Fix:** Índice `_soldByTitle` construido antes del bucle de merge:
+```js
+const _soldByTitle = new Map();
+current.forEach(ex => {
+  if (ex.status === 'sold' && ex.soldPriceReal) {
+    const key = _normTitle(ex.title);
+    _soldByTitle.get(key)?.push(ex) ?? _soldByTitle.set(key, [ex]);
+  }
+});
+
+// En el bucle: skip si ya existe sold con este título y precio real
+if (p.status === 'sold') {
+  const _key = _normTitle(p.title);
+  if ((_soldByTitle.get(_key) || []).length > 0) return; // skip
+}
+```
+
+---
+
+#### [ARCHITECT] — DatabaseService.importFullDatabase fix
+
+**Bug:** Al restaurar BBDD, la config y el diccionario no se guardaban si el array de productos ya tenía datos (hacía merge en lugar de restauración).
+
+**Fix:** Config y diccionario se restauran **siempre**, independientemente de si hubo productos nuevos:
+```js
+// [FIX] Restaurar config, dictionary y dictionaryFull siempre
+if (payload.config) {
+  this.saveConfig(payload.config);
+  result.configRestored = true;
+}
+if (payload.dictionary && Object.keys(payload.dictionary).length > 0) {
+  storage.set(KEYS.DICTIONARY, JSON.stringify(payload.dictionary));
+}
+if (payload.dictionaryFull && Object.keys(payload.dictionaryFull).length > 0) {
+  storage.set(KEYS.FULL_DICTIONARY, JSON.stringify(payload.dictionaryFull));
+}
+```
+
+---
+
+#### Archivos Sprint 14
+
+| Fichero | Tipo | Cambio |
+|---------|------|--------|
+| `theme.js` | **NUEVO** | Design System v2 completo |
+| `services/IntelligenceService.js` | **NUEVO** | Motor BI con benchmarks + bayesian blend |
+| `screens/BusinessIntelligenceScreen.jsx` | **NUEVO** | Pantalla BI con 5 tabs |
+| `screens/DeduplicationScreen.jsx` | **NUEVO** | Pantalla deduplicación inventario |
+| `screens/DashboardScreen.jsx` | Migrado | theme.js + FONT_FAMILY.mono |
+| `screens/ProductsScreen.jsx` | Ampliado | theme.js + eliminar + ordenar + KPI interactivo |
+| `screens/SoldHistoryScreen.jsx` | Ampliado | theme.js + eliminar + ordenar |
+| `screens/AdvancedStatsScreen.jsx` | Migrado | theme.js + botón "BI" en header |
+| `screens/SettingsScreen.jsx` | Migrado | theme.js + useRef (Regla 9) |
+| `screens/VintedImportScreen.jsx` | Fix + Migrado | theme.js + fix handleConfirmC/D/E |
+| `screens/ProductDetailScreen.jsx` | Migrado | theme.js + markProductAsSold |
+| `screens/SoldEditDetailView.jsx` | Migrado | theme.js |
+| `screens/LogsScreen.jsx` | Migrado | theme.js |
+| `screens/DebugScreen.jsx` | Migrado | theme.js |
+| `App.jsx` | Ampliado | +BusinessIntelligenceScreen +DeduplicationScreen en Stack |
+| `services/DatabaseService.js` | Fix | detectRepost + anti-duplicados + importFullDatabase fix |
+
+---
+
+#### Git Workflow — Sprint 14
+
+```bash
+git checkout -b feature/sprint14-ds2-bi-dedup
+
+git add theme.js
+git add services/IntelligenceService.js
+git add screens/BusinessIntelligenceScreen.jsx
+git add screens/DeduplicationScreen.jsx
+git add screens/DashboardScreen.jsx
+git add screens/ProductsScreen.jsx
+git add screens/SoldHistoryScreen.jsx
+git add screens/AdvancedStatsScreen.jsx
+git add screens/SettingsScreen.jsx
+git add screens/VintedImportScreen.jsx
+git add screens/ProductDetailScreen.jsx
+git add screens/SoldEditDetailView.jsx
+git add screens/LogsScreen.jsx
+git add screens/DebugScreen.jsx
+git add App.jsx
+git add services/DatabaseService.js
+git add SYSTEM_DESIGN.md
+
+git commit -m "feat(sprint14): Design System v2 + Business Intelligence + Deduplicación
+
+[ARCHITECT]
+- theme.js: Design System v2 centralizado (paleta, tipografía, espaciado, sombras)
+  Todas las pantallas migradas de DS local a theme.js importado
+- DatabaseService: fix detectRepost con GENERIC_TITLES + anti-duplicados sold
+- DatabaseService.importFullDatabase: config+dict siempre restaurados
+- App.jsx: +Intelligence y +Deduplication en Stack.Navigator
+
+[DATA_SCIENTIST]
+- IntelligenceService.js: motor BI con benchmarks globales Vinted España
+  Bayesian blend: combina prior global (30%) con historial personal (70% a partir de 10 ventas)
+  getCategoryAnalysis: TTS personal vs global + score oportunidad (0-100)
+  getPriceRecommendation: precio óptimo con justificación narrativa
+  getPublishWindowStatus: ventana prime de publicación en tiempo real
+  getProductOpportunities: ranking activos por score de oportunidad
+  getPersonalLearnings: aprendizajes narrativos personalizados
+  generateFullIntelligence: orquesta todos los análisis async
+
+[UI_SPECIALIST]
+- BusinessIntelligenceScreen: 5 tabs (Aprendizajes/Oportunidades/Comparativa/Tendencias/Categorías)
+  KPI strip: totalInsights · topOpportunities · avgScore
+  LearningCard: colapsable con insight + acción + botón ejecutar
+  OpportunityCard: score, precio actual vs sugerido, ventana publicación
+  Gráfico barras doble: personal vs mercado (toggle vendidos/precio)
+- DeduplicationScreen: detecta duplicados por título normalizado + repostOf corruptos
+  Reglas: prefer sold > prefer oldest firstUploadDate
+  Acciones: eliminar individual / eliminar todos / limpiar repostOf
+- ProductsScreen: +eliminar (trash-2) + ordenar (6 opciones) + KPI tap-to-filter
+- SoldHistoryScreen: +eliminar (trash-2) + ordenar (6 opciones)
+
+[QA_ENGINEER]
+- VintedImportScreen: fix handleConfirmC → importFromVinted() (no getInventory)
+  fix handleConfirmD/E → VintedSalesDB.saveRecords() (no bulkInsert)
+- DeduplicationScreen: Los 7 Campos Sagrados intactos en producto conservado
+- theme.js: FONT_FAMILY.mono en todos los precios/fechas numéricos
+
+[LIBRARIAN]
+- SYSTEM_DESIGN.md: Sprint 14 completamente documentado
+- Mapa de ficheros actualizado con nuevas pantallas y servicios"
+
+git checkout main
+git merge --no-ff feature/sprint14-ds2-bi-dedup -m "merge: Sprint 14 DS v2 + BI + Dedup"
+```
+
+---
+
+## 📐 MMKV Keys — Tabla Maestra
+
+| Key | Tipo | Propietario | Descripción |
+|-----|------|-------------|-------------|
+| `products` | JSON Array | [ARCHITECT] | Array maestro de productos |
+| `app_user_config` | JSON Obj | [ARCHITECT] | Config global del usuario |
+| `app_pin` | String | [SECURITY] | PIN — SAGRADO |
+| `app_password` | String | [SECURITY] | Password — SAGRADO |
+| `session_authed_until` | Number ms | [SECURITY] | Expiry sesión — SAGRADO |
+| `custom_dictionary` | JSON | [ARCHITECT] | Dict legacy Cat→Tags |
+| `custom_dictionary_full` | JSON | [ARCHITECT] | Dict Cat→Subcat→Tags |
+| `import_log` | JSON Array | [QA_ENGINEER] | Últimas 50 importaciones |
+| `emergency_backup` | JSON | [SECURITY] | Backup emergencia — SAGRADO |
+| `schema_version` | String | [MIGRATION] | Versión schema — SAGRADO |
+
+**FileSystem (Sprint 10+):**
+```
+<documentDirectory>/resellhub_auto_backup.json
+  → Backup automático de todos los datos MMKV críticos
+  → Escrito con debounce 3s tras cada escritura MMKV
+  → Restaurado automáticamente al arrancar si MMKV vacío
+```
+
+---
+
+## ✅ Checklist Pre-Entrega
+
+```
+[ ] App.jsx tiene exactamente 6 Tab.Screen
+[ ] Tab 6 = VintedImportScreen (label "Importar", icon "upload-cloud")
+[ ] LogsScreen está como Stack.Screen name="Logs", NO como Tab
+[ ] Intelligence está como Stack.Screen name="Intelligence"
+[ ] Deduplication está como Stack.Screen name="Deduplication"
+[ ] Todos los hooks antes de early returns (Regla 3 / Regla 12)
+[ ] Guards (?? 0) en todos los .toFixed() sobre campos de KPIs (Regla 14)
+[ ] _triggerBackup() en DatabaseService para todos los métodos de escritura (Regla 15)
+[ ] autoRestoreIfNeeded() en App.jsx antes de setIsReady(true)
+[ ] Handlers con estado anidado usan useRef como mirror (Regla 9)
+[ ] updateDictionary() sincroniza dictionaryRef y dictionary state
+[ ] Los 7 Campos Sagrados no tocados en importaciones
+[ ] theme.js importado en todas las pantallas (no DS local)
+[ ] SYSTEM_DESIGN.md documenta el sprint entregado
+[ ] Archivos entregados COMPLETOS — nunca fragmentos (Regla 8)
+```
+
+---
+
+## 🤖 Flujos de Orquestación
+
+### Workflow: Nuevo Producto Detectado
+```
+DEVOPS.directory_watcher → ARCHITECT.image_pipeline → ARCHITECT.extract_metadata
+→ DATA_SCIENTIST.staleness_score(init=0) → UI_SPECIALIST.show_pending
+→ QA.LogService.info('PRODUCT_INGESTED', {id, title, brand})
+```
+
+### Workflow: Importación JSON Vinted
+```
+VintedImportScreen.DocumentPicker → FileSystem.readAsStringAsync
+→ detectContentType → parseJson[Products|SalesCurrent|SalesHistory]
+→ Preview + selección por checkboxes → ConfirmModal
+→ MODO C: importFromVinted() → autoRegisterCategories()
+→ MODO D: matchHistoryToInventory() → saveRecords()
+→ MODO E: matchHistoryToInventory() → saveRecords()
+→ _triggerBackup() → LogService.logImportResult()
+```
+
+### Workflow: Resubida
+```
+SECURITY_OFFICER.vinted_safety → ARCHITECT.image_pipeline(crop+1px)
+→ DATA_SCIENTIST.price_optimizer → GROWTH_HACKER.republish_strategy
+→ ARCHITECT.smart_merge(republishCount++) → UI.show_copy_card
+→ QA.LogService.info('PRODUCT_REPUBLISHED', {id, newPrice})
+```
+
+### Workflow: Marcar como Vendido
+```
+ProductDetailScreen → SoldModal (precio + fecha)
+→ DatabaseService.markAsSold(id, soldPriceReal, soldDateReal, false)
+→ DATA_SCIENTIST.calcTTS(product) → actualiza avgTTS por categoría
+→ GROWTH_HACKER.recalibra categorías Relámpago/Ancla
+→ UI animación celebración → mueve a "Vendidos"
+→ _triggerBackup()
+```
+
+### Workflow: Business Intelligence
+```
+AdvancedStatsScreen → botón "BI"
+→ BusinessIntelligenceScreen → IntelligenceService.generateFullIntelligence()
+  → getCategoryAnalysis() → bayesianBlend(global, personal)
+  → getProductOpportunities() → scores 0-100
+  → getPersonalLearnings() → insights narrativos
+  → getPublishWindowStatus() → ventana óptima actual
+→ 5 tabs: Aprendizajes / Oportunidades / Comparativa / Tendencias / Categorías
+```
+
+### Workflow: Deduplicación
+```
+Settings → Import → "Buscar duplicados"
+→ DeduplicationScreen → findDuplicateGroups(products)
+  → normTitle: lowercase + strip symbols
+  → groups: mismo título → priorizar sold > older firstUploadDate
+→ findCorruptRepostOf: repostOf apunta a ID inexistente
+→ usuario selecciona cuál conservar
+→ DatabaseService.deleteProduct(id) × duplicados
+→ loadData() → ActualizaUI
+```
+
+---
+
+*SYSTEM_DESIGN.md — ResellHub v4.3 · Sprint 14 · Mayo 2026*
+*Generado por [LIBRARIAN] · Mantenido por [ORCHESTRATOR]*
