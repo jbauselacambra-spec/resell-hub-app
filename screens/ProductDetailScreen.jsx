@@ -3,6 +3,17 @@
  * 1. Subcategorías: CategoryModal recarga el dict en cada apertura (useEffect con [visible])
  * 2. Fecha -1 día: CalPicker usa new Date(yr, mo, d, 12) — mediodía local → sin desfase UTC
  * 3. Guardar: updateProduct recibe objeto completo con id; refreshProduct busca en todos los productos
+ *
+ * [FIX post-auditoría]
+ * La sección "ETIQUETAS" en modo VISTA leía `product.tags`, un campo que no
+ * existe en el modelo de datos (SYSTEM_DESIGN.md sección 5) — nada en
+ * DatabaseService/VintedParserService lo asigna. Resultado: la sección casi
+ * nunca aparece, y si aparece (por un campo `tags` suelto en el JSON
+ * scrapeado) queda congelada en el momento del import, sin reflejar cambios
+ * posteriores de categoría/subcategoría. El modo EDICIÓN de esta misma
+ * pantalla sí lo hace bien (`currentTags`, derivado en caliente del
+ * diccionario). Se unifica el modo vista para usar la misma fuente:
+ * `DatabaseService.getCategoryTags(category, subcategory)`.
  */
 
 import React, { useState, useMemo, useCallback } from 'react';
@@ -169,7 +180,6 @@ const cS = StyleSheet.create({
 
 // ─── CategoryModal ────────────────────────────────────────────────────────────
 // FIX #1: dict se recarga en cada apertura con useEffect([visible])
-// ─── CategoryModal — reemplazar SOLO la función CategoryModal ────────────────
 function CategoryModal({ visible, onClose, currentCat, currentSub, onSelect }) {
   const [dict,   setDict]   = useState({});
   const [selCat, setSelCat] = useState(currentCat || '');
@@ -433,6 +443,17 @@ export default function ProductDetailScreen({ route, navigation }) {
     return tags;
   }, [editData.category, editData.subcategory, dict]);
 
+  // [FIX post-auditoría] Antes: `product.tags` — campo que ningún proceso del
+  // sistema asigna nunca. Ahora: se deriva del diccionario en vivo con
+  // DatabaseService.getCategoryTags(), la misma fuente de verdad que usa el
+  // modo edición (`currentTags`), así que el modo vista siempre muestra los
+  // tags reales de la categoría/subcategoría actual del producto, no un
+  // valor congelado del momento del import.
+  const viewTags = useMemo(
+    () => DatabaseService.getCategoryTags(product.category, product.subcategory),
+    [product.category, product.subcategory],
+  );
+
   const sev       = product.severity;
   const heroColor = sev ? sev.color : (product.isHot ? DS.danger : DS.brand);
 
@@ -521,12 +542,12 @@ export default function ProductDetailScreen({ route, navigation }) {
             </View>
           </View>
 
-          {/* Tags */}
-          {product.tags && product.tags.length > 0 && (
+          {/* Tags — [FIX] derivados del diccionario, no de product.tags */}
+          {viewTags.length > 0 && (
             <View style={s.tagsSection}>
               <Text style={s.sectionLabel}>ETIQUETAS</Text>
               <View style={s.tagsCloud}>
-                {product.tags.map((tag, i) => (
+                {viewTags.map((tag, i) => (
                   <View key={i} style={s.tag}><Text style={s.tagTxt}>{tag}</Text></View>
                 ))}
               </View>

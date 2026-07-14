@@ -16,6 +16,17 @@
  *  - El usuario puede cambiar manualmente qué conservar antes de confirmar.
  *
  * [QA_ENGINEER] Los 7 Campos Sagrados: nunca se tocan en el producto conservado.
+ *
+ * [FIX post-auditoría — CRÍTICO]
+ * `handleFixCorruptRepostOf()` llamaba a `DatabaseService.updateProduct(p.id,
+ * { repostOf: null })` con DOS argumentos. `updateProduct()` solo acepta UNO:
+ * un objeto que ya incluye `.id`. El segundo argumento se descartaba
+ * silenciosamente; `updated.id` sobre el string `p.id` es `undefined`, el
+ * findIndex nunca encontraba el producto y la función devolvía `false` sin
+ * escribir nada. El botón "Limpiar repostOf corruptos" no limpiaba
+ * absolutamente nada — el contador de corruptos nunca bajaba porque
+ * loadData() volvía a detectar los mismos productos. Misma clase de bug
+ * encontrada en SoldEditDetailView.jsx (tercera aparición en el proyecto).
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -270,6 +281,12 @@ export default function DeduplicationScreen({ navigation }) {
     );
   };
 
+  // [FIX post-auditoría — CRÍTICO] updateProduct() acepta UN único objeto con
+  // `.id` incluido, no (id, updates). Antes: DatabaseService.updateProduct(
+  // p.id, { repostOf: null }) — el 2º argumento se descartaba, updated.id
+  // era undefined, el findIndex nunca encontraba el producto y la función
+  // devolvía false SIN LIMPIAR NADA. El botón parecía funcionar (log de
+  // éxito + recarga) pero el contador de corruptos nunca bajaba.
   const handleFixCorruptRepostOf = () => {
     Alert.alert(
       'Limpiar repostOf corruptos',
@@ -281,10 +298,16 @@ export default function DeduplicationScreen({ navigation }) {
           onPress: () => {
             setProcessing(true);
             try {
+              let fixed = 0;
               corruptRepostOf.forEach(p => {
-                DatabaseService.updateProduct(p.id, { repostOf: null });
+                const ok = DatabaseService.updateProduct({ ...p, repostOf: null });
+                if (ok) fixed++;
+                else LogService.warn(`Dedup: no se pudo limpiar repostOf de ${p.id}`, LOG_CTX.DB);
               });
-              LogService.add(`🔗 Dedup: limpiados ${corruptRepostOf.length} repostOf corruptos`, 'success');
+              LogService.add(`🔗 Dedup: limpiados ${fixed}/${corruptRepostOf.length} repostOf corruptos`, 'success');
+              if (fixed < corruptRepostOf.length) {
+                Alert.alert('Aviso', `Se limpiaron ${fixed} de ${corruptRepostOf.length}. Revisa los logs para el resto.`);
+              }
               loadData();
             } catch (e) {
               LogService.error('Deduplication.handleFixCorruptRepostOf', LOG_CTX.DB, e.message);

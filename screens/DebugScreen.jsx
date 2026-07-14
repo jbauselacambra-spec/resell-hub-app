@@ -3,11 +3,33 @@
  *
  * REFACTORIZADO para usar theme.js (ResellHub Design System v2)
  * - Visualización de logs del sistema
- * - Filtros por tipo (info, success, error)
+ * - Filtros por nivel (info, success, error, warn, debug, critical)
  * - Botón para limpiar logs
+ *
+ * [FIX post-auditoría — CRÍTICO]
+ * Este componente llamaba a una API de LogService que ya no existe:
+ *   `LogService.logs`      → undefined (no hay array en memoria)
+ *   `LogService.subscribe` → no existe (no hay patrón pub-sub)
+ * LogService v2.0 persiste en MMKV y expone getLogs()/getStats()/clear().
+ * El useEffect original crasheaba SIEMPRE al montar con
+ * `TypeError: undefined is not iterable` al hacer `[...LogService.logs]`.
+ *
+ * El esquema de cada entrada también cambió:
+ *   ANTES: { id, type, time, text }
+ *   AHORA: { id, level, tsDisplay, message, context, caller, emoji, color, extra }
+ *
+ * [NOTA IMPORTANTE]
+ * Este componente no está registrado en App.jsx (ni como Tab.Screen ni como
+ * Stack.Screen) — es código huérfano. `LogsScreen.jsx` es la pantalla de logs
+ * activa (Stack.Screen name="Logs") y ya cubre esta función con más
+ * capacidades (filtro por contexto, búsqueda, backup/restaurar/reset).
+ * Recomendación: valorar eliminar este fichero en la próxima purga
+ * (QA_ENGINEER · CLEAN_CODE_PURGE) en vez de mantenerlo duplicado.
+ * Se corrige aquí igualmente para que, si se conserva o se vuelve a
+ * registrar en algún momento, no rompa la app.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet, ScrollView,
 } from 'react-native';
@@ -22,44 +44,61 @@ import {
 
 const DebugScreen = () => {
   const [logs, setLogs] = useState([]);
-  const [filter, setFilter] = useState('all'); // 'all' | 'info' | 'success' | 'error'
+  const [filter, setFilter] = useState('all'); // 'all' | 'info' | 'success' | 'error' | 'warn' | 'debug' | 'critical'
 
-  useEffect(() => {
-    setLogs([...LogService.logs]);
-    return LogService.subscribe(newLogs => setLogs([...newLogs]));
+  // [FIX] getLogs() en vez de leer `.logs` (no existe) — refresco manual,
+  // no hay pub-sub en LogService v2.0.
+  const refresh = useCallback(() => {
+    try {
+      setLogs(LogService.getLogs());
+    } catch (e) {
+      console.warn('DebugScreen.refresh:', e.message);
+    }
   }, []);
 
-  // Filtrar logs según el tipo seleccionado
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  // Filtrar logs según el nivel seleccionado
+  // [FIX] `level`, no `type` — el campo se renombró en LogService v2.0
   const filteredLogs = filter === 'all'
     ? logs
-    : logs.filter(log => log.type === filter);
+    : logs.filter(log => log.level === filter);
 
-  // Contadores por tipo
+  // Contadores por nivel — [FIX] getStats() en vez de calcular a mano sobre `.logs`
+  const stats = LogService.getStats();
   const counts = {
-    all: logs.length,
-    info: logs.filter(l => l.type === 'info').length,
-    success: logs.filter(l => l.type === 'success').length,
-    error: logs.filter(l => l.type === 'error').length,
+    all:      stats.total,
+    info:     stats.info,
+    success:  stats.success,
+    error:    stats.error,
   };
 
   const renderItem = ({ item }) => {
-    // Color según tipo
-    const typeColor = item.type === 'success'
+    // Color según nivel — [FIX] `level`, no `type`
+    const typeColor = item.level === 'success'
       ? DS.success
-      : item.type === 'error'
+      : item.level === 'error' || item.level === 'critical'
       ? DS.danger
+      : item.level === 'warn'
+      ? DS.warning
       : DS.blue;
 
-    const typeBg = item.type === 'success'
+    const typeBg = item.level === 'success'
       ? DS.successLight
-      : item.type === 'error'
+      : item.level === 'error' || item.level === 'critical'
       ? DS.dangerLight
+      : item.level === 'warn'
+      ? DS.warningLight
       : DS.blueLight;
 
-    const typeIcon = item.type === 'success'
+    const typeIcon = item.level === 'success'
       ? 'check-circle'
-      : item.type === 'error'
+      : item.level === 'error' || item.level === 'critical'
       ? 'alert-circle'
+      : item.level === 'warn'
+      ? 'alert-triangle'
       : 'info';
 
     return (
@@ -68,9 +107,11 @@ const DebugScreen = () => {
           <View style={[styles.typeIcon, { backgroundColor: typeBg }]}>
             <Icon name={typeIcon} size={12} color={typeColor} />
           </View>
-          <Text style={styles.logTime}>{item.time}</Text>
+          {/* [FIX] tsDisplay, no time */}
+          <Text style={styles.logTime}>{item.tsDisplay}</Text>
         </View>
-        <Text style={[styles.logText, { color: typeColor }]}>{item.text}</Text>
+        {/* [FIX] message, no text */}
+        <Text style={[styles.logText, { color: typeColor }]}>{item.message}</Text>
       </View>
     );
   };
@@ -89,7 +130,7 @@ const DebugScreen = () => {
           style={styles.clearBtn}
           onPress={() => {
             LogService.clear();
-            setLogs([]);
+            refresh();
           }}
         >
           <Icon name="trash-2" size={16} color={DS.danger} />

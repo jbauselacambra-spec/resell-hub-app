@@ -8,12 +8,20 @@
  * - Historial mensual con barras verticales
  * - Alertas con iconos semánticos
  * Hooks antes de early returns (Regla 12).
+ *
+ * [FIX post-auditoría]
+ * - Gráfico mensual: el orden .reverse().slice(0,12) era incorrecto.
+ *   monthHistory viene DESCENDENTE (más reciente primero) desde
+ *   DatabaseService.getMonthlyHistory(). Al invertir primero y luego
+ *   cortar, se mostraban los 12 meses MÁS ANTIGUOS en vez de los más
+ *   recientes cuando había >12 meses de historial (típico tras un
+ *   import Modo E multi-año). Corregido a .slice(0,12).reverse().
+ * - Limpieza: imports muertos `Platform` y `width` (sin uso real).
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Dimensions, Platform,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { DatabaseService } from '../services/DatabaseService';
@@ -22,7 +30,6 @@ import {
   TRACKING, LAYOUT, MONTH_NAMES_SHORT, fmtPrice,
 } from '../theme';
 
-const { width } = Dimensions.get('window');
 const BAR_H = 80;
 
 // ─── groupByYear helper ───────────────────────────────────────────────────────
@@ -37,7 +44,7 @@ function groupByYear(monthHistory) {
     };
     map[y].recaudacion += m.recaudacion || 0;
     map[y].sales       += m.sales       || 0;
-    map[y].bundles     += m.bundles     || 0;
+    map[y].bundles      += m.bundles     || 0;
     map[y].months.push(m);
     Object.entries(m.categoryBreakdown || {}).forEach(([cat, d]) => {
       if (!map[y].catTotals[cat]) map[y].catTotals[cat] = { recaudacion: 0, sales: 0 };
@@ -363,7 +370,11 @@ export default function AdvancedStatsScreen({ navigation }) {
                 <View style={s.chartWrap}>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     <View style={s.chartRow}>
-                      {[...monthHistory].reverse().slice(0, 12).map((m, i) => {
+                      {/* [FIX] Antes: .reverse().slice(0,12) cogía los 12 meses
+                          MÁS ANTIGUOS (bug de orden). Ahora: slice(0,12) coge
+                          los 12 más recientes (monthHistory viene desc) y
+                          .reverse() los pone en orden cronológico para el eje X. */}
+                      {[...monthHistory].slice(0, 12).reverse().map((m, i) => {
                         const pct     = m.recaudacion / maxMonthlyRec;
                         const barH    = Math.max(Math.round(pct * BAR_H), 4);
                         const isCurr  = m.month === new Date().getMonth() && m.year === new Date().getFullYear();

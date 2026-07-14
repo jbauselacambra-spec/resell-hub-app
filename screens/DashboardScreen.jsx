@@ -8,6 +8,12 @@
  * - Alertas de resubida: barra de staleness compacta
  * - Chart de barras TTS simplificado y legible
  * - Inventario reciente con tabs limpios
+ *
+ * [FIX post-auditoría]
+ * - Banner estacional: parsea 'Categoría › Subcategoría' → muestra solo el label
+ *   corto, igual que ProductsScreen. Antes mostraba el string crudo completo.
+ * - fadeAnim: lazy initializer (useState(() => new Animated.Value(0))) para no
+ *   instanciar un Animated.Value nuevo y descartado en cada render.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -24,6 +30,14 @@ import {
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const BAR_MAX_H = 72;
+
+// ─── Helper: label corto para items de seasonalMap ────────────────────────────
+// seasonalMap puede contener 'Categoría' o 'Categoría › Subcategoría' (Sprint 11).
+// Para mostrar en banners cortos, siempre usamos solo la parte más específica.
+function seasonalLabel(item) {
+  if (!item || typeof item !== 'string') return item;
+  return item.includes(' › ') ? item.split(' › ')[1] : item;
+}
 
 // ─── Componentes auxiliares ───────────────────────────────────────────────────
 
@@ -144,7 +158,9 @@ export default function DashboardScreen({ navigation }) {
   const [products,   setProducts]   = useState([]);
   const [activeTab,  setActiveTab]  = useState('activos');
   const [refreshing, setRefreshing] = useState(false);
-  const fadeAnim = useState(new Animated.Value(0))[0];
+  // [FIX] lazy initializer — evita instanciar un Animated.Value nuevo (y
+  // descartado) en cada render. Igual que el patrón usado para `config`.
+  const fadeAnim = useState(() => new Animated.Value(0))[0];
 
   const loadData = () => {
     setConfig(DatabaseService.getConfig());
@@ -237,7 +253,9 @@ export default function DashboardScreen({ navigation }) {
             <Text style={s.seasonalText}>
               {MONTH_NAMES[currentMonth]}: temporada de{' '}
               <Text style={{ fontWeight: '600', color: DS.warning }}>
-                {seasonalCats.slice(0, 2).join(' y ')}
+                {/* [FIX] parsear 'Cat › Sub' → mostrar solo el label específico,
+                    igual que ProductsScreen. Antes mostraba el string crudo. */}
+                {seasonalCats.slice(0, 2).map(seasonalLabel).join(' y ')}
               </Text>
             </Text>
             <Icon name="chevron-right" size={15} color={DS.warning} />
