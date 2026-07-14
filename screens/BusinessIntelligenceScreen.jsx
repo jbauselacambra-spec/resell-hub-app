@@ -10,6 +10,17 @@
  *   3. Comparativa personal vs mercado por categoría (gráfico de barras)
  *   4. Historial mensual con benchmark (gráfico de línea)
  *   5. Análisis de categorías con score de oportunidad
+ *
+ * [FIX post-auditoría]
+ * `IntelligenceService.generateFullIntelligence()` documenta explícitamente
+ * `marketSold: null` — no existe (ni puede existir) un benchmark de
+ * "unidades vendidas por categoría" a nivel de mercado, solo precio medio.
+ * La pantalla usaba `chartMode = 'count'` como modo POR DEFECTO, que es
+ * justo el que no tiene dato de mercado, y renderizaba `null` directamente
+ * como si fuera un número → la barra "Mercado" aparecía en blanco, sin
+ * etiqueta, indistinguible de un fallo de carga. Se distingue
+ * explícitamente la ausencia de dato ("N/D") y se cambia el modo por
+ * defecto a 'price', el único con datos completos a ambos lados.
  */
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
@@ -132,7 +143,10 @@ export default function BusinessIntelligenceScreen({ navigation }) {
   const [activeTab, setActiveTab] = useState('learnings');
   const [refreshing, setRefreshing] = useState(false);
   const [intel, setIntel] = useState(null);
-  const [chartMode, setChartMode] = useState('count'); // 'count' | 'price'
+  // [FIX] Antes: 'count' por defecto — modo SIN datos de mercado
+  // (marketSold es siempre null, documentado en IntelligenceService).
+  // 'price' es el único modo con datos completos a ambos lados.
+  const [chartMode, setChartMode] = useState('price'); // 'count' | 'price'
   const [expandedCat, setExpandedCat] = useState(null);
 
   const loadIntelligence = useCallback(async () => {
@@ -279,16 +293,22 @@ export default function BusinessIntelligenceScreen({ navigation }) {
               </View>
               <Text style={styles.chartSubtitle}>
                 {chartMode === 'count' ? 'Cantidad vendida' : 'Precio promedio'} por categoría
+                {/* [FIX] Aviso explícito: el mercado no publica cantidad vendida */}
+                {chartMode === 'count' ? ' — el mercado no publica este dato, solo tu historial' : ''}
               </Text>
 
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 <View style={styles.barGroupsRow}>
                   {intel.categoryComparison.map((cat, i) => {
-                    const myVal = chartMode === 'count' ? cat.mySold : cat.myAvgPrice;
-                    const mkVal = chartMode === 'count' ? cat.marketSold : cat.marketAvgPrice;
-                    const max = Math.max(myVal, mkVal, 1);
+                    const myVal = chartMode === 'count' ? (cat.mySold ?? 0) : (cat.myAvgPrice ?? 0);
+                    // [FIX] marketSold es SIEMPRE null (sin benchmark de unidades
+                    // vendidas de mercado — solo precio medio). Se distingue
+                    // explícitamente en vez de intentar renderizar `null`.
+                    const mkHasData = chartMode !== 'count';
+                    const mkVal = chartMode === 'count' ? cat.marketSold : (cat.marketAvgPrice ?? 0);
+                    const max = Math.max(myVal, mkHasData ? mkVal : 0, 1);
                     const myH = (myVal / max) * BAR_MAX_H;
-                    const mkH = (mkVal / max) * BAR_MAX_H;
+                    const mkH = mkHasData ? (mkVal / max) * BAR_MAX_H : 0;
 
                     return (
                       <View key={i} style={styles.barGroup}>
@@ -301,8 +321,8 @@ export default function BusinessIntelligenceScreen({ navigation }) {
                           </View>
                           <View style={styles.barWrapper}>
                             <View style={[styles.bar, { height: mkH, backgroundColor: DS.blue }]} />
-                            <Text style={[styles.barVal, { color: DS.blue }]}>
-                              {chartMode === 'count' ? mkVal : `${mkVal}€`}
+                            <Text style={[styles.barVal, { color: mkHasData ? DS.blue : DS.text3 }]}>
+                              {mkHasData ? `${mkVal}€` : 'N/D'}
                             </Text>
                           </View>
                         </View>

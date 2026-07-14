@@ -3,6 +3,20 @@
  *
  * Tabs: Umbrales | Calendario | Categorías | BBDD | Import | Alertas
  * useRef para stale closure en diccionario (Regla 9)
+ *
+ * [FIX post-auditoría]
+ * - El diccionario solo se cargaba UNA VEZ al montar (useEffect con []).
+ *   Con bottom-tabs las pantallas no se desmontan al cambiar de tab, así
+ *   que si el usuario importaba un JSON en la tab "Importar" y
+ *   VintedImportScreen.autoRegisterCategories() añadía una categoría nueva
+ *   directamente en MMKV, SettingsScreen seguía mostrando el diccionario
+ *   viejo. Si el usuario editaba cualquier categoría existente y pulsaba
+ *   "Guardar categorías", `handleSaveDictionary()` sobreescribía MMKV con
+ *   el estado local desactualizado → LA CATEGORÍA AUTO-REGISTRADA
+ *   DESAPARECÍA (pérdida de datos silenciosa).
+ *   Fix: listener de `focus` que fusiona (merge aditivo) categorías nuevas
+ *   detectadas en el diccionario persistido, sin tocar/sobreescribir las
+ *   que el usuario ya tiene cargadas o está editando localmente.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -214,6 +228,36 @@ export default function SettingsScreen({ navigation }) {
       }
     }
   }, []);
+
+  // [FIX post-auditoría] Con bottom-tabs esta pantalla NUNCA se desmonta al
+  // cambiar de tab. Si el usuario importa un JSON en "Importar" y se
+  // auto-registran categorías nuevas directamente en MMKV
+  // (VintedImportScreen.autoRegisterCategories), el estado local `dictionary`
+  // de esta pantalla se queda desactualizado. Si luego el usuario guarda
+  // cualquier cambio de categorías, `handleSaveDictionary()` sobreescribiría
+  // MMKV con el diccionario viejo y la categoría auto-registrada
+  // desaparecería silenciosamente.
+  //
+  // Fix: al recuperar el foco, fusiona (merge ADITIVO) categorías nuevas
+  // presentes en el diccionario persistido que no existan ya localmente.
+  // Nunca toca ni sobreescribe categorías que el usuario ya tiene cargadas
+  // o está editando — solo añade las que faltan.
+  useEffect(() => {
+    const unsub = navigation.addListener('focus', () => {
+      const full = DatabaseService.getFullDictionary();
+      if (full && Object.keys(full).length > 0) {
+        updateDictionary(prev => {
+          const merged = { ...prev };
+          let added = false;
+          Object.entries(full).forEach(([cat, data]) => {
+            if (!merged[cat]) { merged[cat] = data; added = true; }
+          });
+          return added ? merged : prev;
+        });
+      }
+    });
+    return unsub;
+  }, [navigation]);
 
   useEffect(() => {
     if (activeTab === 'database') { loadDbStats(); loadBackupInfo(); }

@@ -5,6 +5,19 @@
  * - Eliminar producto vendido: confirmación Alert + deleteProduct()
  * - Ordenar vendidos: por fecha de venta, precio de venta, TTS
  *   Panel desplegable con opciones asc/desc
+ *
+ * [FIX post-auditoría — CRÍTICO]
+ * El archivo reimplementaba el cálculo de TTS localmente en 3 sitios
+ * (KPI "TTS Medio", ordenación por TTS, badge de cada tarjeta) con un
+ * fallback a `soldDate`/`soldAt` (fechas legacy auto-extraídas por el
+ * scraper). El Motor TTS documentado en SYSTEM_DESIGN.md (sección 10) es
+ * explícito: `calcTTS()` SOLO cuenta productos con `soldDateReal`
+ * confirmado manualmente por el usuario — es una decisión de negocio del
+ * Sprint 1 v4.2 para no contaminar estadísticas con fechas no fiables.
+ * Las 3 reimplementaciones locales rompían esa regla y contaminaban el
+ * promedio "TTS Medio" con productos sin fecha de venta real confirmada.
+ * Fix: se elimina `calcItemTTS()` local y se usa `calcTTS()` importado
+ * de DatabaseService.js (fuente única de verdad, Regla 1).
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -13,7 +26,7 @@ import {
   Image, ActivityIndicator, Alert,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { DatabaseService } from '../services/DatabaseService';
+import { DatabaseService, calcTTS } from '../services/DatabaseService';
 import LogService from '../services/LogService';
 
 // ── Importar Design System ───────────────────────────────────────────────────
@@ -69,6 +82,8 @@ export default function SoldHistoryScreen({ navigation }) {
   const ttsAnchor    = parseInt(config?.ttsAnchor    || 30);
 
   // KPIs
+  // [FIX] calcTTS() canónico — antes reimplementaba el cálculo con fallback
+  // a soldDate/soldAt, contaminando el promedio con ventas sin soldDateReal.
   const kpis = useMemo(() => {
     if (!soldProducts.length) return { count: 0, recaudacion: 0, avgPrecio: 0, avgTTS: 0 };
     const count       = soldProducts.length;
@@ -76,12 +91,9 @@ export default function SoldHistoryScreen({ navigation }) {
       (s, p) => s + Math.max(0, Number(p.soldPriceReal || p.soldPrice || p.price || 0)), 0,
     );
     const avgPrecio = count ? +(recaudacion / count).toFixed(0) : 0;
-    const ttsList = soldProducts.map(p => {
-      const s = p.firstUploadDate || p.createdAt;
-      const e = p.soldDateReal    || p.soldDate || p.soldAt;
-      if (!s || !e) return null;
-      return Math.max(1, Math.round((new Date(e) - new Date(s)) / 86_400_000));
-    }).filter(v => v !== null);
+    const ttsList = soldProducts
+      .map(p => calcTTS(p))
+      .filter(v => v !== null);
     const avgTTS = ttsList.length
       ? Math.round(ttsList.reduce((a, b) => a + b, 0) / ttsList.length)
       : 0;
@@ -102,15 +114,8 @@ export default function SoldHistoryScreen({ navigation }) {
     )].sort();
   }, [soldProducts, filterCat]);
 
-  // Calcular TTS para cada producto (helper)
-  const calcItemTTS = (p) => {
-    const s = p.firstUploadDate || p.createdAt;
-    const e = p.soldDateReal    || p.soldDate || p.soldAt;
-    if (!s || !e) return null;
-    return Math.max(1, Math.round((new Date(e) - new Date(s)) / 86_400_000));
-  };
-
   // Lista ordenada + filtrada
+  // [FIX] calcTTS() canónico en vez de calcItemTTS() local con fallback legacy
   const sorted = useMemo(() => {
     let arr = filterCat
       ? soldProducts.filter(p => p.category === filterCat)
@@ -127,9 +132,9 @@ export default function SoldHistoryScreen({ navigation }) {
         vA = Math.max(0, Number(a.soldPriceReal || a.soldPrice || a.price || 0));
         vB = Math.max(0, Number(b.soldPriceReal || b.soldPrice || b.price || 0));
       } else {
-        // tts
-        vA = calcItemTTS(a) ?? 9999;
-        vB = calcItemTTS(b) ?? 9999;
+        // tts — [FIX] calcTTS() canónico, null → 9999 (va al final del orden)
+        vA = calcTTS(a) ?? 9999;
+        vB = calcTTS(b) ?? 9999;
       }
       return opt.dir === 'desc' ? vB - vA : vA - vB;
     });
@@ -174,7 +179,8 @@ export default function SoldHistoryScreen({ navigation }) {
       } catch { return '—'; }
     })();
 
-    const tts = calcItemTTS(p);
+    // [FIX] calcTTS() canónico — antes calcItemTTS() local con fallback legacy
+    const tts = calcTTS(p);
     const ttsCol = tts && tts > 0
       ? (tts <= ttsLightning ? DS.success : tts <= ttsAnchor ? DS.warning : DS.danger)
       : DS.text3;

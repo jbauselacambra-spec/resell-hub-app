@@ -3,13 +3,26 @@
  *
  * [FIX] handleConfirmC: getInventory()/saveInventory() → importFromVinted()
  * [FIX] handleConfirmD/E: VintedSalesDB.bulkInsert() → saveRecords()
+ *
+ * [FIX post-auditoría — REGRESIÓN]
+ * En Sprint 6 se detectó y corrigió: "Modo D (ventas año actual) no incluye
+ * fecha de venta → sin UI para introducirla antes de confirmar" mediante un
+ * componente `DateConfirmModal`. Ese componente se perdió en la reescritura
+ * de Sprint 8 (paso de clipboard a DocumentPicker) sin que nadie lo notara,
+ * porque `parseJsonSalesCurrent()` sigue documentando `soldDateReal: null`
+ * como comportamiento normal — nunca lanzaba error, solo dejaba la fecha
+ * vacía para siempre. Efecto real: los productos importados vía Modo D
+ * quedaban con `status:'sold'` y `soldPriceReal` correctos pero
+ * `soldDateReal`永久 null → `calcTTS()` nunca podía calcular su TTS.
+ * Se reintroduce `DateConfirmModal` como paso intermedio entre
+ * ConfirmModalD y la importación real.
  */
 
 import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, Dimensions, Alert, Image, Modal,
-  Platform, ActivityIndicator, Animated,
+  Platform, ActivityIndicator, Animated, TextInput,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import * as DocumentPicker from 'expo-document-picker';
@@ -279,13 +292,115 @@ function ConfirmModalD({ visible, items, onConfirm, onClose }) {
             activeOpacity={0.85}
           >
             <Icon name="refresh-cw" size={18} color={DS.white} />
-            <Text style={styles.confirmBtnTxt}>Actualizar {items.length} ventas</Text>
+            <Text style={styles.confirmBtnTxt}>Continuar</Text>
           </TouchableOpacity>
         </View>
       </View>
     </Modal>
   );
 }
+
+// ─── Modal D-bis: fecha de venta (RESTAURADO — Sprint 6) ──────────────────────
+// [FIX post-auditoría] El JSON de "Ventas año actual" (Modo D) nunca incluye
+// fecha de venta (`parseJsonSalesCurrent` documenta soldDateReal:null a
+// propósito). Sin este paso, matchHistoryToInventory() nunca escribía
+// soldDateReal → calcTTS() no podía calcular el TTS de esos productos NUNCA,
+// hasta que el usuario los editara uno a uno manualmente.
+function DateConfirmModal({ visible, count, onApply, onSkip, onClose }) {
+  const [dateText, setDateText] = useState('');
+
+  const parseDate = (txt) => {
+    const m = txt.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!m) return null;
+    const [, d, mo, y] = m;
+    const date = new Date(Number(y), Number(mo) - 1, Number(d), 12, 0, 0);
+    if (isNaN(date.getTime())) return null;
+    return date.toISOString();
+  };
+
+  const handleApply = () => {
+    const iso = parseDate(dateText);
+    if (!iso) {
+      Alert.alert('Fecha inválida', 'Usa el formato DD/MM/AAAA (ej: 15/02/2026).');
+      return;
+    }
+    setDateText('');
+    onApply(iso);
+  };
+
+  const handleSkip = () => {
+    setDateText('');
+    onSkip();
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Fecha de venta</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Icon name="x" size={24} color={DS.text2} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={[styles.infoBox, { backgroundColor: DS.warningLight, borderColor: DS.warning, borderWidth: 1 }]}>
+            <Icon name="alert-circle" size={18} color={DS.warning} />
+            <Text style={[styles.infoTxt, { color: DS.warning }]}>
+              Este archivo no incluye la fecha de venta
+            </Text>
+          </View>
+
+          <Text style={styles.modalDesc}>
+            El JSON de "Ventas año actual" de Vinted no incluye la fecha real de venta.{'\n\n'}
+            Introduce una fecha para aplicarla a los {count} artículos seleccionados
+            — se usará para calcular el Time-to-Sell (TTS). Si la saltas, podrás
+            editarla luego producto a producto, pero no aparecerán en las
+            estadísticas de velocidad hasta entonces.
+          </Text>
+
+          <TextInput
+            style={dateInputStyle}
+            placeholder="DD/MM/AAAA"
+            placeholderTextColor={DS.text3}
+            value={dateText}
+            onChangeText={setDateText}
+            keyboardType="numbers-and-punctuation"
+            maxLength={10}
+          />
+
+          <TouchableOpacity
+            style={[styles.confirmBtn, { backgroundColor: DS.success }]}
+            onPress={handleApply}
+            activeOpacity={0.85}
+          >
+            <Icon name="calendar" size={18} color={DS.white} />
+            <Text style={styles.confirmBtnTxt}>Aplicar fecha a {count} artículos</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.skipBtn} onPress={handleSkip} activeOpacity={0.7}>
+            <Text style={styles.skipBtnTxt}>Saltar (sin fecha, editar después)</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const dateInputStyle = {
+  backgroundColor: DS.surface2,
+  borderWidth: 2,
+  borderColor: DS.border,
+  borderRadius: RADIUS.lg,
+  paddingVertical: SPACE[3] + 2,
+  paddingHorizontal: SPACE[4],
+  fontSize: FONT_SIZE.lg,
+  fontFamily: FONT_FAMILY.mono,
+  color: DS.text,
+  textAlign: 'center',
+  marginBottom: SPACE[4],
+};
 
 // ─── Modal E: confirmar importación historial ─────────────────────────────────
 function ConfirmModalE({ visible, items, onConfirm, onClose }) {
@@ -356,6 +471,8 @@ export default function VintedImportScreen({ navigation }) {
 
   const [checkedIds, setCheckedIds] = useState(new Set());
   const [showConfirm, setShowConfirm] = useState(false);
+  // [FIX post-auditoría] paso intermedio Modo D restaurado
+  const [showDateModal, setShowDateModal] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -467,10 +584,25 @@ export default function VintedImportScreen({ navigation }) {
     }
   }, [jsonProducts, checkedIds, fadeAnim]);
 
+  // ─── Modo D — Paso 1: confirmar selección → abre modal de fecha ─────────────
+  // [FIX post-auditoría] Antes ConfirmModalD llamaba directamente a
+  // handleConfirmD, sin dar opción de introducir fecha de venta.
+  const handleConfirmDStep1 = useCallback(() => {
+    setShowConfirm(false);
+    setShowDateModal(true);
+  }, []);
+
   // ─── [FIX] handleConfirmD — usa saveRecords() en lugar de bulkInsert() ───────
-  const handleConfirmD = useCallback(() => {
+  // [FIX post-auditoría] Ahora acepta `dateOverride`: si el usuario introdujo
+  // una fecha en DateConfirmModal, se aplica a soldDateReal de cada item
+  // ANTES de cruzar con el inventario, para que matchHistoryToInventory()
+  // pueda escribirla de verdad (antes siempre llegaba null y se perdía).
+  const handleConfirmD = useCallback((dateOverride) => {
     try {
-      const selected = parsedItems.filter(i => checkedIds.has(i.orderId));
+      const baseSelected = parsedItems.filter(i => checkedIds.has(i.orderId));
+      const selected = dateOverride
+        ? baseSelected.map(i => ({ ...i, soldDateReal: dateOverride, date: i.date || dateOverride }))
+        : baseSelected;
 
       // Cruzar con inventario para actualizar soldPriceReal + soldDateReal
       const result = matchHistoryToInventory(selected);
@@ -489,12 +621,13 @@ export default function VintedImportScreen({ navigation }) {
       logImportEvent('D', { total: selected.length, matched: result.matched, created: result.created });
 
       LogService.add(
-        `✅ Modo D: ${result.matched} productos actualizados, ${result.created} creados`,
+        `✅ Modo D: ${result.matched} productos actualizados, ${result.created} creados` +
+        (dateOverride ? ` · fecha aplicada: ${dateOverride.slice(0, 10)}` : ' · sin fecha (editar manualmente)'),
         'success',
         LOG_CTX.IMPORT,
       );
 
-      setShowConfirm(false);
+      setShowDateModal(false);
       setImportResult({ mode: 'D', updated: result.matched + (result.created || 0) });
       Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
     } catch (e) {
@@ -551,6 +684,7 @@ export default function VintedImportScreen({ navigation }) {
     setParsedItems([]);
     setCheckedIds(new Set());
     setImportResult(null);
+    setShowDateModal(false);
     fadeAnim.setValue(0);
   }, [fadeAnim]);
 
@@ -558,6 +692,7 @@ export default function VintedImportScreen({ navigation }) {
 
   // ─── Render ───────────────────────────────────────────────────────────────
   const meta = TYPE_META[contentType] || TYPE_META.unknown;
+  const selectedDCount = parsedItems.filter(i => checkedIds.has(i.orderId)).length;
 
   return (
     <View style={styles.root}>
@@ -774,8 +909,17 @@ export default function VintedImportScreen({ navigation }) {
       <ConfirmModalD
         visible={showConfirm && currentMode === 'D'}
         items={parsedItems.filter(i => checkedIds.has(i.orderId))}
-        onConfirm={handleConfirmD}
+        onConfirm={handleConfirmDStep1}
         onClose={() => setShowConfirm(false)}
+      />
+      {/* [FIX post-auditoría] Paso intermedio restaurado — sin esto, soldDateReal
+          quedaba null para siempre en todo import Modo D. */}
+      <DateConfirmModal
+        visible={showDateModal}
+        count={selectedDCount}
+        onApply={(iso) => handleConfirmD(iso)}
+        onSkip={() => handleConfirmD(null)}
+        onClose={() => setShowDateModal(false)}
       />
       <ConfirmModalE
         visible={showConfirm && currentMode === 'E'}
@@ -1226,5 +1370,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: DS.white,
     letterSpacing: 0.3,
+  },
+  skipBtn: {
+    alignItems: 'center',
+    padding: SPACE[3],
+  },
+  skipBtnTxt: {
+    fontSize: FONT_SIZE.sm,
+    color: DS.text2,
+    fontWeight: '600',
   },
 });

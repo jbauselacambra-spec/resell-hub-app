@@ -5,6 +5,28 @@
  * - Edición inline de precio de venta, fecha de venta, categoría, fecha de subida
  * - Modal de categoría con subcategorías
  * - CalPicker para selección de fechas
+ *
+ * [FIX post-auditoría — CRÍTICO]
+ * `handleSave()` llamaba a `DatabaseService.updateProduct(product.id, {...})`
+ * con DOS argumentos, pero `updateProduct()` solo acepta UNO: un objeto que
+ * ya incluye `.id`. El segundo argumento se descartaba silenciosamente;
+ * dentro del servicio, `updated.id` sobre el string `product.id` es
+ * `undefined`, el findIndex nunca encontraba el producto y la función
+ * devolvía `false` sin escribir nada en MMKV. Como el código no comprobaba
+ * el retorno, el Alert "✅ Guardado" se mostraba igualmente — CADA edición
+ * de venta desde esta pantalla (precio real, fecha real, categoría, fecha
+ * de subida) se perdía en silencio. Corregido a un único objeto con `.id`
+ * (mismo patrón ya usado correctamente en ProductDetailScreen.jsx), y se
+ * comprueba el retorno para no mentir al usuario si algún día vuelve a
+ * fallar.
+ *
+ * [FIX post-auditoría — secundario]
+ * CategoryModal recibía `dict` como prop congelada (useMemo con deps [])
+ * del padre, en vez de recargar el diccionario cada vez que se abre. Esto
+ * contradice lo que la skill UI-006-modal_dictionary_loading.md da por
+ * corregido para este archivo. Se alinea con el patrón ya usado en
+ * ProductDetailScreen.jsx: el modal carga y refresca su propio dict al
+ * abrirse.
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
@@ -175,12 +197,20 @@ const cS = StyleSheet.create({
 });
 
 // ─── Modal de Categoría ───────────────────────────────────────────────────────
-function CategoryModal({ visible, onClose, dict, currentCat, currentSub, onSelect }) {
+// [FIX post-auditoría] Antes recibía `dict` como prop congelada del padre
+// (useMemo con deps []) — nunca se refrescaba tras cambios en Settings.
+// Ahora carga y refresca su propio diccionario cada vez que se abre,
+// igual que CategoryModal en ProductDetailScreen.jsx.
+function CategoryModal({ visible, onClose, currentCat, currentSub, onSelect }) {
+  const [dict,   setDict]   = useState(() => loadDictionaryWithFallbacks());
   const [selCat, setSelCat] = useState(currentCat || '');
   const [selSub, setSelSub] = useState(currentSub || null);
 
   useEffect(() => {
-    if (visible) { setSelCat(currentCat || ''); setSelSub(currentSub || null); }
+    if (!visible) return;
+    setDict(loadDictionaryWithFallbacks());
+    setSelCat(currentCat || '');
+    setSelSub(currentSub || null);
   }, [visible, currentCat, currentSub]);
 
   const cats = Object.keys(dict);
@@ -303,7 +333,9 @@ export default function SoldEditDetailView({ route, navigation }) {
   const [showCalUpload, setShowCalUpload] = useState(false);
   const [showCatModal,  setShowCatModal]  = useState(false);
 
-  const dict = useMemo(() => loadDictionaryWithFallbacks(), []);
+  // [FIX post-auditoría] useState en vez de useMemo(deps:[]) — así puede
+  // refrescarse tras seleccionar categoría, igual que en ProductDetailScreen.
+  const [dict, setDict] = useState(() => loadDictionaryWithFallbacks());
 
   // TTS calculado
   const tts = useMemo(() => {
@@ -339,8 +371,16 @@ export default function SoldEditDetailView({ route, navigation }) {
 
   const handleCategorySelect = (cat, sub) => {
     setEditForm(prev => ({ ...prev, category: cat, subcategory: sub }));
+    // [FIX post-auditoría] refresca el preview de tags con el dict más reciente
+    setDict(loadDictionaryWithFallbacks());
   };
 
+  // [FIX post-auditoría — CRÍTICO] updateProduct() acepta UN único objeto
+  // con `.id` incluido, no (id, updates). Antes: DatabaseService.updateProduct(
+  // product.id, {...}) — el 2º argumento se descartaba, updated.id era
+  // undefined, el findIndex nunca encontraba el producto y la función
+  // devolvía false SIN GUARDAR NADA — mientras el Alert de éxito se mostraba
+  // igual porque no se comprobaba el retorno. Corregido + se comprueba `ok`.
   const handleSave = () => {
     const sp = parseFloat(editForm.soldPriceReal);
     if (!sp || sp <= 0) {
@@ -348,13 +388,23 @@ export default function SoldEditDetailView({ route, navigation }) {
       return;
     }
     try {
-      DatabaseService.updateProduct(product.id, {
+      const ok = DatabaseService.updateProduct({
+        ...product,
         soldPriceReal:   sp,
         soldDateReal:    editForm.soldDateReal,
         category:        editForm.category,
         subcategory:     editForm.subcategory,
         firstUploadDate: editForm.firstUploadDate,
       });
+      if (!ok) {
+        LogService.error(
+          'SoldEditDetailView.handleSave: updateProduct devolvió false (producto no encontrado)',
+          LOG_CTX.UI,
+          { productId: product.id },
+        );
+        Alert.alert('Error', 'No se pudo guardar. El producto no se encontró en la base de datos.');
+        return;
+      }
       LogService.add(`💾 Venta editada: ${product.title}`, 'success');
       Alert.alert('✅ Guardado', 'Datos de venta actualizados correctamente.', [
         { text: 'OK', onPress: () => navigation.goBack() },
@@ -555,7 +605,6 @@ export default function SoldEditDetailView({ route, navigation }) {
       <CategoryModal
         visible={showCatModal}
         onClose={() => setShowCatModal(false)}
-        dict={dict}
         currentCat={editForm.category}
         currentSub={editForm.subcategory}
         onSelect={handleCategorySelect}

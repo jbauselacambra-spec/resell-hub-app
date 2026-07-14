@@ -5,6 +5,16 @@
  * - Eliminar producto: swipe-to-delete con confirmación Alert
  * - Ordenar inventario: por fecha de subida, tiempo en stock, precio
  *   Panel de ordenación desplegable con iconos de dirección asc/desc
+ *
+ * [FIX post-auditoría]
+ * - useMemo `filtered`: la rama de ordenación por precio llamaba
+ *   `b.parseFloat(a.price)` — `b` es un objeto producto, no tiene el
+ *   método `.parseFloat`. Esto crasheaba la pantalla con
+ *   `TypeError: b.parseFloat is not a function` en cuanto el usuario
+ *   elegía "Mayor precio" o "Menor precio" en el panel de ordenación.
+ *   Corregido a `parseFloat(b.price) || 0`.
+ *   (El bug histórico de Hotfix 3 — dead code en este mismo useMemo,
+ *   que rompía `filterCat` — ya estaba corregido; este es uno nuevo.)
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -100,8 +110,11 @@ const filtered = useMemo(() => {
       vA = a.daysOld || 0;
       vB = b.daysOld || 0;
     } else {
+      // [FIX] Antes: `b.parseFloat(a.price)` — b no tiene método parseFloat,
+      // y además el argumento apuntaba a `a.price` en vez de `b.price`.
+      // Esto crasheaba la pantalla al elegir "Mayor precio" / "Menor precio".
       vA = parseFloat(a.price) || 0;
-      vB = b.parseFloat(a.price) || 0;
+      vB = parseFloat(b.price) || 0;
     }
     return opt.dir === 'desc' ? vB - vA : vA - vB;
   });
